@@ -35,4 +35,5 @@ try:
     send_cmd(client, data)
     
 finally:
-    client.close()
+    # 保持连接，不主动断开
+    pass

@@ -264,6 +264,49 @@ class TwinTest2(World):
         rospy.loginfo(f"TRAJECTORY GENERATED FOR CURENT POSE:{[curr_pos, curr_orn]} TO TARGET POSE:{[target_pos, target_orn]}")
         return 1, trajectory, trajectory_ee, infos
     
+    def check_arm_joints_z_height(self, struct_name, z_min_threshold=0.10):
+        """
+        检查机械臂所有关节的Z高度是否低于阈值
+
+        Args:
+            struct_name: 机械臂结构名称 (left_arm/right_arm)
+            z_min_threshold: Z高度最小阈值，默认0.10m
+
+        Returns:
+            is_safe: 是否安全 (所有关节Z > z_min_threshold)
+            unsafe_links: 低于阈值的关节名称列表 [(link_name, z_value), ...]
+            min_z: 最低的Z值
+        """
+        arm_struct = self.robot.robot_structs[struct_name]
+        # 获取机械臂关节对应的link ID
+        # 排除 base_link 和 arm_end_link，只检查 Link1-Link7
+        arm_link_ids = arm_struct.link_ids
+        arm_link_names = arm_struct.link_names
+
+        # 过滤掉 base_link 和 end_link，只检查实际的机械臂关节 link
+        links_to_skip = ["base_link", "arm_end_link", "robot_base_link"]
+        check_link_ids = []
+        check_link_names = []
+        for i, name in enumerate(arm_link_names):
+            if name not in links_to_skip and "base" not in name.lower():
+                check_link_ids.append(arm_link_ids[i])
+                check_link_names.append(name)
+
+        unsafe_links = []
+        min_z = float('inf')
+
+        for link_id, link_name in zip(check_link_ids, check_link_names):
+            link_state = p.getLinkState(self.robot.id, link_id)
+            link_pos = link_state[0]  # 世界坐标系中的位置 [x, y, z]
+            link_z = link_pos[2]
+            min_z = min(min_z, link_z)
+
+            if link_z < z_min_threshold:
+                unsafe_links.append([link_name, round(link_z, 4)])
+
+        is_safe = len(unsafe_links) == 0
+        return is_safe, unsafe_links, round(min_z, 4)
+
     def linear_traj_generation2(self, config):
 
         struct_name = config["struct"]
@@ -271,6 +314,7 @@ class TwinTest2(World):
         curr_js = config["current_js"]
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
+        z_min_threshold = config["z_min_threshold"] if "z_min_threshold" in config else 0.10  # 关节最低高度阈值
         if struct_name not in ["left_arm", "right_arm"]:
             rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
             return 0, {}
@@ -293,30 +337,43 @@ class TwinTest2(World):
         infos = []
         reaches = []
         collides = []
+        z_safes = []
         js_fake = copy.deepcopy(curr_js)
         for target_pos, target_orn in zip(target_pos_list, target_orn_list):
             self.robot.robot_structs[struct_name].reset_by_ee_pose_self(target_pos, target_orn, js = js_fake)
             self.step()
             js_fake = self.robot.robot_structs[struct_name].get_joint_pose()            
             
-            # condition check for target IK 
+            # condition check for target IK
             is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[struct_name].check_reach(target_pos, target_orn
                                                                                                 , xyz_threshold =0.01, rpy_threshold = 0.01)
             is_collide, collide_id = self.robot.check_collision()
+            # 检查关节Z高度是否安全
+            is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(struct_name, z_min_threshold)
             info = {}
             info["is_reached"] = int(is_reach)
             info["delta_xyz"] = delta_xyz
             info["delta_rpy"] = delta_rpy
             info["is_collided"] = int(is_collide)
             info["collide_body"] = collide_id
+            info["is_z_safe"] = int(is_z_safe)
+            info["unsafe_links"] = unsafe_links
+            info["min_z"] = min_z
             info["js_fake"] = list(js_fake)
-            info["ee_fake"] = target_pos + target_orn 
+            info["ee_fake"] = target_pos + target_orn
             if self.vis:
                 print(info)
                 print("-"*20)
             infos.append(info)
             reaches.append(int(is_reach))
             collides.append(is_collide)
+            z_safes.append(is_z_safe)
+
+            # Z高度不安全则直接失败
+            if not is_z_safe:
+                rospy.logwarn(f"Z_HEIGHT_UNSAFE: Links {unsafe_links} below {z_min_threshold}m at target pose {target_pos}")
+                return 0, [], [], infos
+
         if loose_constraint:
             if not reaches[-1]: # or any(is_collide == 1 for is_collide in collides):
                 return 0, [], [], infos
@@ -364,13 +421,15 @@ class TwinTest2(World):
                 self.robot.robot_structs[struct_name].reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
                 self.step()            
                 
-                # condition check  
+                # condition check
                 intermediate_js = self.robot.robot_structs[struct_name].get_joint_pose()
                 is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[struct_name].check_reach(intermediate_pos, intermediate_orn
                                                                                                 , xyz_threshold =0.01, rpy_threshold = 0.01)
                 is_collide, collide_id = self.robot.check_collision()
-                
-                
+                # 检查关节Z高度
+                is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(struct_name, z_min_threshold)
+
+
                 trajectory.append(list(intermediate_js))
                 trajectory_ee.append(list(intermediate_pos) + list(intermediate_orn))
 
@@ -381,15 +440,22 @@ class TwinTest2(World):
                 info["delta_rpy"] = delta_rpy
                 info["is_collided"] = int(is_collide)
                 info["collide_body"] = collide_id
+                info["is_z_safe"] = int(is_z_safe)
+                info["unsafe_links"] = unsafe_links
+                info["min_z"] = min_z
                 if self.vis:
                     print(info)
                     print("-"*20)
                 infos.append(info)
-                
+
                 print(info)
-                
+
                 if is_collide:
                     rospy.logwarn(f"COLLISION AT pos:{intermediate_pos}, {intermediate_orn}, CANOT GENERATE TRAJECTORY FOR TARGET:{target_pose}")
+                    return 0, trajectory, trajectory_ee, infos
+
+                if not is_z_safe:
+                    rospy.logwarn(f"Z_HEIGHT_UNSAFE: Links {unsafe_links} below {z_min_threshold}m at pos:{intermediate_pos}")
                     return 0, trajectory, trajectory_ee, infos
             
             fake_pos = np.array(target_pos)

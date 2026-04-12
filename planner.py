@@ -11,9 +11,8 @@ from geometry_msgs.msg import TransformStamped
 from armcontroller import ArmController
 from datetime import datetime
 from transformation import TransformationUtil
-from audio import VoiceListener
 from camera import RealSenseCapture
-from parser import CommandParser
+from json_input import JsonInputParser
 from termcolor import cprint
 from PIL import Image
 from ultralytics import YOLOWorld
@@ -22,13 +21,11 @@ from scipy.spatial.transform import Rotation as R
 from utils import graspcam2pixel, self_rotation_np, rpy_to_vector, transform_world_to_camera, self_rotation_inv, visualization, pixel_to_camera_point, pixel_to_camera_point2
 
 class Planner:
-    def __init__(self, whisper_model_path="", yolo_model_path="", anygrasp_model_path="", robot_config_path="", save_path=""):
+    def __init__(self, yolo_model_path="", anygrasp_model_path="", robot_config_path="", save_path=""):
         self.save_path = save_path
         self.checkpoint_path = anygrasp_model_path
         self.cam = RealSenseCapture(width=640, height=480, fps=30, save_path=save_path)
-        model_path = whisper_model_path
-        self.listener = VoiceListener(model_path_or_size=model_path, device="cuda")
-        self.parser = CommandParser()
+        self.json_parser = JsonInputParser()
         self.yolo_model = YOLOWorld(yolo_model_path)
         self.transform = TransformationUtil()
         self.arm_controller = ArmController()
@@ -79,7 +76,7 @@ class Planner:
 
     def control_hand(self, cmd_type="close"):
         self.hand_config = {
-            "close": [50, 50, 50, 400, 360, 0],
+            "close": [0, 0, 0, 460, 0, 0],
             "open": [1000, 1000, 1000, 1000, 1000, 0]
         }
         if cmd_type == "close":
@@ -97,16 +94,18 @@ class Planner:
         rgb, depth = self.cam.get_rgbd()
         return rgb, depth
 
-    def get_human_voice_input(self):
-        result_text = self.listener.listen_and_transcribe()
-        return result_text
+    def get_json_input(self):
+        """从stdin读取JSON命令输入"""
+        result = self.json_parser.get_command()
+        return result
 
-    def parser_input(self, human_input):
-        res = self.parser.parse(human_input)
-        obj = res['object'] if res['object'] else "fruit"
-        direction = res['direction'] if res['direction'] else "right"
-        container = res['container'] if res['container'] else "plate"
-        return obj, direction, container
+    def parse_input(self, json_data):
+        """解析JSON数据，提取物体和容器信息"""
+        if json_data is None:
+            return None, None
+        obj = json_data.get('object')
+        container = json_data.get('container')
+        return obj, container
 
     def save_current_transformation(self,):
         transform_from_frame = self.robot_config["base_link_name"]
@@ -116,16 +115,20 @@ class Planner:
         grasping_to_frame = self.robot_config["arm_end_link_name"]
         self.T_hand_effector_to_arm_endlink, _, _ = self.transform.get_transform_from_frame_to_frame(grasping_from_frame, grasping_to_frame)
 
-    def filtering_pose(self, anygrasp_pose, class_name="", image="", return_label=False, vis=False):
+    def filtering_pose(self, anygrasp_pose, class_name="", image="", return_label=False, vis=True):
         class_name = [cls for cls in class_name.split(',')]
         self.yolo_model.set_classes(class_name)
         results = self.yolo_model.predict(source=Image.fromarray(image), conf=0.2)
-        detections = results[0].boxes.data.tolist()
+        if len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
+            detections = []
+        else:
+            detections = results[0].boxes.data.tolist()
 
         grasp_points, grasp_pose_cam = graspcam2pixel(anygrasp_pose)
         valid_indices = set()
         final_grasps = []
         valid_boxes = []
+        ans = False
         if len(detections):
             det = detections[0][:4] # detections[0][2]
             x1, y1, x2, y2 = det
@@ -133,7 +136,7 @@ class Planner:
             for i, grasp_p in enumerate(grasp_points):
                 if grasp_p[0] > x1 - 20 and grasp_p[0] < x2 + 20 and grasp_p[1] > y1 - 20 and grasp_p[1] < y2 + 20:
                     valid_indices.add(i)
-            
+
             if len(valid_indices):
                 sorted_indices = sorted(list(valid_indices))
                 for i in sorted_indices:
@@ -143,6 +146,7 @@ class Planner:
                             g_pose["label"] = class_name
                     final_grasps.append(g_pose)
                 cprint(f"*********** Class name {class_name} ****************** Grasp pose number: {len(final_grasps)} ******************", "red")
+                ans = True
             else:
                 cprint(f"Found objects ({class_name}) but NO grasp points inside them.", "yellow")
         else:
@@ -164,59 +168,64 @@ class Planner:
                     plt.plot(grasp_points[idx][0], grasp_points[idx][1], 'g*', markersize=8, label='Valid')
             else:
                 if len(grasp_points) > 0:
-                    plt.plot(grasp_points[:, 0], grasp_points[:, 1], 'b.', markersize=2, alpha=0.5)
+                    plt.plot(grasp_points[:, 0], grasp_points[:, 1], 'b.', markersize=6, alpha=0.5)
             plt.title(f'{class_name}: {len(valid_boxes)} objects, {len(final_grasps)} grasps')
             plt.axis('off')
             save_filename = f"filtered_rgb_{timestamp}_{class_name}.png"
             plt.savefig(os.path.join(self.save_path, save_filename))
             plt.close()
 
-        return final_grasps
+        return final_grasps if ans else []
 
     def get_placing_position(self, class_name=None, image="", vis=False):
         self.yolo_model.set_classes([class_name])
         results = self.yolo_model.predict(source=Image.fromarray(image), conf=0.25)
-        detections = results[0].boxes.data.tolist()
+        if len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
+            detections = []
+        else:
+            detections = results[0].boxes.data.tolist()
 
-        if len(results):
-            det = detections[0][:4] # detections[0][2]
-            if det[1] >= 400 and det[3] <= 480 and len(detections) > 1:
-                det = detections[1][:4]
-            x1, y1, x2, y2 = [int(coord) for coord in det]
+        try:
+            if len(results):
+                det = detections[0][:4] # detections[0][2]
+                if det[1] >= 400 and det[3] <= 480 and len(detections) > 1:
+                    det = detections[1][:4]
+                x1, y1, x2, y2 = [int(coord) for coord in det]
 
-            H, W = self.depth.shape
-            x1 = max(0, x1)
-            y1 = max(0, y1)
-            x2 = min(W, x2)
-            y2 = min(H, y2)
-            
-            depth_sub_image_mm = self.depth[y1:y2, x1:x2]
-            
-            valid_depths_mm = depth_sub_image_mm[depth_sub_image_mm > 0]
+                H, W = self.depth.shape
+                x1 = max(0, x1)
+                y1 = max(0, y1)
+                x2 = min(W, x2)
+                y2 = min(H, y2)
+                
+                depth_sub_image_mm = self.depth[y1:y2, x1:x2]
+                
+                valid_depths_mm = depth_sub_image_mm[depth_sub_image_mm > 0]
 
-            if len(valid_depths_mm) > 0:
-                mean_depth_mm = np.median(valid_depths_mm)
-            else:
-                print("Warning: No valid depth values found in the bounding box.")
-            
-            mean_depth_m = mean_depth_mm * 1e-3
+                if len(valid_depths_mm) > 0:
+                    mean_depth_mm = np.median(valid_depths_mm)
+                else:
+                    print("Warning: No valid depth values found in the bounding box.")
+                
+                mean_depth_m = mean_depth_mm * 1e-3
 
-            center_x = (x1 + x2) / 2
-            center_y = (y1 + y2) / 2
-            center_cam_point = pixel_to_camera_point2(np.array([center_x, center_y]).reshape(-1, 2), mean_depth_m)
-            center_cam_point = center_cam_point.flatten()
-            placing_pos_world = self.transform_pose_to_world(center_cam_point)
+                center_x = (x1 + x2) / 2
+                center_y = (y1 + y2) / 2
+                center_cam_point = pixel_to_camera_point2(np.array([center_x, center_y]).reshape(-1, 2), mean_depth_m)
+                center_cam_point = center_cam_point.flatten()
+                placing_pos_world = self.transform_pose_to_world(center_cam_point)
 
-            if vis:
-                plt.figure()
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                plt.imshow(image)
-                plt.gca().add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, color='red'))
-                plt.gca().text(x1, y1 - 5, f'{class_name}', color='red', fontsize=10, backgroundcolor='none')
-                plt.savefig(f"./log/placement_rgb_{timestamp}.png")
+                if vis:
+                    plt.figure()
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    plt.imshow(image)
+                    plt.gca().add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, color='red'))
+                    plt.gca().text(x1, y1 - 5, f'{class_name}', color='red', fontsize=10, backgroundcolor='none')
+                    plt.savefig(f"./log/placement_rgb_{timestamp}.png")
 
-            return placing_pos_world
-        return []
+                return placing_pos_world
+        except:
+            return []
 
     def transform_pose_to_world(self, pose_cam_point):
         placing_translation = pose_cam_point.flatten()
@@ -465,6 +474,8 @@ class Planner:
 
         basic_mat = np.eye(4)
         execution_grasping_pos = grasping_pose_world_hand @ basic_mat
+        print("=-============================", execution_grasping_pos[2, 3])
+        execution_grasping_pos[2, 3] = max(execution_grasping_pos[2, 3], 0.042)
         # self.publish_grasping_pose(execution_grasping_pos, f"execution_grasping_pos_hand_end")
         execution_grasping_pos = execution_grasping_pos @ self.T_hand_effector_to_arm_endlink
         execution_grasping_pos_position = execution_grasping_pos[:3, 3]
@@ -495,7 +506,7 @@ class Planner:
             return False
 
     def execute_placement_js(self, placement_pos_world):
-        placement_pos_world[2, 3] += 0.1
+        placement_pos_world[2, 3] += 0.15
         placement_pos_arm = placement_pos_world @ self.T_hand_effector_to_arm_endlink
         placement_pos_arm_pos_position = placement_pos_arm[:3, 3]
         placement_pos_arm_pos_orientation = R.from_matrix(placement_pos_arm[:3, :3]).as_quat()
@@ -515,86 +526,294 @@ class Planner:
             time.sleep(1)
             # post_trajectory = copy.deepcopy(list(trajectory_placing))[::-1]
             # self.control_arm(trajectory=post_trajectory, speed=20, use_block = False)
-            self.control_arm(pose_type="place1", speed=30)
+            # self.control_arm(pose_type="place1", speed=30)
             cprint(f"=============== Reach post placing pose =============")
             return True
         else:
             cprint(f"********************* The placing pose is not reachable !! *********************", "yellow")
             return False
 
+    def execute_handover_js(self):
+        """执行递送操作：平滑移动经过中间姿态到handover位置并松开手
+
+        轨迹: 当前位置 → get_ready_to_handover_1st → get_ready_to_handover_2nd → handover_pose
+        """
+        # 获取所有需要的位姿
+        pose_1st = self.robot_config.get("get_ready_to_handover_1st")
+        pose_2nd = self.robot_config.get("get_ready_to_handover_2nd")
+        handover_pose = self.robot_config.get("handover_pose")
+
+        if pose_1st is None or pose_2nd is None or handover_pose is None:
+            cprint("错误: robot_config.json 中缺少 handover 相关位姿定义", "red")
+            return False
+
+        cprint(f"=============== Moving to handover pose (smooth trajectory) =============", "cyan")
+
+        # 提取关节角度的辅助函数
+        def extract_joints(pose_dict):
+            return [
+                pose_dict["J1"], pose_dict["J2"], pose_dict["J3"],
+                pose_dict["J4"], pose_dict["J5"], pose_dict["J6"], pose_dict["J7"]
+            ]
+
+        # 构建平滑轨迹：1st → 2nd → handover
+        waypoint_joints = [
+            extract_joints(pose_1st),
+            extract_joints(pose_2nd),
+            extract_joints(handover_pose)
+        ]
+
+        # 生成插值轨迹
+        trajectory = self._interpolate_joint_trajectory(waypoint_joints, steps_per_segment=20)
+
+        # 执行平滑轨迹
+        self.control_arm(trajectory=trajectory, speed=15)
+
+        cprint(f"=============== Reached handover pose =============", "green")
+        time.sleep(0.5)
+
+        # 松开手递送物品
+        self.control_hand(cmd_type="open")
+        cprint(f"=============== Opened hand for handover =============", "green")
+        time.sleep(1)
+
+        # 返回到安全位置
+        self.control_arm(pose_type="grasp1", speed=30)
+        cprint(f"=============== Returned to safe pose =============", "cyan")
+
+        return True
+
+    def _interpolate_joint_trajectory(self, waypoint_joints, steps_per_segment=20):
+        """
+        在多个关节空间waypoint之间生成平滑插值轨迹
+
+        Args:
+            waypoint_joints: list of joint angle lists [[J1,J2...J7], [J1,J2...J7], ...]
+            steps_per_segment: 每段轨迹的插值点数
+
+        Returns:
+            trajectory: numpy array of shape (N, 7)
+        """
+        trajectory = []
+        for i in range(len(waypoint_joints) - 1):
+            start_joints = np.array(waypoint_joints[i])
+            end_joints = np.array(waypoint_joints[i + 1])
+
+            for step in range(steps_per_segment):
+                t = step / steps_per_segment
+                interpolated = start_joints + t * (end_joints - start_joints)
+                trajectory.append(interpolated)
+
+        # 添加最后一个waypoint
+        trajectory.append(np.array(waypoint_joints[-1]))
+
+        return np.array(trajectory)
+
+    def execute_throw_to_trash_js(self):
+        """执行丢垃圾操作：移动到预设的throw_to_trash_pose位置并松开手"""
+        throw_pose = self.robot_config.get("throw_to_trash_pose")
+        if throw_pose is None:
+            cprint("错误: robot_config.json 中没有定义 throw_to_trash_pose", "red")
+            return False
+
+        cprint(f"=============== Moving to trash pose =============", "cyan")
+
+        # 转换为关节角度列表 [J1, J2, J3, J4, J5, J6, J7]
+        joint_angles = [
+            throw_pose["J1"],
+            throw_pose["J2"],
+            throw_pose["J3"],
+            throw_pose["J4"],
+            throw_pose["J5"],
+            throw_pose["J6"],
+            throw_pose["J7"]
+        ]
+
+        # 使用control_arm的trajectory模式直接发送关节角度
+        trajectory = np.array([joint_angles])
+        self.control_arm(trajectory=trajectory, speed=15)
+
+        cprint(f"=============== Reached trash pose =============", "green")
+        time.sleep(0.5)
+
+        # 松开手丢掉物品
+        self.control_hand(cmd_type="open")
+        cprint(f"=============== Opened hand to drop trash =============", "green")
+        time.sleep(1)
+
+        # 返回到安全位置
+        self.control_arm(pose_type="grasp1", speed=30)
+        cprint(f"=============== Returned to safe pose =============", "cyan")
+
+        return True
+
+    def execute_desk_placement_js(self):
+        """执行桌面放置操作：从desk_pose_1/2/3中随机选择一个位置放置物品"""
+        import random
+
+        desk_poses = ["desk_pose_1", "desk_pose_2", "desk_pose_3"]
+        selected_pose_key = random.choice(desk_poses)
+        desk_pose = self.robot_config.get(selected_pose_key)
+
+        if desk_pose is None:
+            cprint(f"错误: robot_config.json 中没有定义 {selected_pose_key}", "red")
+            return False
+
+        cprint(f"=============== Moving to desk pose ({selected_pose_key}) =============", "cyan")
+
+        # 转换为关节角度列表 [J1, J2, J3, J4, J5, J6, J7]
+        joint_angles = [
+            desk_pose["J1"],
+            desk_pose["J2"],
+            desk_pose["J3"],
+            desk_pose["J4"],
+            desk_pose["J5"],
+            desk_pose["J6"],
+            desk_pose["J7"]
+        ]
+
+        # 使用control_arm的trajectory模式直接发送关节角度
+        trajectory = np.array([joint_angles])
+        self.control_arm(trajectory=trajectory, speed=15)
+
+        cprint(f"=============== Reached desk pose ({selected_pose_key}) =============", "green")
+        time.sleep(0.5)
+
+        # 松开手放置物品
+        self.control_hand(cmd_type="open")
+        cprint(f"=============== Opened hand to place on desk =============", "green")
+        time.sleep(1)
+
+        # 返回到安全位置
+        self.control_arm(pose_type="grasp1", speed=30)
+        cprint(f"=============== Returned to safe pose =============", "cyan")
+
+        return True
+
     def run_pipeline(self):
-        while True:
-            # human_input = self.get_human_voice_input()
-            # human_input = "将水果放在绿色碗里"
-            # human_input = "将盒子放在绿色碗里"
-            human_input = "将瓶子放在粉色盘子里"
-            # human_input = "将水果放在粉色盘子里"
-            cprint(f"=================== 1. Get user voice input: \"{human_input}\"===================", "cyan")
-            if human_input and len(human_input.strip()) > 0:
-                obj, direction, container = self.parser_input(human_input)
-                cprint(f"=================== 2. Parser user input: Grasp {obj} and place it in the {direction}-{container} ===================", "cyan")
-                self.control_hand(cmd_type="close")
-                # grasp
-                check_object = False
-                for key, value in self.default_traj_js.items():
-                    if "grasp" in key:
-                        self.control_arm(pose_type=key, speed=30)
+        """主流程：从stdin读取JSON命令，执行抓取和放置任务（单次执行）"""
+        json_data = self.get_json_input()
 
-                        self.rgb, self.depth = self.get_camera_obs()
-                        cprint(f"G=================== 3. Save current rgb and dpeth observations: {self.save_path} ===================", "cyan")
-                        anygrasp_pose = self.get_pose_and_save(self.rgb, self.depth)
-                        cprint(f"G=================== 4. Generate the grasping pose and save it in file: {self.save_path}/result.json ===================", "cyan")
-                        self.save_current_transformation()
-                        if not anygrasp_pose:
-                            continue
+        if json_data is None:
+            cprint("未收到有效的JSON输入", "red")
+            return False
 
-                        if obj is not None:
-                            filtering_grasping_pose = self.filtering_pose(anygrasp_pose, class_name=obj, image=self.rgb)
-                        
-                        if not filtering_grasping_pose:
-                            break
-                        
-                        grasping_pose_world = self.transform_anygrasp_pose(filtering_grasping_pose, _visualization=False)
+        cprint(f"=================== 1. Get JSON input: {json_data} ===================", "cyan")
 
-                        if not len(grasping_pose_world):
-                            continue
+        obj, container = self.parse_input(json_data)
+        if obj is None or container is None:
+            cprint("JSON输入缺少必需字段 (object 或 container)", "red")
+            return False
 
-                        for i in range(len(grasping_pose_world)):
-                            cprint(f"=================== Checking pose: {i+1} / {len(grasping_pose_world)} ===================", "yellow")
-                            check = self.execute_grasping_twin_js_2(grasping_pose_world[i], idx=key)
-                            
-                            if check:
-                                check_object = self.check_grasping_object()
-                                break
+        cprint(f"=================== 2. Parse input: Grasp {obj} and place it in the {container} ===================", "cyan")
+        self.control_hand(cmd_type="close")
 
-                    if check_object:
+        # grasp phase
+        check = False  # 初始化抓取成功标志
+        check_object = False
+        for key, value in self.default_traj_js.items():
+            if "grasp" in key:
+                self.control_arm(pose_type=key, speed=30)
+
+                self.rgb, self.depth = self.get_camera_obs()
+                cprint(f"G=================== 3. Save current rgb and depth observations: {self.save_path} ===================", "cyan")
+                anygrasp_pose = self.get_pose_and_save(self.rgb, self.depth)
+                cprint(f"G=================== 4. Generate the grasping pose and save it in file: {self.save_path}/result.json ===================", "cyan")
+                self.save_current_transformation()
+                if not anygrasp_pose:
+                    continue
+
+                if obj is not None:
+                    filtering_grasping_pose = self.filtering_pose(anygrasp_pose, class_name=obj, image=self.rgb)
+
+                if not filtering_grasping_pose:
+                    continue
+
+                grasping_pose_world = self.transform_anygrasp_pose(filtering_grasping_pose, _visualization=False)
+
+                if not len(grasping_pose_world):
+                    continue
+
+                for i in range(len(grasping_pose_world)):
+                    cprint(f"=================== Checking pose: {i+1} / {len(grasping_pose_world)} ===================", "yellow")
+                    check = self.execute_grasping_twin_js_2(grasping_pose_world[i], idx=key)
+
+                    if check:
                         break
-                cprint(f"G=================== 5. Successfully completed the grasping task ===================", "green")
-                # placement
-                for key, value in self.default_traj_js.items():
-                    if "place" in key:
-                        self.control_arm(pose_type=key, speed=30)
-                        self.rgb, self.depth = self.get_camera_obs()
-                        cprint(f"P=================== 3. Save current rgb and dpeth observations: {self.save_path} ===================", "cyan")
-                        self.save_current_transformation()
-                        placing_pos_world = self.get_placing_position(class_name=container, image=self.rgb, vis=False)
-                        cprint(f"P=================== 4. Generate the grasping pose ===================", "cyan")
 
-                        if not len(placing_pos_world):
-                            break
+                if not check:
+                    continue
+                else:
+                    break
 
-                        check = self.execute_placement_js(placing_pos_world)
+        if not check:
+            cprint("G=================== Grasping task failed ===================", "red")
+            return False
 
-                        if check:
-                            break
-                self.control_arm(pose_type="grasp1", speed=30)
-                cprint(f"P=================== 5. Successfully completed the placement task ===================", "green")
-                break
+        cprint(f"G=================== 5. Successfully completed the grasping task ===================", "green")
+
+        # placement phase - check if handing over to a person
+        if container.lower() == "person":
+            cprint(f"H=================== Handover mode detected: delivering to person ===================", "cyan")
+            check = self.execute_handover_js()
+            if check:
+                cprint(f"H=================== 5. Successfully completed the handover task ===================", "green")
+                return True
+            else:
+                cprint(f"H=================== Handover task failed ===================", "red")
+                return False
+
+        # placement phase - check if throwing to trash
+        if container.lower() in ["trash", "垃圾桶", "garbage", "bin"]:
+            cprint(f"T=================== Trash mode detected: throwing to trash ===================", "cyan")
+            check = self.execute_throw_to_trash_js()
+            if check:
+                cprint(f"T=================== 5. Successfully completed the trash task ===================", "green")
+                return True
+            else:
+                cprint(f"T=================== Trash task failed ===================", "red")
+                return False
+
+        # placement phase - check if placing on desk
+        if container.lower() in ["desk", "桌子", "table"]:
+            cprint(f"D=================== Desk placement mode detected: placing on desk ===================", "cyan")
+            check = self.execute_desk_placement_js()
+            if check:
+                cprint(f"D=================== 5. Successfully completed the desk placement task ===================", "green")
+                return True
+            else:
+                cprint(f"D=================== Desk placement task failed ===================", "red")
+                return False
+
+        # normal placement phase
+        for key, value in self.default_traj_js.items():
+            if "grasp" in key:
+                self.control_arm(pose_type=key, speed=30)
+                self.rgb, self.depth = self.get_camera_obs()
+                cprint(f"P=================== 3. Save current rgb and depth observations: {self.save_path} ===================", "cyan")
+                self.save_current_transformation()
+                placing_pos_world = self.get_placing_position(class_name=container, image=self.rgb, vis=False)
+                cprint(f"P=================== 4. Generate the placing pose ===================", "cyan")
+
+                if not len(placing_pos_world):
+                    continue
+
+                check = self.execute_placement_js(placing_pos_world)
+
+                if check:
+                    break
+
+        self.control_arm(pose_type="grasp1", speed=30)
+        cprint(f"P=================== 5. Successfully completed the placement task ===================", "green")
+        return True
 
 if __name__ == '__main__':
-    planner = Planner(whisper_model_path="/home/zz/faster-whisper-large-v3",
-                      yolo_model_path="/home/zz/ros_proj/erdaiji_ws/src/anygrasp_ros/src/yolo_world/yolov8x-worldv2.pt",
+    planner = Planner(yolo_model_path="/home/zz/ros_proj/erdaiji_ws/src/anygrasp_ros/src/yolo_world/yolov8x-worldv2.pt",
                       anygrasp_model_path="/home/zz/ros_proj/erdaiji_ws/src/anygrasp_ros/src/anygrasp_sdk/checkpoint_detection.tar",
                       robot_config_path="./robot_config.json",
                       save_path="./log")
-    planner.run_pipeline()
+    success = planner.run_pipeline()
+    if success:
+        print("任务执行成功")
+    else:
+        print("任务执行失败")

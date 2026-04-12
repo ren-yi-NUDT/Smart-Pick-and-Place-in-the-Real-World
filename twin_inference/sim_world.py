@@ -62,7 +62,9 @@ class World:
         return robot_state
     
     def __del__(self):
-        p.disconnect(self.physicsClient)
+        # 保持连接，不主动断开
+        # p.disconnect(self.physicsClient)
+        pass
         
 
 

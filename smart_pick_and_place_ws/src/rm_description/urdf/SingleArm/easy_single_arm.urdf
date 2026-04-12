@@ -1304,7 +1304,7 @@
     name="L_hand_joint_endeffector"
     type="fixed">
     <origin
-      xyz="0.020 -0.051 -0.156"
+      xyz="0.030 -0.053 -0.15"
       rpy="2.222 0 0.05" />
     <parent
       link="L_hand_base_link" />

@@ -1,3 +1,4 @@
 #!/bin/bash
 cd twin_inference/
-python3 twin.py
+source /opt/ros/noetic/setup.bash
+python3 twin.py    #解算IK代码

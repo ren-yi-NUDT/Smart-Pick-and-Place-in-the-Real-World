@@ -19,7 +19,7 @@ class HandController():
             'actionSeq': 2320,
             'actionRun': 2322
         }
-        self.ip_address = '192.168.11.210'
+        self.ip_address = '192.168.11.209'
         self.port = 6000
         print('打开Modbus TCP连接！')
         self.client = self.open_modbus(self.ip_address, self.port)

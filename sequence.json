@@ -1,0 +1,48 @@
+{
+    "description": "示例动作序列 - 抓取放置流程",
+    "sequence": [
+        {
+            "arm": "home",
+            "hand": "open",
+            "speed": 30,
+            "delay": 1.0,
+            "note": "回到初始位置，打开手"
+        },
+        {
+            "arm": "grasp1",
+            "hand": "open",
+            "speed": 30,
+            "delay": 1.0,
+            "note": "移动到抓取位置"
+        },
+        {
+            "hand": "close",
+            "delay": 1.5,
+            "note": "闭合手抓取"
+        },
+        {
+            "arm": "home",
+            "speed": 30,
+            "delay": 1.0,
+            "note": "抬起"
+        },
+        {
+            "arm": "place1",
+            "speed": 30,
+            "delay": 1.0,
+            "note": "移动到放置位置"
+        },
+        {
+            "hand": "open",
+            "delay": 1.5,
+            "note": "松开手放置"
+        },
+        {
+            "arm": "home",
+            "hand": "open",
+            "speed": 30,
+            "delay": 0.5,
+            "note": "回到初始位置"
+        }
+    ]
+}

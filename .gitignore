@@ -3,6 +3,7 @@ anygrasp_sdk/.vscode/
 anygrasp_sdk/grasp_tracking/
 smart_pick_and_place_ws/devel/
 smart_pick_and_place_ws/*/CMakeLists.txt
+log/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

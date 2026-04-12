@@ -1,0 +1,15 @@
+{
+  "sequence": [
+    {"arm": "dance_1", "hand": "peace", "delay": 0.4},
+    {"arm": "dance_2", "hand": "rock", "delay": 0.4},
+    {"arm": "dance_1", "hand": "peace", "delay": 0.4},
+    {"arm": "dance_2", "hand": "rock", "delay": 0.4},
+    {"arm": "dance_3", "hand": "thumbs_up", "delay": 0.4},
+    {"arm": "dance_4", "hand": "ok", "delay": 0.4},
+    {"arm": "dance_5", "hand": "open", "delay": 0.4},
+    {"arm": "dance_3", "hand": "thumbs_up", "delay": 0.4},
+    {"arm": "dance_4", "hand": "ok", "delay": 0.4},
+    {"arm": "dance_5", "hand": "open", "delay": 0.4},
+    {"arm": "home", "hand": "open", "delay": 0.3}
+  ]
+}
