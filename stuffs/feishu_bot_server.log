@@ -1,0 +1,27 @@
+INFO:__main__:HTTP服务器启动在 0.0.0.0:8080
+INFO:__main__:开始监听消息...
+INFO:__main__:收到飞书消息: {
+  "type": "event",
+  "event": {
+    "type": "im.message.receive_v1",
+    "message": {
+      "message_id": "om_1a2b3c4d5e6f",
+      "chat_id": "oc_7e4b49aa7cec5f5061d8c9a416628afd",
+      "text": "\u6d4b\u8bd5\u6d88\u606f",
+      "sender": {
+        "sender_id": {
+          "open_id": "ou_c8699a101e67b008a156e10e99efd752"
+        }
+      }
+    }
+  }
+}
+INFO:__main__:事件类型: im.message.receive_v1
+INFO:__main__:收到消息: 测试消息 (来自: ou_c8699a101e67b008a156e10e99efd752, 聊天ID: oc_7e4b49aa7cec5f5061d8c9a416628afd)
+INFO:__main__:发送回复结果: {"code":230001,"msg":"Your request contains an invalid request parameter, ext=invalid receive_id","error":{"log_id":"20260309171115B2B29495F21BC30C3B2B","troubleshooter":"排查建议查看(Troubleshooting suggestions): https://open.feishu.cn/search?from=openapi&log_id=20260309171115B2B29495F21BC30C3B2B&code=230001&method_id=6936075528891154460"}}
+ERROR:__main__:发送回复错误:   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100   689  100   349  100   340    748    729 --:--:-- --:--:-- --:--:--  1478
+
