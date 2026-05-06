@@ -1,39 +1,46 @@
 # Smart Pick and Place in the Real World
 
-基于虚实结合双重推理架构桌面级智能机械臂平台
-
-基于虚实结合双重推理架构的桌面级智能机械臂 Pick-and-Place 系统。系统通过 JSON 命令驱动，集成 YOLO-World 开放词汇目标检测、AnyGrasp 抓取姿态生成、PyBullet 仿真轨迹规划，实现真实环境下的智能抓取与放置。
+基于虚实结合双重推理架构的桌面级智能机械臂 Pick-and-Place 系统。采用 **Skill-DB 架构**，通过统一 CLI 调用封装好的机器人技能，集成 YOLO-World 开放词汇检测、AnyGrasp 抓取姿态生成、PyBullet 仿真轨迹规划，实现真实环境下的智能抓取与放置。
 
 ## 系统架构
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     planner.py / fetch_from_user.py                 │
-│              (主控：JSON命令 → 目标检测 → 抓取 → 放置)                │
-└──────────┬──────────┬──────────┬──────────┬──────────┬──────────────┘
-           │          │          │          │          │
-     json_input.py  camera.py  utils.py  armcontroller.py  look_around.py
-     (JSON解析)    (RealSense) (坐标变换)  (Socket机械臂控制)  (GLM-4.5V场景分析)
-           │          │          │          │
-           │          ▼          │          ▼
-           │   anygrasp_sdk     │    Socket Servers
-           │   (抓取姿态生成)    │    (8000灵巧手/8010机械臂)
-           │          │          │          │
-           │          ▼          ▼          ▼
-           │   transformation.py    ROS Nodes (start1.bash)
-           │   (ROS TF坐标变换)
-           │          │
-           └──────────┴──────────────────────┐
-                      │                      │
-                      ▼                      │
-           twin_inference/twin.py            │
-           (PyBullet仿真IK服务器, 端口8020)    │
+┌──────────────────────────────────────────────────────────────────┐
+│                       run_skill.py (统一入口)                      │
+│            argparse + JSON stdin → Skill Registry → skill.run()  │
+└──────────┬───────────────────────────────────────────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                         skills/ (Skill-DB)                        │
+│  ┌─────────────┐  ┌─────────────┐  ┌───────────┐  ┌───────────┐ │
+│  │pick_and_place│  │fetch_from   │  │look_around│  │capture_at │ │
+│  │  (高级skill) │  │  _user      │  │           │  │ _handover │ │
+│  └──────┬──────┘  └─────────────┘  └───────────┘  └───────────┘ │
+│         │ 组合调用                                                 │
+│  ┌──────┴──────────────────────────────────────────┐             │
+│  │  grasp │ place │ handover │ trash │ desk_place  │  (原子skill)│
+│  └───────┴───────┴─────────┴───────┴──────────────┘             │
+│  ┌─────────────┐                                                  │
+│  │pose_execute │  (位姿/动作序列执行)                               │
+│  └─────────────┘                                                  │
+└──────────┬───────────────────────────────────────────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                          core/ (基础设施)                          │
+│  config │ arm │ hand │ camera │ twin_client │ transforms          │
+│  perception │ vlm │ json_input                                   │
+└──────────┬──────────────┬────────────────────────────────────────┘
+           │              │
+     Socket Clients   Socket Servers
+     (8010/8000/8020)  (ROS Nodes + Twin Server)
 ```
 
 **三进程分布式架构：**
 - **进程1 (start1.bash)**: ROS系统启动 — 机械臂驱动、相机节点、灵巧手节点
-- **进程2 (start2.bash)**: 数字孪生推理服务器 — PyBullet物理仿真，提供IK求解和碰撞检测
-- **进程3 (start3.bash)**: 主控规划器 — 从stdin读取JSON命令执行任务
+- **进程2 (start2.bash)**: 数字孪生推理服务器 — PyBullet物理仿真，IK求解与碰撞检测
+- **主进程 (run_skill.py)**: 通过 CLI 调用技能
 
 ## 快速开始
 
@@ -41,8 +48,8 @@
 
 - ROS Noetic
 - Conda 环境 `anygrasp` (Python 3.9)
-- Intel RealSense D435 相机
-- 7-DOF 机械臂 + Inspire 灵巧手
+- Intel RealSense D455 相机
+- RM75-B 7-DOF 机械臂 + Inspire 灵巧手
 - CUDA / cuDNN
 
 ### 启动系统
@@ -53,212 +60,201 @@ conda activate anygrasp
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib
 
 # 2. 确保硬件连接
-ping 192.168.1.19     # 机械臂IP
-ping 192.168.11.210   # 灵巧手IP
+ping 192.168.1.19     # 机械臂
+ping 192.168.11.209   # 灵巧手
 
-# 3. 启动所有进程（在3个终端中分别启动，或使用下面的命令）
-./start.bash
+# 3. 启动服务（在2个终端中分别启动）
+bash start1.bash   # ROS (灵巧手 8000, 机械臂 8010)
+bash start2.bash   # Twin IK 服务 (8020)
 ```
 
-`start.bash` 会在3个 gnome-terminal 中分别启动 `start1.bash`、`start2.bash`、`start3.bash`。
+### 调用技能
 
-### 发送任务命令
-
-在 start3 窗口中输入 JSON 命令：
+所有技能通过统一入口 `run_skill.py` 调用：
 
 ```bash
-# 抓取橘子放到粉色盘子里
-{"object": "orange", "container": "pink plate"}
+cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World
 
-# 抓取苹果或水果放到碗里
-{"object": "apple,fruit", "container": "bowl"}
+# 查看所有可用 skill
+python run_skill.py list
 
-# 把瓶子递给用户
-{"object": "bottle", "container": "person"}
+# 抓取物品放到容器里
+echo '{"object":"orange","container":"green bowl"}' | python run_skill.py pick_and_place
 
-# 把包装纸扔进垃圾桶
-{"object": "wrapper", "container": "trash"}
+# 把物品递给用户
+echo '{"object":"bottle","container":"person"}' | python run_skill.py pick_and_place
 
-# 放到桌子上
-{"object": "cup", "container": "desk"}
+# 扔垃圾
+echo '{"object":"wrapper","container":"trash"}' | python run_skill.py pick_and_place
+
+# 放到桌面
+echo '{"object":"cup","container":"desk"}' | python run_skill.py pick_and_place
+
+# 从用户手中接收物品
+echo '{"container":"pink plate"}' | python run_skill.py fetch_from_user
+
+# 环顾桌面拍照
+python run_skill.py look_around
+
+# 执行动作序列
+echo '{"sequence":[{"arm":"home","hand":"open","delay":0.5}]}' | python run_skill.py pose_execute
 ```
 
-## JSON 命令格式
+## Skill 一览
 
-### Pick and Place (`planner.py`)
+### 高级 Skill（组合流程）
 
-```json
-{
-    "object": "orange",
-    "container": "pink plate",
-    "direction": "left"
-}
-```
+| Skill | 说明 | 输入 |
+|-------|------|------|
+| `pick_and_place` | 检测→抓取→放置完整流程 | `object` + `container` |
+| `fetch_from_user` | 从用户手中接收→放置 | `container` |
+| `look_around` | 移动到观测位姿拍照，VLM 分析场景 | 无 |
+| `capture_at_handover` | 移动到 handover 位拍照，VLM 识别物品 | 无 |
+| `pose_execute` | 执行位姿/动作序列（支持手势） | `sequence` 或 `command` |
 
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `object` | 是 | 要抓取的物体名称，支持逗号分隔多类别（OR逻辑），直接传给 YOLO-World |
-| `container` | 是 | 放置目标，可以是容器名称或特殊模式关键词 |
-| `direction` | 否 | 方位提示 (left/right/middle/front/back)，暂未实现 |
+### 原子 Skill（单步操作，由高级 skill 组合调用）
 
-**特殊放置模式：**
+| Skill | 说明 |
+|-------|------|
+| `grasp` | 视觉抓取（YOLO 检测 + AnyGrasp + Twin 轨迹） |
+| `place` | 视觉放置（检测容器位置 → 生成放置轨迹） |
+| `handover` | 递交给人（插值轨迹经中间点到 handover 位姿） |
+| `trash` | 扔垃圾（移动到垃圾桶位姿松手） |
+| `desk_place` | 放桌面（随机选择预设位姿） |
+
+### container 参数
 
 | container 值 | 模式 | 行为 |
 |---|---|---|
-| `"person"` | 递送 | 平滑轨迹经过中间点到达 handover 位姿，松手 |
-| `"trash"` / `"垃圾桶"` / `"garbage"` / `"bin"` | 丢垃圾 | 移动到垃圾桶位姿，松手 |
-| `"desk"` / `"桌子"` / `"table"` | 放桌面 | 随机选择3个预设桌面位姿之一 |
+| 容器名称 (如 `"green bowl"`) | 桌面放置 | YOLO 检测容器位置，生成放置轨迹 |
+| `"person"` | 人机递物 | 平滑轨迹到 handover 位姿，松手 |
+| `"trash"` | 扔垃圾 | 移动到垃圾桶位姿，松手 |
+| `"desk"` | 放桌面 | 随机选择3个预设位姿之一 |
 
-### Fetch from User (`fetch_from_user.py`)
+## 项目结构
 
-从用户手中接收物品并放置，只需指定 `container`：
-
-```json
-{"container": "pink plate"}
+```
+Smart-Pick-and-Place-in-the-Real-World/
+├── run_skill.py              # 统一 CLI 入口
+├── robot_config.json         # 机器人配置（关节位姿、坐标系名称）
+├── recorded_poses.json       # 录制的位姿库
+│
+├── skills/                   # Skill-DB
+│   ├── base.py               # Skill 基类 + 注册机制 + 懒加载硬件
+│   ├── __init__.py           # 导入所有 skill 触发注册
+│   ├── pick_and_place.py     # 高级：抓取+放置
+│   ├── fetch_from_user.py    # 高级：从用户接收
+│   ├── look_around.py        # 高级：场景扫描
+│   ├── capture_at_handover.py# 高级：handover 拍照
+│   ├── pose_execute.py       # 位姿/动作序列执行
+│   ├── grasp.py              # 原子：视觉抓取
+│   ├── place.py              # 原子：视觉放置
+│   ├── handover.py           # 原子：递交给用户
+│   ├── trash.py              # 原子：扔垃圾
+│   └── desk_place.py         # 原子：放桌面
+│
+├── core/                     # 共享基础设施
+│   ├── config.py             # 集中配置管理
+│   ├── arm.py                # 机械臂 Socket 客户端 (:8010)
+│   ├── hand.py               # 灵巧手 Socket 客户端 (:8000)
+│   ├── camera.py             # RealSense RGB-D 采集
+│   ├── twin_client.py        # 数字孪生客户端 (:8020)
+│   ├── transforms.py         # ROS TF 坐标变换
+│   ├── perception.py         # YOLO-World + AnyGrasp 封装
+│   ├── vlm.py                # GLM-4.5V 视觉语言模型客户端
+│   └── json_input.py         # JSON stdin 解析
+│
+├── tools/                    # 开发工具（非 skill）
+│   ├── pose_record.py        # 位姿录制（直连机械臂 SDK）
+│   └── get_current_pose.py   # 读取当前关节角度
+│
+├── twin_inference/           # 数字孪生推理（独立进程）
+├── anygrasp_sdk/             # AnyGrasp 抓取检测 SDK
+├── smart_pick_and_place_ws/  # ROS catkin 工作空间
+│
+├── start1.bash               # 启动 ROS 服务
+├── start2.bash               # 启动 Twin IK 服务
+└── start.bash                # 一键启动全部
 ```
 
-流程：移动到 handover 位姿 → 张开手等待 → 用户放入物品 → 关闭手 → 放置到指定容器。
+## Skill 基类
 
-## 功能模块
+所有 skill 继承 `skills.base.Skill`，通过 `@register_skill("name")` 注册：
 
-### 核心模块
+```python
+from skills.base import Skill, register_skill
 
-| 文件 | 功能 |
-|------|------|
-| `planner.py` | 主控管线：JSON → 目标检测 → 抓取 → 放置 |
-| `fetch_from_user.py` | 反向管线：从用户接收物品 → 放置到容器 |
-| `json_input.py` | 从 stdin 读取并解析 JSON 命令 |
-| `armcontroller.py` | 机械臂控制，通过 Socket 发送关节空间指令 |
-| `camera.py` | RealSense D435 RGB-D 图像采集 (640x480, 30fps) |
-| `transformation.py` | ROS TF 坐标变换工具 (base_link ↔ cam_link) |
-| `utils.py` | 相机投影、坐标变换、3D可视化 |
-| `robot_config.json` | 预定义关节位姿、坐标系名称 |
+@register_skill("my_skill")
+class MySkill(Skill):
+    def run(self, **kwargs):
+        # 通过 self.arm, self.hand, self.camera 等懒加载属性访问硬件
+        pass
+```
 
-### 辅助工具
+硬件资源（arm、hand、camera、twin、perception、vlm）通过 property 懒加载，首次访问时才建立连接。
 
-| 文件 | 功能 |
-|------|------|
-| `look_around.py` | 遍历观测位置拍照，调用 GLM-4.5V 分析场景物品和空间关系 |
-| `capture_at_handover.py` | 移动到 handover 观察位姿拍照，GLM-4.5V 识别用户手中物品 |
-| `arm_pose_record_and_execute.py` | 位姿录制、回放和动作序列执行 |
-| `get_current_pose.py` | 读取机械臂当前关节角度 |
+## 添加新 Skill
 
-### 数字孪生推理 (`twin_inference/`)
-
-| 文件 | 功能 |
-|------|------|
-| `twin.py` | PyBullet 仿真服务器 (端口8020)，提供 IK 求解和轨迹生成 |
-| `robot.py` | 机器人模型定义：`ErdaijiRobot`，包含 `Arm`/`Hand`/`Gripper`/`Head` 结构体 |
-| `sim_world.py` | PyBullet 物理仿真环境 |
-| `utils.py` | 变换矩阵计算、SLERP 四元数插值、可视化 |
-| `p_utils.py` | PyBullet 关节/连杆/碰撞检测工具函数 |
-
-### ROS 工作空间 (`smart_pick_and_place_ws/`)
-
-| 路径 | 功能 |
-|------|------|
-| `src/rm_65_pkg/src/arm_75_bringup.py` | 机械臂 ROS 驱动节点 |
-| `src/rm_65_pkg/src/mount_camera.py` | 相机标定/挂载节点 |
-| `src/rm_65_pkg/src/inspire_hand_bringup.py` | Inspire 灵巧手 ROS 节点 |
-| `src/rm_65_pkg/src/hand_controller_modbus.py` | 灵巧手 Modbus 控制节点 |
-| `src/rm_description/urdf/SingleArm/` | URDF 模型和仿真配置 |
+1. 在 `skills/` 下创建 `my_skill.py`
+2. 继承 `Skill`，添加 `@register_skill("my_skill")`
+3. 实现 `run(self, **kwargs)`
+4. 完成。调用：`echo '{"key":"value"}' | python run_skill.py my_skill`
 
 ## 通信协议
 
-系统使用 Socket 进行进程间通信：
+| 端口 | 服务 | 发送协议 | 接收协议 |
+|------|------|----------|----------|
+| 8000 | 灵巧手 | 纯 JSON | 纯 JSON |
+| 8010 | 机械臂 | 4字节大端长度头 + JSON | 纯 JSON |
+| 8020 | Twin IK | 纯 JSON | 4字节大端长度头 + JSON |
 
-| 端口 | 服务 | 协议 |
-|------|------|------|
-| 8000 | 灵巧手控制 | JSON: `{"src": "/left_hand/movement_control", "type": "set/get", "cmd": [...]}` |
-| 8010 | 机械臂控制 | 4字节大端长度前缀 + JSON |
-| 8020 | 数字孪生推理 | 请求: JSON; 响应: 4字节大端长度前缀 + JSON |
+**灵巧手指令：** `{"src": "/left_hand/movement_control", "type": "set", "cmd": [a0,a1,a2,a3,a4,a5]}`
+- `[小指, 无名指, 中指, 食指, 拇指, 拇指外展]`，0=弯曲，1000=张开
 
-**机械臂控制指令格式 (端口 8010)：**
-```json
-{
-    "srv": "/right_arm/movement_control",
-    "cmd": [
-        {"type": "start", "act": []},
-        {"type": "js", "act": {"J1": 5.5, "J2": 38.4, ...}, "speed": 20, "block": true},
-        {"type": "end", "act": []}
-    ]
-}
-```
+**手势预设：** `open`, `close`, `peace`, `rock`, `pointing`, `thumbs_up`, `ok`, `grab`
 
-**注意：** `robot_config.json` 中的关节角度使用**角度制**，数字孪生返回的轨迹使用**弧度制**，`planner.py` 中会进行转换。
+**机械臂指令：** `{"srv": "/right_arm/movement_control", "cmd": [{"type":"start"},{"type":"js","act":{J1:...},"speed":20,"block":true},{"type":"end"}]}`
 
-## 数字孪生服务类型
+**注意：** `robot_config.json` 使用角度制，Twin 返回的轨迹使用弧度制，skill 内部会进行转换。
+
+## 数字孪生服务
 
 | 类型 | 说明 |
 |------|------|
-| `reachability_check` | 检查目标位姿是否可达（含碰撞检测） |
+| `trajectory_generation` | 单目标线性轨迹（含碰撞检测） |
+| `trajectory_generation2` | 多目标线性轨迹（含碰撞检测和 Z 轴安全检查） |
+| `reachability_check` | 可达性检查 |
 | `collision_check` | 碰撞检测 |
 | `IK_calculation` | 逆运动学求解 |
-| `trajectory_generation` | 单目标线性轨迹生成（含碰撞检测） |
-| `trajectory_generation2` | 多目标线性轨迹生成（含碰撞检测和 Z 轴高度安全检查） |
 
-## 预定义位姿
-
-| 位姿名称 | 用途 |
-|----------|------|
-| `grasp1` ~ `grasp4` | 抓取观测位置（遍历搜索） |
-| `place1`, `place2` | 放置后返回位置 |
-| `handover_pose` | 递送物品给用户的位姿 |
-| `get_ready_to_handover_1st`, `get_ready_to_handover_2nd` | 递送平滑轨迹中间路径点 |
-| `throw_to_trash_pose` | 丢弃垃圾位姿 |
-| `desk_pose_1/2/3` | 桌面放置位姿（随机选择） |
-| `look_over_what_in_user_hand_pose` | 查看用户手中物品的相机位姿 |
-
-## 位姿录制与回放
+## 开发工具
 
 ```bash
-# 录制当前位姿
-python3 arm_pose_record_and_execute.py record --name "home"
+# 录制位姿（直连机械臂 SDK，不需要 ROS 服务）
+python tools/pose_record.py record --name "home"
 
-# 交互式录制
-python3 arm_pose_record_and_execute.py record --interactive
-
-# 执行预设位姿
-python3 arm_pose_record_and_execute.py play --name home --speed 30
-
-# 执行动作序列
-python3 arm_pose_record_and_execute.py sequence --file sequence.json
-
-# 列出已录制位姿
-python3 arm_pose_record_and_execute.py list
+# 查看当前关节角度
+python tools/get_current_pose.py
 ```
 
-**灵巧手手势预设：** `open`, `close`, `peace`, `rock`, `pointing`, `thumbs_up`, `ok`, `grab`
+## 硬件
 
-## 抓取流程
-
-1. 从 stdin 读取 JSON 命令
-2. **抓取阶段** — 遍历 grasp1-4 观测位置：
-   - 移动到观测位姿，采集 RGB-D 图像
-   - AnyGrasp 生成候选抓取姿态（top-50）
-   - YOLO-World 检测目标物体，筛选与检测框重叠的抓取姿态（20px容差）
-   - 坐标变换：相机坐标系 → 世界坐标系
-   - 数字孪生生成无碰撞轨迹
-   - 执行轨迹，关闭灵巧手，验证抓取（手指位置差检测）
-3. **放置阶段**：
-   - 递送模式：平滑插值轨迹经2个中间点到 handover 位姿
-   - 垃圾桶/桌面模式：移动到预定义位姿，松手
-   - 普通模式：YOLO-World 检测容器位置，深度图计算3D坐标，生成放置轨迹
-
-## 目标检测
-
-系统使用 YOLO-World 进行开放词汇目标检测，支持任意类别名称：
-- 物体：orange, apple, lemon, pear, bottle, cup, banana, carrot 等
-- 容器：bowl, plate, box, basket, tray 等
-- 多类别语法：逗号分隔表示 OR 逻辑，如 `"object": "apple,orange,fruit"`
+| 设备 | 型号 | 连接 |
+|------|------|------|
+| 机械臂 | RM75-B (7DOF) | 192.168.1.19:8010 |
+| 灵巧手 | Inspire Hand | 192.168.11.209:8000 (Modbus) |
+| 相机 | RealSense D455 | USB, 640x480@30fps |
 
 ## 依赖
 
 - **ROS Noetic** — 机器人控制和坐标变换
 - **PyBullet** — 物理仿真和逆运动学
 - **YOLO-World (Ultralytics)** — 开放词汇目标检测
-- **AnyGrasp SDK** — 抓取姿态生成（需要许可证）
-- **pyrealsense2** — Intel RealSense D435 驱动
+- **AnyGrasp SDK** — 抓取姿态生成
+- **pyrealsense2** — RealSense D455 驱动
 - **CUDA / cuDNN** — GPU 加速
-- **Robotic_Arm SDK** — RM65 机械臂直连控制（位姿录制器使用）
-- scipy, numpy, open3d, PIL, matplotlib, termcolor
+- scipy, numpy, open3d, PIL, termcolor
+
+## License
+
+See [LICENSE](LICENSE).
