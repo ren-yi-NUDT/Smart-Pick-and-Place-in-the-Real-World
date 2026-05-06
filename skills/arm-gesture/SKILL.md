@@ -1,31 +1,30 @@
 # arm-gesture Skill
 
-机械臂位姿录制与动作序列执行。结合之前预录制好的位姿，可以实现一些表演性动作
+机械臂位姿执行与动作序列播放。结合预录制好的位姿，可以实现表演性动作。
 
 ## 触发条件
 
 - 用户说"做个动作"、"敬礼"、"挥手"、"跳舞"等表演性动作
-- 用户说"录制位姿"、"保存当前姿态"
 - 用户说"执行动作序列"
 - 用户说"列出所有位姿"
 
 ## 脚本位置
 
-```
-/home/zz/Code/Smart-Pick-and-Place-in-the-Real-World/arm_pose_record_and_execute.py
-```
+统一入口：`/home/zz/Code/Smart-Pick-and-Place-in-the-Real-World/run_skill.py`
 
 **必须使用 anygrasp conda 环境的 Python**：
 ```bash
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib
-/home/zz/anaconda3/envs/anygrasp/bin/python arm_pose_record_and_execute.py <command>
+cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
+/home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pose_execute
 ```
 
-## 操控机械臂与灵巧手执行动作序列
+## 执行动作序列（从 stdin 传入）
 
-### 从 stdin 传入动作序列                                               
-  - 示例：echo '{"sequence": [{"arm": "home", "hand": "open"}, {"arm": "dance_1", "hand": "peace"}]}' | python3 arm_pose_record_and_execute.py sequence
-
+```bash
+echo '{"sequence": [{"arm": "home", "hand": "open"}, {"arm": "dance_1", "hand": "peace"}]}' | \
+  /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pose_execute
+```
 
 ### Sequence JSON 格式
 
@@ -51,11 +50,21 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 - ✅ 正确: `{"arm": "dance_1", "delay": 0.4}`
 - ❌ 错误: `{"name": "dance_1", "delay": 0.4}` （会被忽略，机械臂不动）
 
+## 执行单一位姿
 
-## 操控机械臂与灵巧手执行单一位姿
 ```bash
-python3 arm_pose_record_and_execute.py play --name home
-python3 arm_pose_record_and_execute.py play --name home --speed 50
+echo '{"command": "play", "name": "home"}' | \
+  /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pose_execute
+
+echo '{"command": "play", "name": "home", "speed": 50}' | \
+  /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pose_execute
+```
+
+## 列出所有位姿
+
+```bash
+echo '{"command": "list"}' | \
+  /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pose_execute
 ```
 
 ## 手势预设
@@ -122,10 +131,6 @@ python3 arm_pose_record_and_execute.py play --name home --speed 50
 | palm_toward_user_right | 手掌朝向用户右侧（可用于挥手） |
 | palm_toward_user_right_more | 手掌朝向用户右侧更远 |
 
-
-
-
-
 ## 前置条件
 
 - **ROS 服务已启动**: `bash start1.bash` (灵巧手 8000, 机械臂 8010)
@@ -142,4 +147,12 @@ python3 arm_pose_record_and_execute.py play --name home --speed 50
 - **delay 设置**: 影响观感的连续动作 delay 应较短 (0.3~0.5s)
 - **位姿文件**: 默认存储在 `./recorded_poses.json`，不需要主动读取这个位姿文件，除非动作执行失败。
 - **手势配合**: 执行动作序列时应搭配合适的手势来完成
-- **动作序列结束后**: 此时相机不会指向桌面或用户，只能用`python3 look_around.py` or `capture_at_handover.py` 来获取桌面 or 用户手上的图片
+- **动作序列结束后**: 此时相机不会指向桌面或用户，只能用 `run_skill.py look_around` or `run_skill.py capture_at_handover` 来获取桌面 or 用户手上的图片
+
+## 录制位姿（开发工具）
+
+录制新位姿使用 tools/pose_record.py（需直连机械臂 SDK）：
+```bash
+cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
+/home/zz/anaconda3/envs/anygrasp/bin/python tools/pose_record.py record --name <位姿名>
+```

@@ -126,28 +126,25 @@ image(prompt="列出图片中所有物品，包括：名称、位置（左/中/�
 
 ## 数据获取快速参考
 
-
 ### 获取用户手中物品图片
 
 ```bash
-# 拍照后不返回，留在 handover 位置（等待用户放入物品）
-python3 capture_at_handover.py --no-return
-# 保存到 ./log/handover_capture/
-
-# 拍照后返回 grasp1
-python3 capture_at_handover.py
+cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
+/home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py capture_at_handover
 ```
 
 ### 获取桌面图片
 
 ```bash
-# 环顾三个位置，只在grasp1拍照                                                                                                                                
-  python3 look_around.py     
+cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
+/home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py look_around
 ```
 
-# 使用 image 工具检测
-```
+### 使用 image 工具检测
 *注意: 调用获取物品图片的脚本之后需要先cp到/home/zz/.openclaw/workspace下才能调用image工具识别*
+```
 image(prompt="列出图中所有物品及其位置", image="/path/to/rgb.png")
 ```
 
@@ -161,22 +158,7 @@ image(prompt="列出图中所有物品及其位置", image="/path/to/rgb.png")
 | 机械臂 | 8010 | JSON | ROS 节点 (start1.bash) |
 | Twin规划 | 8020 | 长度头+JSON | twin.py (start2.bash) |
 
-**注意**: start3.bash 已废弃，改用 start2.bash
-
----
-
-## 环顾拍照 (look_around.py)
-```bash
-# 环顾三个位置，只在 grasp1 拍照
-python3 look_around.py
-
-# 只移动到单个位置并拍照
-python3 look_around.py --position grasp1
-
-# 完成后不返回起始位置
-python3 look_around.py --no-return
-
-```
+**注意**: start3.bash 已废弃，改用 `run_skill.py` 作为主进程入口
 
 ### anygrasp
 - **Python**: 3.9
@@ -206,4 +188,4 @@ Skills are shared. Your setup is yours. Keeping them apart means you can update 
 
 ---
 
-*Last updated: 2026-03-23*
+*Last updated: 2026-05-06*

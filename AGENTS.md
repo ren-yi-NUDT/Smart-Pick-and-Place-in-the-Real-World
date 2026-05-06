@@ -35,10 +35,17 @@ workspace/
 **Self-Improving Reminder:**
 ```
 ~/self-improving/
-├── memory.md          # HOT: ≤100行, 总是加载
-├── corrections.md     # 修正日志
-├── projects/          # 项目特定经验
-└── domains/           # 领域经验 (code, writing...)
+├── memory.md          # 用户偏好 + 经验教训 (≤100行)
+├── corrections.md     # 纠错日志 (只增不减)
+└── archive/           # 已归档的旧笔记
+
+⚠️ 写入规则 (避免记忆多重修改):
+- 项目状态、架构、硬件配置 → workspace MEMORY.md
+- 命令调用方式 → workspace skills/*/SKILL.md
+- 操作事实/事件 → workspace memory/logs/YYYY-MM-DD.md
+- 用户偏好、交互风格 → ~/self-improving/memory.md
+- 纠错记录 → ~/self-improving/corrections.md
+- 禁止在 self-improving 中重复记录 workspace 已有的信息
 
 触发器 (自动记录):
 - 用户纠正 → corrections.md
@@ -59,22 +66,17 @@ You wake up fresh each session. These files are your continuity:
 
 - **Daily notes:** `memory/logs/YYYY-MM-DD.md` (create `memory/logs/` if needed) — raw logs of what happened
 - **Long-term:** `MEMORY.md` — your curated memories, like a human's long-term memory
-- **Self-improving:** `~/self-improving/` (via `self-improving` skill) — execution-improvement memory (preferences, workflows, style patterns, what improved/worsened outcomes)
+- **Self-improving:** `~/self-improving/` — 用户偏好、交互经验、纠错记录（不记录项目状态和命令参考）
 
 Capture what matters. Decisions, context, things to remember. Skip the secrets unless asked to keep them.
 
 Use `memory/logs/YYYY-MM-DD.md` and `MEMORY.md` for factual continuity (events, context, decisions).
-Use `~/self-improving/` for compounding execution quality across tasks.
-For compounding quality, read `~/self-improving/memory.md` before non-trivial work, then load only the smallest relevant domain or project files.
-If in doubt, store factual history in `memory/logs/YYYY-MM-DD.md` / `MEMORY.md`, and store reusable performance lessons in `~/self-improving/` (tentative until human validation).
+Use `~/self-improving/` for user preferences and interaction lessons only.
+For compounding quality, read `~/self-improving/memory.md` before non-trivial work.
+If in doubt, store factual history in `memory/logs/YYYY-MM-DD.md` / `MEMORY.md`, and store user preferences in `~/self-improving/`.
 
 Before any non-trivial task:
 - Read `~/self-improving/memory.md`
-- List available files first:
-  ```bash
-  for d in ~/self-improving/domains ~/self-improving/projects; do
-    [ -d "$d" ] && find "$d" -maxdepth 1 -type f -name "*.md"
-  done | sort
   ```
 - Read up to 3 matching files from `~/self-improving/domains/`
 - If a project is clearly active, also read `~/self-improving/projects/<project>.md`
@@ -99,9 +101,8 @@ If inferring a new rule, keep it tentative until human validation.
 - When someone says "remember this" → if it's factual context/event, update `memory/logs/YYY-MM-DD.md`; if it's a correction, preference, workflow/style choice, or performance lesson, log it in `~/self-improving/`
 - Explicit user correction → append to `~/self-improving/corrections.md` immediately
 - Reusable global rule or preference → append to `~/self-improving/memory.md`
-- Domain-specific lesson → append to `~/self-improving/domains/<domain>.md`
-- Project-only override → append to `~/self-improving/projects/<project>.md`
-- Keep entries short, concrete, and one lesson per bullet; if scope is ambiguous, default to domain rather than global
+- Project state / command reference → write to workspace MEMORY.md or skills/*/SKILL.md (NOT self-improving)
+- Keep entries short, concrete, and one lesson per bullet
 - After a correction or strong reusable lesson, write it before the final response
 - **Text > Brain** 📝
 

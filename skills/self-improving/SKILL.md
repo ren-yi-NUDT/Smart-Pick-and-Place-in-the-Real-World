@@ -14,17 +14,16 @@ User corrects you or points out mistakes. You complete significant work and want
 
 ## Architecture
 
-Memory lives in `~/self-improving/` with tiered structure. If `~/self-improving/` does not exist, run `setup.md`.
+Memory lives in `~/self-improving/`. If it does not exist, run `setup.md`.
 
 ```
 ~/self-improving/
-├── memory.md          # HOT: ≤100 lines, always loaded
-├── index.md           # Topic index with line counts
-├── projects/          # Per-project learnings
-├── domains/           # Domain-specific (code, writing, comms)
-├── archive/           # COLD: decayed patterns
-└── corrections.md     # Last 50 corrections log
+├── memory.md          # 用户偏好 + 经验教训 (≤100 lines, always loaded)
+├── corrections.md     # 纠错日志 (append-only)
+└── archive/           # 归档的旧笔记
 ```
+
+**⚠️ 不重复原则**: 项目状态、硬件配置、命令参考写在 workspace (MEMORY.md, TOOLS.md, skills/*/SKILL.md)，不写在这里。这里只记录用户偏好、交互风格和经验教训。
 
 ## Quick Reference
 
@@ -103,14 +102,11 @@ Self-reflection entries follow the same promotion rules: 3x applied successfully
 
 | User says | Action |
 |-----------|--------|
-| "What do you know about X?" | Search all tiers for X |
+| "What do you know about X?" | Search memory.md + corrections.md |
 | "What have you learned?" | Show last 10 from `corrections.md` |
-| "Show my patterns" | List `memory.md` (HOT) |
-| "Show [project] patterns" | Load `projects/{name}.md` |
-| "What's in warm storage?" | List files in `projects/` + `domains/` |
-| "Memory stats" | Show counts per tier |
-| "Forget X" | Remove from all tiers (confirm first) |
-| "Export memory" | ZIP all files |
+| "Show my patterns" | List `memory.md` |
+| "Memory stats" | Show file sizes |
+| "Forget X" | Remove from memory.md and/or corrections.md (confirm first) |
 
 ## Memory Stats
 
@@ -119,20 +115,12 @@ On "memory stats" request, report:
 ```
 📊 Self-Improving Memory
 
-HOT (always loaded):
-  memory.md: X entries
-
-WARM (load on demand):
-  projects/: X files
-  domains/: X files
-
-COLD (archived):
-  archive/: X files
+memory.md: X entries (偏好 + 经验教训)
+corrections.md: X entries
+archive/: X files
 
 Recent activity (7 days):
   Corrections logged: X
-  Promotions to HOT: X
-  Demotions to WARM: X
 ```
 
 ## Core Rules
@@ -143,24 +131,24 @@ Recent activity (7 days):
 - Never infer from silence alone
 - After 3 identical lessons → ask to confirm as rule
 
-### 2. Tiered Storage
-| Tier | Location | Size Limit | Behavior |
-|------|----------|------------|----------|
-| HOT | memory.md | ≤100 lines | Always loaded |
-| WARM | projects/, domains/ | ≤200 lines each | Load on context match |
-| COLD | archive/ | Unlimited | Load on explicit query |
+### 2. Single Responsibility
+| 内容 | 写在哪里 |
+|------|----------|
+| 用户偏好、交互风格、经验教训 | `~/self-improving/memory.md` |
+| 纠错记录 | `~/self-improving/corrections.md` |
+| 项目状态、架构、硬件配置 | workspace `MEMORY.md`, `TOOLS.md` |
+| 命令调用方式 | workspace `skills/*/SKILL.md` |
+| 操作日志 | workspace `memory/logs/YYYY-MM-DD.md` |
 
 ### 3. Automatic Promotion/Demotion
-- Pattern used 3x in 7 days → promote to HOT
-- Pattern unused 30 days → demote to WARM
-- Pattern unused 90 days → archive to COLD
+- Pattern used 3x in 7 days → promote to memory.md
+- Pattern unused 30 days → consider removing
 - Never delete without asking
 
 ### 4. Namespace Isolation
-- Project patterns stay in `projects/{name}.md`
-- Global preferences in HOT tier (memory.md)
-- Domain patterns (code, writing) in `domains/`
-- Cross-namespace inheritance: global → domain → project
+- self-improving: 偏好、经验教训、纠错
+- workspace: 项目状态、命令参考、操作日志
+- 禁止在 self-improving 中记录 workspace 已有的信息
 
 ### 5. Conflict Resolution
 When patterns contradict:
