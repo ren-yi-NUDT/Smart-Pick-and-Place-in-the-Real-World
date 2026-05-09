@@ -28,11 +28,11 @@ TWIN_PORT = 8020
 # ---------------------------------------------------------------------------
 DEFAULT_YOLO_MODEL = os.path.join(
     PROJECT_ROOT,
-    "yolo_world", "yolov8x-worldv2.pt",
+    "dependence", "yolo_world", "yolov8x-worldv2.pt",
 )
 DEFAULT_ANYGRASP_CHECKPOINT = os.path.join(
     PROJECT_ROOT,
-    "anygrasp_sdk", "checkpoint_detection.tar",
+    "dependence", "anygrasp_sdk", "checkpoint_detection.tar",
 )
 
 # ---------------------------------------------------------------------------

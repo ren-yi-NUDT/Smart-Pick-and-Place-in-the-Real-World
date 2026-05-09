@@ -61,6 +61,12 @@ class ArmClient:
             cprint(f"[ArmClient] Connection failed: {e}", "red")
             return False
 
+    def _set_recv_timeout(self, n_waypoints: int):
+        """Set recv timeout: 2 min per waypoint."""
+        timeout = max(10, n_waypoints * 120)
+        if self.sock is not None:
+            self.sock.settimeout(timeout)
+
     def close(self) -> None:
         if self.sock is not None:
             self.sock.close()
@@ -133,9 +139,11 @@ class ArmClient:
         *trajectory* is an iterable of ``[J1, J2, J3, J4, J5, J6, J7]``.
         """
         try:
+            traj_list = list(trajectory)
+            self._set_recv_timeout(len(traj_list))
             self.reset_cmd()
             self.start_cmd()
-            for wp in trajectory:
+            for wp in traj_list:
                 self.add_js_cmd(
                     {
                         "J1": wp[0], "J2": wp[1], "J3": wp[2],

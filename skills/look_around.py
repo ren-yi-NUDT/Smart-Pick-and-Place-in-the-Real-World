@@ -9,7 +9,13 @@ from skills.base import Skill, register_skill
 class LookAroundSkill(Skill):
     """Scan workspace from observation positions using GLM-4.5V."""
 
-    def run(self, **kwargs):
+    def run(self, reset_pose="grasp1", **kwargs):
+        """Scan workspace and analyze scene with VLM.
+
+        Args:
+            reset_pose: Pose name to return to after scanning.
+                        Set to None to skip reset (for chained calls).
+        """
         cprint("=================== Look Around: Scanning workspace ===================", "cyan")
 
         images = {}
@@ -52,5 +58,6 @@ class LookAroundSkill(Skill):
         else:
             cprint("VLM analysis failed", "red")
 
-        self.control_arm(pose_type="grasp1", speed=30)
+        if reset_pose:
+            self.control_arm(pose_type=reset_pose, speed=30)
         return analysis

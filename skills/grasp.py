@@ -377,7 +377,10 @@ class GraspSkill(Skill):
             cprint("=============== Reach post grasping pose =============")
             return True
         else:
-            cprint("********************* The preparasion pose is not reachable !! *********************")
+            twin_info = rsp.get("info", {})
+            cprint(f"********************* Grasp pose not reachable: "
+                   f"collided={twin_info.get('is_collided', '?')}, "
+                   f"delta_xyz={twin_info.get('delta_xyz', '?')} *********************", "red")
             return False
 
     # ------------------------------------------------------------------
@@ -451,7 +454,8 @@ class GraspSkill(Skill):
                 break
 
         if not check:
-            cprint("G=================== Grasping task failed ===================", "red")
+            cprint("G=================== Grasping task failed: 所有观测位均未能生成可达的抓取轨迹 ===================", "red")
+            cprint("G=================== 可能原因: 目标不可达 / 碰撞 / 物品位置不佳 ===================", "yellow")
             return False
 
         cprint("G=================== Successfully completed the grasping task ===================", "green")

@@ -18,7 +18,7 @@ class VLMClient:
 
     DEFAULT_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     DEFAULT_MODEL = "glm-4.5v"
-    DEFAULT_TOKEN = "b8b434c4bc27407e83b76a5bec46fa12.UJWcvdOgEnGb4cBJ"
+    DEFAULT_TOKEN = "REDACTED_GLM_TOKEN"
 
     def __init__(self, api_url=None, api_token=None, model=None):
         self.api_url = api_url or self.DEFAULT_API_URL

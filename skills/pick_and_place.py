@@ -1,4 +1,5 @@
 import copy
+import random
 import time
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -12,7 +13,10 @@ class PickAndPlaceSkill(Skill):
     """Main pick-and-place pipeline: detect → grasp → place."""
 
     def run(self, **kwargs):
-        json_data = self.json_parser.get_command()
+        if kwargs.get("object") and kwargs.get("container"):
+            json_data = kwargs
+        else:
+            json_data = self.json_parser.get_command()
         if json_data is None:
             cprint("未收到有效的JSON输入", "red")
             return False
@@ -25,6 +29,7 @@ class PickAndPlaceSkill(Skill):
             return False
 
         cprint(f"=================== 2. Parse input: Grasp {obj} and place it in the {container} ===================", "cyan")
+        self.control_arm(pose_type="grasp1", speed=30)
         self.control_hand(cmd_type="close")
 
         # ---- Grasp phase ----
@@ -68,33 +73,53 @@ class PickAndPlaceSkill(Skill):
         # ---- Placement phase ----
         if container.lower() == "person":
             cprint("H=================== Handover mode detected: delivering to person ===================", "cyan")
-            from skills.handover import HandoverSkill
-            check = HandoverSkill(config_path=self.config_path, save_path=self.save_path).run()
-            if check:
-                cprint("H=================== 5. Successfully completed the handover task ===================", "green")
-            else:
-                cprint("H=================== Handover task failed ===================", "red")
-            return check
+            pose_1st = self.config.get_pose("get_ready_to_handover_1st")
+            pose_2nd = self.config.get_pose("get_ready_to_handover_2nd")
+            if self.config.get_pose("handover_pose") is None:
+                cprint("H=================== Handover task failed: handover_pose not found ===================", "red")
+                return False
+            if pose_1st is not None:
+                self.control_arm(pose_type="get_ready_to_handover_1st", speed=15)
+            if pose_2nd is not None:
+                self.control_arm(pose_type="get_ready_to_handover_2nd", speed=15)
+            self.control_arm(pose_type="handover_pose", speed=15)
+            time.sleep(0.5)
+            self.control_hand(cmd_type="open")
+            time.sleep(1)
+            self.control_arm(pose_type="grasp1", speed=30)
+            cprint("H=================== 5. Successfully completed the handover task ===================", "green")
+            return True
 
         if container.lower() in ["trash", "垃圾桶", "garbage", "bin"]:
             cprint("T=================== Trash mode detected: throwing to trash ===================", "cyan")
-            from skills.trash import TrashSkill
-            check = TrashSkill(config_path=self.config_path, save_path=self.save_path).run()
-            if check:
-                cprint("T=================== 5. Successfully completed the trash task ===================", "green")
-            else:
-                cprint("T=================== Trash task failed ===================", "red")
-            return check
+            throw_pose = self.config.get_pose("throw_to_trash_pose")
+            if throw_pose is None:
+                cprint("T=================== Trash task failed: throw_to_trash_pose not found ===================", "red")
+                return False
+            joint_angles = [throw_pose[f"J{i}"] for i in range(1, 8)]
+            self.control_arm(trajectory=np.array([joint_angles]), speed=15)
+            time.sleep(0.5)
+            self.control_hand(cmd_type="open")
+            time.sleep(1)
+            self.control_arm(pose_type="grasp1", speed=30)
+            cprint("T=================== 5. Successfully completed the trash task ===================", "green")
+            return True
 
         if container.lower() in ["desk", "桌子", "table"]:
             cprint("D=================== Desk placement mode detected: placing on desk ===================", "cyan")
-            from skills.desk_place import DeskPlaceSkill
-            check = DeskPlaceSkill(config_path=self.config_path, save_path=self.save_path).run()
-            if check:
-                cprint("D=================== 5. Successfully completed the desk placement task ===================", "green")
-            else:
-                cprint("D=================== Desk placement task failed ===================", "red")
-            return check
+            selected = random.choice(["desk_pose_1", "desk_pose_2", "desk_pose_3"])
+            desk_pose = self.config.get_pose(selected)
+            if desk_pose is None:
+                cprint(f"D=================== Desk task failed: {selected} not found ===================", "red")
+                return False
+            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 8)]
+            self.control_arm(trajectory=np.array([joint_angles]), speed=15)
+            time.sleep(0.5)
+            self.control_hand(cmd_type="open")
+            time.sleep(1)
+            self.control_arm(pose_type="grasp1", speed=30)
+            cprint("D=================== 5. Successfully completed the desk placement task ===================", "green")
+            return True
 
         # Normal vision-based placement
         for key, value in self.config.default_traj_js.items():

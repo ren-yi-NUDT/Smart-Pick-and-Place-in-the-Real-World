@@ -12,7 +12,6 @@ Usage (CLI):
 
 import random
 import time
-import numpy as np
 from termcolor import cprint
 
 from skills.base import Skill, register_skill
@@ -49,30 +48,19 @@ class DeskPlaceSkill(Skill):
             "cyan",
         )
 
-        joint_angles = [
-            desk_pose["J1"], desk_pose["J2"], desk_pose["J3"],
-            desk_pose["J4"], desk_pose["J5"], desk_pose["J6"],
-            desk_pose["J7"],
-        ]
-
-        trajectory = np.array([joint_angles])
-        self.control_arm(trajectory=trajectory, speed=15)
+        self.control_arm(pose_type=selected_pose_key, speed=15)
 
         cprint(
             f"=============== Reached desk pose ({selected_pose_key}) =============",
             "green",
         )
         time.sleep(0.5)
-
-        # Open hand to place on desk
         self.control_hand(cmd_type="open")
         cprint(
             "=============== Opened hand to place on desk =============",
             "green",
         )
         time.sleep(1)
-
-        # Return to safe position
         self.control_arm(pose_type="grasp1", speed=30)
         cprint("=============== Returned to safe pose =============", "cyan")
 

@@ -17,9 +17,9 @@
 │  │pick_and_place│  │fetch_from   │  │look_around│  │capture_at │ │
 │  │  (高级skill) │  │  _user      │  │           │  │ _handover │ │
 │  └──────┬──────┘  └─────────────┘  └───────────┘  └───────────┘ │
-│         │ 组合调用                                                 │
+│         │ 独立CLI调用（高级skill已内联等效逻辑）                     │
 │  ┌──────┴──────────────────────────────────────────┐             │
-│  │  grasp │ place │ handover │ trash │ desk_place  │  (原子skill)│
+│  │  grasp │ place │ handover │ trash │ desk_place  │ (独立skill) │
 │  └───────┴───────┴─────────┴───────┴──────────────┘             │
 │  ┌─────────────┐                                                  │
 │  │pose_execute │  (位姿/动作序列执行)                               │
@@ -52,27 +52,52 @@
 - RM75-B 7-DOF 机械臂 + Inspire 灵巧手
 - CUDA / cuDNN
 
-### 启动系统
+### 启动流程 A：面向 OpenClaw（AI Agent 模式）
+
+通过 OpenClaw 启动 AI Agent（CMLLR），以自然语言对话方式操控机械臂。适用于演示和交互场景。
+
+**前置：** OpenClaw 已安装（`openclaw --version`），`openclaw-configs` 分支已 checkout 到工作目录。
 
 ```bash
-# 1. 激活环境
+# ── 终端 1：ROS 硬件服务 ──
+bash start1.bash    # 灵巧手 :8000, 机械臂 :8010
+
+# ── 终端 2：数字孪生 IK 服务 ──
+bash start2.bash    # Twin IK :8020
+
+# ── 终端 3：启动 OpenClaw Agent ──
+openclaw             # 加载 workspace/ (IDENTITY, SOUL, skills/) 启动 CMLLR
+```
+
+启动后 CMLLR 会自动加载 `SOUL.md` → `USER.md` → `skills/` → `MEMORY.md`，之后可通过自然语言对话操控机器人：
+
+```
+> 把橘子放到绿色碗里
+> 递给我那个瓶子
+> 看看桌上有什么
+> 做个挥手的动作
+```
+
+Agent 在后台调用 `run_skill.py` 执行具体技能，无需手动输入 JSON。
+
+### 启动流程 B：面向测试（CLI 直调模式）
+
+直接通过命令行调用技能，适用于开发调试和自动化测试。
+
+```bash
+# 0. 激活环境
 conda activate anygrasp
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib
 
-# 2. 确保硬件连接
+# 1. 确保硬件连接
 ping 192.168.1.19     # 机械臂
 ping 192.168.11.209   # 灵巧手
 
-# 3. 启动服务（在2个终端中分别启动）
+# 2. 启动硬件服务（在 2 个终端中分别启动）
 bash start1.bash   # ROS (灵巧手 8000, 机械臂 8010)
 bash start2.bash   # Twin IK 服务 (8020)
-```
 
-### 调用技能
-
-所有技能通过统一入口 `run_skill.py` 调用：
-
-```bash
+# 3. 调用技能
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World
 
 # 查看所有可用 skill
@@ -100,6 +125,11 @@ python run_skill.py look_around
 echo '{"sequence":[{"arm":"home","hand":"open","delay":0.5}]}' | python run_skill.py pose_execute
 ```
 
+**快速验证服务是否就绪：**
+```bash
+lsof -ti:8000,8010,8020  # 应返回 3 个 PID
+```
+
 ## Skill 一览
 
 ### 高级 Skill（组合流程）
@@ -112,7 +142,9 @@ echo '{"sequence":[{"arm":"home","hand":"open","delay":0.5}]}' | python run_skil
 | `capture_at_handover` | 移动到 handover 位拍照，VLM 识别物品 | 无 |
 | `pose_execute` | 执行位姿/动作序列（支持手势） | `sequence` 或 `command` |
 
-### 原子 Skill（单步操作，由高级 skill 组合调用）
+### 原子 Skill（单步操作，仅用于独立 CLI 调用）
+
+> **注意**：高级 skill（pick_and_place、fetch_from_user）内部已内联等效逻辑，不再实例化调用这些原子 skill，以避免创建额外的 TCP 连接。原子 skill 仅保留给独立 CLI 调用。
 
 | Skill | 说明 |
 |-------|------|
@@ -130,6 +162,22 @@ echo '{"sequence":[{"arm":"home","hand":"open","delay":0.5}]}' | python run_skil
 | `"person"` | 人机递物 | 平滑轨迹到 handover 位姿，松手 |
 | `"trash"` | 扔垃圾 | 移动到垃圾桶位姿，松手 |
 | `"desk"` | 放桌面 | 随机选择3个预设位姿之一 |
+
+## 位姿配置说明
+
+`robot_config.json` 中的预定义位姿分两处存储：
+
+| 存储位置 | 包含的位姿 | 查询方式 |
+|----------|-----------|----------|
+| `default_traj_js` 字段内 | `grasp1-4`、`place1-2` | `config.default_traj_js[name]` |
+| JSON 顶层 | `handover_pose`、`get_ready_to_handover_*`、`throw_to_trash_pose`、`desk_pose_*` | `config.robot_config.get(name)` |
+
+**统一查询方式**：始终使用 `config.get_pose(name)` 方法，该方法会先查顶层再查 `default_traj_js`，无需关心位姿存储在哪个位置。
+
+## 开发原则
+
+- **流水线执行中禁止跨 Skill 实例化**：高级 skill（如 `pick_and_place`、`fetch_from_user`）需要执行子任务（递送、扔垃圾、放桌面）时，必须使用 `self.control_arm` / `self.control_hand` 内联逻辑，而非 `new Skill()` 创建新实例。新实例会建立额外的 TCP 连接（arm 8010、hand 8000），引入延迟和连接冲突，破坏阶段间的无缝衔接。
+- **Skill 的 `run()` 方法必须先检查 `kwargs`**：`run_skill.py` 从 stdin 读取 JSON 后以 `kwargs` 传入。Skill 应先检查 `kwargs`（`if kwargs.get("field"): data = kwargs`），仅在 `kwargs` 为空时才回退到 `self.json_parser.get_command()`，否则 stdin 已被消费，parser 读不到数据。
 
 ## 项目结构
 
@@ -168,9 +216,11 @@ Smart-Pick-and-Place-in-the-Real-World/
 │   ├── pose_record.py        # 位姿录制（直连机械臂 SDK）
 │   └── get_current_pose.py   # 读取当前关节角度
 │
-├── twin_inference/           # 数字孪生推理（独立进程）
-├── anygrasp_sdk/             # AnyGrasp 抓取检测 SDK
-├── smart_pick_and_place_ws/  # ROS catkin 工作空间
+├── dependence/               # 第三方依赖
+│   ├── twin_inference/       # 数字孪生推理（独立进程）
+│   ├── anygrasp_sdk/         # AnyGrasp 抓取检测 SDK
+│   ├── yolo_world/           # YOLO-World 模型
+│   └── smart_pick_and_place_ws/ # ROS catkin 工作空间
 │
 ├── start1.bash               # 启动 ROS 服务
 ├── start2.bash               # 启动 Twin IK 服务

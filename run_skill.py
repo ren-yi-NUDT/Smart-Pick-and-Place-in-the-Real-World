@@ -17,6 +17,7 @@ def main():
     project_root = os.path.dirname(os.path.abspath(__file__))
     os.chdir(project_root)
     sys.path.insert(0, project_root)
+    sys.path.insert(0, os.path.join(project_root, "dependence"))
 
     parser = argparse.ArgumentParser(description="Robot Skill Runner")
     parser.add_argument("skill", help="Skill name to run (or 'list' to see all)")
@@ -56,6 +57,8 @@ def main():
         sys.exit(1)
     elif result is True:
         print("Skill execution succeeded")
+    elif isinstance(result, dict):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

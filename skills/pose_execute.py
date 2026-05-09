@@ -354,18 +354,23 @@ class PoseExecuteSkill(Skill):
         执行动作序列
 
         Args:
-            sequence_input: 序列 JSON 文件路径 或 JSON 字符串
-            is_file: True 表示 sequence_input 是文件路径，False 表示是 JSON 字符串
+            sequence_input: 序列 JSON 文件路径、JSON 字符串，或直接的列表/字典
+            is_file: True 表示 sequence_input 是文件路径，False 表示是 JSON 字符串或直接数据
 
         Returns:
             bool: 是否全部执行成功
         """
         try:
-            if is_file:
+            if isinstance(sequence_input, (list, dict)):
+                # 已经是解析好的数据
+                seq_data = sequence_input if isinstance(sequence_input, dict) else {"sequence": sequence_input}
+            elif is_file:
                 with open(sequence_input, "r") as f:
                     seq_data = json.load(f)
-            else:
+            elif isinstance(sequence_input, str):
                 seq_data = json.loads(sequence_input)
+                if isinstance(seq_data, list):
+                    seq_data = {"sequence": seq_data}
         except Exception as e:
             cprint(f"[pose_execute] 读取序列失败: {e}", "red")
             return False

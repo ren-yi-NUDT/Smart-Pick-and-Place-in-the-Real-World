@@ -9,7 +9,13 @@ from skills.base import Skill, register_skill
 class CaptureAtHandoverSkill(Skill):
     """Move to handover viewing pose, capture image, analyze with VLM."""
 
-    def run(self, **kwargs):
+    def run(self, reset_pose="grasp1", **kwargs):
+        """Move to handover viewing pose, capture image, analyze with VLM.
+
+        Args:
+            reset_pose: Pose name to return to after capture.
+                        Set to None to skip reset (for chained calls).
+        """
         cprint("=================== Capture at Handover ===================", "cyan")
 
         look_pose = self.config.robot_config.get("look_over_what_in_user_hand_pose")
@@ -43,5 +49,6 @@ class CaptureAtHandoverSkill(Skill):
         else:
             cprint("VLM analysis failed", "red")
 
-        self.control_arm(pose_type="grasp1", speed=30)
+        if reset_pose:
+            self.control_arm(pose_type=reset_pose, speed=30)
         return analysis

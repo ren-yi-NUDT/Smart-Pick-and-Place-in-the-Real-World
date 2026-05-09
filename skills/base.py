@@ -232,7 +232,10 @@ class Skill(ABC):
         try:
             arm = self.arm
             if pose_type is not None:
-                arm.move_to_named_pose(self.config.default_traj_js[pose_type], speed=speed)
+                pose = self.config.get_pose(pose_type)
+                if pose is None:
+                    raise KeyError(f"Pose '{pose_type}' not found in config")
+                arm.move_to_named_pose(pose, speed=speed)
             elif trajectory is not None:
                 arm.execute_trajectory(trajectory, speed=speed)
             return True
