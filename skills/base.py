@@ -62,32 +62,29 @@ class Skill(ABC):
         self._tf_broadcaster = None
 
     # ------------------------------------------------------------------
-    # Lazy property: arm client (socket to :8010)
+    # Lazy property: arm driver (via driver factory)
     # ------------------------------------------------------------------
     @property
     def arm(self):
-        """Return an initialized ArmController + connected socket client."""
+        """Return a connected arm driver (hardware-agnostic)."""
         if self._arm is None:
-            import socket
-            from core.config import HOST, ARM_PORT
-            from core.arm import ArmClient
-            client = ArmClient(HOST, ARM_PORT)
-            client.connect()
-            self._arm = client
+            from core.drivers.factory import create_arm_driver
+            driver = create_arm_driver(self.config.profile["arm"])
+            driver.connect()
+            self._arm = driver
         return self._arm
 
     # ------------------------------------------------------------------
-    # Lazy property: hand client (socket to :8000)
+    # Lazy property: hand driver (via driver factory)
     # ------------------------------------------------------------------
     @property
     def hand(self):
-        """Return a connected HandClient."""
+        """Return a connected hand driver (hardware-agnostic)."""
         if self._hand is None:
-            from core.config import HOST, HAND_PORT
-            from core.hand import HandClient
-            client = HandClient(HOST, HAND_PORT)
-            client.connect()
-            self._hand = client
+            from core.drivers.factory import create_hand_driver
+            driver = create_hand_driver(self.config.profile["hand"])
+            driver.connect()
+            self._hand = driver
         return self._hand
 
     # ------------------------------------------------------------------
@@ -97,9 +94,9 @@ class Skill(ABC):
     def twin(self):
         """Return a connected TwinClient."""
         if self._twin is None:
-            from core.config import HOST, TWIN_PORT
             from core.twin_client import TwinClient
-            client = TwinClient(HOST, TWIN_PORT)
+            p = self.config.profile["twin"]
+            client = TwinClient(p["host"], p["port"])
             client.connect()
             self._twin = client
         return self._twin

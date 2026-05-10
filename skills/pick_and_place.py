@@ -96,7 +96,7 @@ class PickAndPlaceSkill(Skill):
             if throw_pose is None:
                 cprint("T=================== Trash task failed: throw_to_trash_pose not found ===================", "red")
                 return False
-            joint_angles = [throw_pose[f"J{i}"] for i in range(1, 8)]
+            joint_angles = self.config.pose_to_list(throw_pose)
             self.control_arm(trajectory=np.array([joint_angles]), speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
@@ -112,7 +112,7 @@ class PickAndPlaceSkill(Skill):
             if desk_pose is None:
                 cprint(f"D=================== Desk task failed: {selected} not found ===================", "red")
                 return False
-            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 8)]
+            joint_angles = self.config.pose_to_list(desk_pose)
             self.control_arm(trajectory=np.array([joint_angles]), speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
@@ -240,7 +240,7 @@ class PickAndPlaceSkill(Skill):
         execution_grasping_pos_position = execution_grasping_pos[:3, 3]
         execution_grasping_pos_orientation = R.from_matrix(execution_grasping_pos[:3, :3]).as_quat()
 
-        default_traj_js_rad = [data / 180 * np.pi for data in self.config.default_traj_js[idx].values()]
+        default_traj_js_rad = self.config.get_default_js_rad(idx)
         cnfg = {
             "target_pose": [
                 [preparasion_grasping_pos_position[0], preparasion_grasping_pos_position[1], preparasion_grasping_pos_position[2],
@@ -249,7 +249,7 @@ class PickAndPlaceSkill(Skill):
                  execution_grasping_pos_orientation[0], execution_grasping_pos_orientation[1], execution_grasping_pos_orientation[2], execution_grasping_pos_orientation[3]],
             ],
             "current_js": default_traj_js_rad,
-            "struct": "left_arm",
+            "struct": self.config.arm_struct_name,
         }
         rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         state = rsp["value"]
@@ -323,11 +323,11 @@ class PickAndPlaceSkill(Skill):
         pos = placement_pos_arm[:3, 3]
         orn = R.from_matrix(placement_pos_arm[:3, :3]).as_quat()
 
-        default_js_rad = [v / 180 * np.pi for v in self.config.default_traj_js["grasp1"].values()]
+        default_js_rad = self.config.get_default_js_rad("grasp1")
         cnfg = {
             "target_pose": [[pos[0], pos[1], pos[2], orn[0], orn[1], orn[2], orn[3]]],
             "current_js": default_js_rad,
-            "struct": "left_arm",
+            "struct": self.config.arm_struct_name,
         }
         rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         if rsp["value"]:

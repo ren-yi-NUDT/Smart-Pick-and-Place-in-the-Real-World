@@ -28,19 +28,66 @@
            │
            ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                          core/ (基础设施)                          │
-│  config │ arm │ hand │ camera │ twin_client │ transforms          │
-│  perception │ vlm │ json_input                                   │
-└──────────┬──────────────┬────────────────────────────────────────┘
-           │              │
-     Socket Clients   Socket Servers
-     (8010/8000/8020)  (ROS Nodes + Twin Server)
+│                  core/ (基础设施 + 硬件抽象层)                      │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐     │
+│  │  core/drivers/  (硬件抽象)                                │     │
+│  │  ArmDriver (ABC)  ── RM75ArmDriver  (RM-75 7DOF)        │     │
+│  │  HandDriver (ABC) ── InspireHandDriver (Inspire 灵巧手)  │     │
+│  │  factory.py ← robot_profile.json → 具体驱动实例           │     │
+│  └──────────────────────────┬──────────────────────────────┘     │
+│                             │                                    │
+│  config │ camera │ twin_client │ transforms                      │
+│  perception │ vlm │ json_input                                    │
+└──────────┬──────────────────┬────────────────────────────────────┘
+           │                  │
+     Socket Clients     Socket Servers
+     (8010/8000/8020)    (ROS Nodes + Twin Server)
 ```
 
 **三进程分布式架构：**
 - **进程1 (start1.bash)**: ROS系统启动 — 机械臂驱动、相机节点、灵巧手节点
 - **进程2 (start2.bash)**: 数字孪生推理服务器 — PyBullet物理仿真，IK求解与碰撞检测
 - **主进程 (run_skill.py)**: 通过 CLI 调用技能
+
+### 硬件抽象层
+
+系统通过 **Driver 抽象层** 实现硬件解耦，使 Skill 层代码与具体机械臂/灵巧手型号无关：
+
+```
+robot_profile.json          ← 硬件参数配置（关节名、DOF、端口、URDF 路径等）
+    │
+    ▼
+core/config.py              ← 加载 profile，提供关节无关辅助方法
+    │                          pose_to_list() / get_default_js_rad() / arm_struct_name
+    ▼
+core/drivers/               ← 抽象接口 + 具体实现
+  ├── arm_driver.py          ArmDriver ABC (connect / move_to_named_pose / execute_trajectory)
+  ├── hand_driver.py         HandDriver ABC (connect / open / close / is_grasping)
+  ├── rm75_driver.py         RM-75 7-DOF 机械臂实现
+  ├── inspire_driver.py      Inspire 灵巧手实现
+  └── factory.py             create_arm_driver() / create_hand_driver()
+    │
+    ▼
+skills/base.py              ← 懒加载属性通过工厂创建 driver 实例
+```
+
+**设计要点：**
+
+1. **Profile 驱动**：`robot_profile.json` 声明硬件型号（`driver: "rm75"`）和参数（关节名、端口、URDF 路径），Config 加载后提供统一的关节无关接口
+2. **工厂模式**：`factory.py` 根据配置中的 `driver` 字段选择对应的 Driver 实现，Skill 层无需知道具体型号
+3. **零配置兼容**：`robot_profile.json` 不存在时，Config 自动从旧常量合成 RM-75 默认 profile，现有部署无需任何改动
+4. **关节无关**：Skill 中不再出现 `J1`-`J7` 或 `range(1, 8)` 等硬编码，统一使用 `config.pose_to_list()` 和 `config.get_default_js_rad()` 转换
+5. **孪生服务解耦**：Twin 服务器从 profile 读取 URDF 路径，struct 验证改为动态检查，不再硬编码机械臂型号
+
+### 跨臂适配流程
+
+适配新机械臂只需 4 步，**无需修改任何 Skill 代码**：
+
+1. **创建 Profile**：复制 `robot_profile.json`，修改关节名、DOF、端口、URDF 路径
+2. **实现 Driver**：在 `core/drivers/` 中新建实现类（如 `franka_driver.py`），实现 `ArmDriver` ABC
+3. **注册 Driver**：在 `factory.py` 的 `ARM_DRIVERS` 字典中注册
+4. **提供位姿和 URDF**：在 `robot_config.json` 中录制新臂的位姿，为新臂提供 PyBullet URDF
 
 ## 快速开始
 
@@ -163,28 +210,74 @@ lsof -ti:8000,8010,8020  # 应返回 3 个 PID
 | `"trash"` | 扔垃圾 | 移动到垃圾桶位姿，松手 |
 | `"desk"` | 放桌面 | 随机选择3个预设位姿之一 |
 
-## 位姿配置说明
+## 配置系统
 
-`robot_config.json` 中的预定义位姿分两处存储：
+系统使用两个互补的配置文件：
+
+### `robot_profile.json` — 硬件描述
+
+声明机械臂和灵巧手的型号、通信参数和运动学特征。切换硬件时只需更换此文件。
+
+```json
+{
+    "arm": {
+        "driver": "rm75",                    // driver 注册名
+        "service_name": "/right_arm/movement_control",
+        "struct_name": "left_arm",           // 孪生服务中的结构体名
+        "num_joints": 7,
+        "joint_names": ["J1","J2","J3","J4","J5","J6","J7"],
+        "host": "127.0.0.1", "port": 8010
+    },
+    "hand": {
+        "driver": "inspire",
+        "service_name": "/left_hand/movement_control",
+        "gestures": {"close": [0,0,0,460,0,0], "open": [1000,1000,1000,1000,1000,0]},
+        "host": "127.0.0.1", "port": 8000
+    },
+    "twin": {
+        "host": "127.0.0.1", "port": 8020,
+        "urdf_path": "dependence/.../easy_single_arm_bullet.urdf",
+        "robot_config_path": "dependence/.../robot_config.json"
+    },
+    "frames": {
+        "base_link": "base_link",
+        "camera_link": "cam_link_grasp",
+        "hand_effector": "L_hand_endeffector",
+        "arm_end_link": "Link7"
+    }
+}
+```
+
+### `robot_config.json` — 任务位姿
+
+存储具体任务中的关节位姿（抓取观测位、放置位、handover 位等），换臂后需要重新录制。
 
 | 存储位置 | 包含的位姿 | 查询方式 |
 |----------|-----------|----------|
 | `default_traj_js` 字段内 | `grasp1-4`、`place1-2` | `config.default_traj_js[name]` |
 | JSON 顶层 | `handover_pose`、`get_ready_to_handover_*`、`throw_to_trash_pose`、`desk_pose_*` | `config.robot_config.get(name)` |
 
-**统一查询方式**：始终使用 `config.get_pose(name)` 方法，该方法会先查顶层再查 `default_traj_js`，无需关心位姿存储在哪个位置。
+**统一查询方式**：始终使用 `config.get_pose(name)` 方法，该方法会先查顶层再查 `default_traj_js`。
 
-## 开发原则
+### Config 关节无关接口
 
-- **流水线执行中禁止跨 Skill 实例化**：高级 skill（如 `pick_and_place`、`fetch_from_user`）需要执行子任务（递送、扔垃圾、放桌面）时，必须使用 `self.control_arm` / `self.control_hand` 内联逻辑，而非 `new Skill()` 创建新实例。新实例会建立额外的 TCP 连接（arm 8010、hand 8000），引入延迟和连接冲突，破坏阶段间的无缝衔接。
-- **Skill 的 `run()` 方法必须先检查 `kwargs`**：`run_skill.py` 从 stdin 读取 JSON 后以 `kwargs` 传入。Skill 应先检查 `kwargs`（`if kwargs.get("field"): data = kwargs`），仅在 `kwargs` 为空时才回退到 `self.json_parser.get_command()`，否则 stdin 已被消费，parser 读不到数据。
+Skill 层通过 Config 提供的辅助方法访问位姿数据，不直接操作关节名：
+
+| 方法 | 说明 |
+|------|------|
+| `config.pose_to_list(pose_dict)` | 位姿 dict → 有序值列表（按 profile 中的 joint_names 排序） |
+| `config.get_default_js_rad(name)` | 获取指定位姿的弧度值列表（度→弧度） |
+| `config.arm_struct_name` | 孪生服务的结构体名（如 `"left_arm"`） |
+| `config.arm_num_joints` | 关节数量 |
+| `config.arm_joint_names` | 关节名列表 |
 
 ## 项目结构
 
 ```
 Smart-Pick-and-Place-in-the-Real-World/
 ├── run_skill.py              # 统一 CLI 入口
-├── robot_config.json         # 机器人配置（关节位姿、坐标系名称）
+├── robot_config.json         # 任务位姿配置（关节角度、坐标系名称）
+├── robot_profile.json        # 硬件描述配置（型号、端口、关节名、URDF 路径）
 ├── recorded_poses.json       # 录制的位姿库
 │
 ├── skills/                   # Skill-DB
@@ -202,9 +295,15 @@ Smart-Pick-and-Place-in-the-Real-World/
 │   └── desk_place.py         # 原子：放桌面
 │
 ├── core/                     # 共享基础设施
-│   ├── config.py             # 集中配置管理
-│   ├── arm.py                # 机械臂 Socket 客户端 (:8010)
-│   ├── hand.py               # 灵巧手 Socket 客户端 (:8000)
+│   ├── config.py             # 集中配置管理 + profile 加载 + 关节无关辅助方法
+│   ├── drivers/              # 硬件抽象层
+│   │   ├── arm_driver.py     # ArmDriver ABC
+│   │   ├── hand_driver.py    # HandDriver ABC
+│   │   ├── rm75_driver.py    # RM-75 机械臂实现
+│   │   ├── inspire_driver.py # Inspire 灵巧手实现
+│   │   └── factory.py        # Driver 工厂（根据 profile 创建实例）
+│   ├── arm.py                # RM-75 Socket 客户端 (底层, :8010)
+│   ├── hand.py               # Inspire Socket 客户端 (底层, :8000)
 │   ├── camera.py             # RealSense RGB-D 采集
 │   ├── twin_client.py        # 数字孪生客户端 (:8020)
 │   ├── transforms.py         # ROS TF 坐标变换
@@ -241,14 +340,22 @@ class MySkill(Skill):
         pass
 ```
 
-硬件资源（arm、hand、camera、twin、perception、vlm）通过 property 懒加载，首次访问时才建立连接。
+硬件资源通过 property 懒加载，首次访问时由 `factory.py` 根据 `robot_profile.json` 创建对应的 Driver 实例。Skill 层看到的 `self.arm` 是 `ArmDriver` 抽象接口，不依赖具体型号。
 
 ## 添加新 Skill
 
 1. 在 `skills/` 下创建 `my_skill.py`
 2. 继承 `Skill`，添加 `@register_skill("my_skill")`
-3. 实现 `run(self, **kwargs)`
+3. 实现 `run(self, **kwargs)`，使用 `config.get_pose()` / `config.pose_to_list()` 访问位姿
 4. 完成。调用：`echo '{"key":"value"}' | python run_skill.py my_skill`
+
+## 添加新机械臂
+
+1. 在 `core/drivers/` 中创建 `my_arm_driver.py`，实现 `ArmDriver` ABC
+2. 在 `factory.py` 中注册：`ARM_DRIVERS["my_arm"] = MyArmDriver`
+3. 创建 `robot_profile.json`，设置 `"driver": "my_arm"` 和对应的关节参数
+4. 提供新臂的 URDF（PyBullet 仿真用），在 `robot_config.json` 中录制新臂的任务位姿
+5. 如需新手/夹爪，同理实现 `HandDriver` 并注册
 
 ## 通信协议
 
@@ -294,6 +401,12 @@ python tools/get_current_pose.py
 | 机械臂 | RM75-B (7DOF) | 192.168.1.19:8010 |
 | 灵巧手 | Inspire Hand | 192.168.11.209:8000 (Modbus) |
 | 相机 | RealSense D455 | USB, 640x480@30fps |
+
+## 开发原则
+
+- **流水线执行中禁止跨 Skill 实例化**：高级 skill（如 `pick_and_place`、`fetch_from_user`）需要执行子任务（递送、扔垃圾、放桌面）时，必须使用 `self.control_arm` / `self.control_hand` 内联逻辑，而非 `new Skill()` 创建新实例。新实例会建立额外的 TCP 连接（arm 8010、hand 8000），引入延迟和连接冲突，破坏阶段间的无缝衔接。
+- **Skill 的 `run()` 方法必须先检查 `kwargs`**：`run_skill.py` 从 stdin 读取 JSON 后以 `kwargs` 传入。Skill 应先检查 `kwargs`（`if kwargs.get("field"): data = kwargs`），仅在 `kwargs` 为空时才回退到 `self.json_parser.get_command()`，否则 stdin 已被消费，parser 读不到数据。
+- **位姿操作必须使用 Config 辅助方法**：不直接访问关节名（`pose["J1"]`）或 `range(1,8)` 循环，使用 `config.pose_to_list()`、`config.get_default_js_rad()`、`config.arm_struct_name` 等关节无关接口，确保 Skill 代码可跨臂复用。
 
 ## 依赖
 

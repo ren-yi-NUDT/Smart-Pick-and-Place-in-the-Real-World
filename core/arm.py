@@ -42,9 +42,11 @@ class ArmClient:
 
     SERVICE_NAME = "/right_arm/movement_control"
 
-    def __init__(self, host: str = HOST, port: int = ARM_PORT):
+    def __init__(self, host: str = HOST, port: int = ARM_PORT,
+                 joint_names: list = None):
         self.host = host
         self.port = port
+        self.joint_names = joint_names or ["J1", "J2", "J3", "J4", "J5", "J6", "J7"]
         self.sock = None   # type: socket.socket | None
         self._cmds = []     # type: list[dict]
 
@@ -136,7 +138,8 @@ class ArmClient:
     def execute_trajectory(self, trajectory, speed: int = 20) -> bool:
         """Execute a list of joint-space waypoints.
 
-        *trajectory* is an iterable of ``[J1, J2, J3, J4, J5, J6, J7]``.
+        *trajectory* is an iterable of ``[j1, j2, ...]`` arrays whose length
+        must match ``self.joint_names``.
         """
         try:
             traj_list = list(trajectory)
@@ -144,14 +147,8 @@ class ArmClient:
             self.reset_cmd()
             self.start_cmd()
             for wp in traj_list:
-                self.add_js_cmd(
-                    {
-                        "J1": wp[0], "J2": wp[1], "J3": wp[2],
-                        "J4": wp[3], "J5": wp[4], "J6": wp[5], "J7": wp[6],
-                    },
-                    speed=speed,
-                    block=True,
-                )
+                joint_dict = {name: wp[i] for i, name in enumerate(self.joint_names)}
+                self.add_js_cmd(joint_dict, speed=speed, block=True)
             self.send_cmds()
             return True
         except Exception as e:

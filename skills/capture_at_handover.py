@@ -18,12 +18,12 @@ class CaptureAtHandoverSkill(Skill):
         """
         cprint("=================== Capture at Handover ===================", "cyan")
 
-        look_pose = self.config.robot_config.get("look_over_what_in_user_hand_pose")
+        look_pose = self.config.get_pose("look_over_what_in_user_hand_pose")
         if look_pose is None:
             cprint("错误: robot_config.json 中没有定义 look_over_what_in_user_hand_pose", "red")
             return None
 
-        joint_angles = [look_pose[f"J{i}"] for i in range(1, 8)]
+        joint_angles = self.config.pose_to_list(look_pose)
         import numpy as np
         self.control_arm(trajectory=np.array([joint_angles]), speed=15)
         time.sleep(1)

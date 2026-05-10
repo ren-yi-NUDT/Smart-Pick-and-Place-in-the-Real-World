@@ -30,16 +30,13 @@ class FetchFromUserSkill(Skill):
         cprint(f"=================== 2. Target container: {container} ===================", "cyan")
 
         # ---- Step 2: Move to receive position (handover_pose) ----
-        handover_pose = self.config.robot_config.get("handover_pose")
+        handover_pose = self.config.get_pose("handover_pose")
         if handover_pose is None:
             cprint("Error: handover_pose not defined in robot_config.json", "red")
             return False
 
         cprint("=================== Moving to receive pose (handover) ===================", "cyan")
-        joint_angles = [
-            handover_pose["J1"], handover_pose["J2"], handover_pose["J3"],
-            handover_pose["J4"], handover_pose["J5"], handover_pose["J6"], handover_pose["J7"]
-        ]
+        joint_angles = self.config.pose_to_list(handover_pose)
         trajectory = np.array([joint_angles])
         self.control_arm(trajectory=trajectory, speed=15)
         cprint("=================== Reached receive pose ===================", "green")
@@ -73,7 +70,7 @@ class FetchFromUserSkill(Skill):
             if throw_pose is None:
                 cprint("=================== Trash task failed: throw_to_trash_pose not found ===================", "red")
                 return False
-            joint_angles = [throw_pose[f"J{i}"] for i in range(1, 8)]
+            joint_angles = self.config.pose_to_list(throw_pose)
             self.control_arm(trajectory=np.array([joint_angles]), speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
@@ -90,7 +87,7 @@ class FetchFromUserSkill(Skill):
             if desk_pose is None:
                 cprint(f"=================== Desk task failed: {selected} not found ===================", "red")
                 return False
-            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 8)]
+            joint_angles = self.config.pose_to_list(desk_pose)
             self.control_arm(trajectory=np.array([joint_angles]), speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
@@ -177,11 +174,11 @@ class FetchFromUserSkill(Skill):
         pos = placement_pos_arm[:3, 3]
         orn = R.from_matrix(placement_pos_arm[:3, :3]).as_quat()
 
-        default_js_rad = [v / 180 * np.pi for v in self.config.default_traj_js["grasp1"].values()]
+        default_js_rad = self.config.get_default_js_rad("grasp1")
         cnfg = {
             "target_pose": [[pos[0], pos[1], pos[2], orn[0], orn[1], orn[2], orn[3]]],
             "current_js": default_js_rad,
-            "struct": "left_arm",
+            "struct": self.config.arm_struct_name,
         }
         rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         if rsp["value"]:

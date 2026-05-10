@@ -35,17 +35,33 @@ def visualize_pose(pos, orn, d = 1):
 SUPPORTED_TWIN_SRV_TYPE = ["reachability_check", "collision_check", "IK_calculation","trajectory_generation" , "trajectory_generation2"]
 
 class TwinTest2(World):
-    def __init__(self, vis=True):
+    def __init__(self, vis=True, profile_path=None):
         self.vis = vis
         self.camera_refresh_freq = 50
-        urdf_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf/SingleArm")
-        self.robot_path = os.path.join(urdf_dir, "easy_single_arm_bullet.urdf")
-        self.robot_config_path = os.path.join(urdf_dir, "robot_config.json")
-        self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0), robot_path = self.robot_path, config_path = self.robot_config_path, fixed_robot = True, vis=self.vis)        
+
+        # Load robot paths from profile (fallback to RM-75 defaults)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if profile_path is None:
+            profile_path = os.path.join(project_root, "robot_profile.json")
+
+        if os.path.isfile(profile_path):
+            with open(profile_path, "r") as f:
+                profile = json.load(f)
+            twin_cfg = profile.get("twin", {})
+            self.robot_path = os.path.join(project_root, twin_cfg.get("urdf_path", ""))
+            self.robot_config_path = os.path.join(project_root, twin_cfg.get("robot_config_path", ""))
+            server_port = twin_cfg.get("port", 8020)
+        else:
+            urdf_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf/SingleArm")
+            self.robot_path = os.path.join(urdf_dir, "easy_single_arm_bullet.urdf")
+            self.robot_config_path = os.path.join(urdf_dir, "robot_config.json")
+            server_port = 8020
+
+        self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0), robot_path = self.robot_path, config_path = self.robot_config_path, fixed_robot = True, vis=self.vis)
 
         self.srv_name = "twin_inference"
         self.server_ip = '0.0.0.0'
-        self.server_port = 8020
+        self.server_port = server_port
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.server_ip, self.server_port))
@@ -159,7 +175,7 @@ class TwinTest2(World):
         struct_name = config["struct"]
         target_pose = config["target_pose"]
         curr_js = config["current_js"]
-        if struct_name not in ["left_arm", "right_arm"]:
+        if struct_name not in self.robot.robot_structs:
             rospy.logwarn(f"TWIN INFERENCER 'reachaibility' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
             return 0, {}
         
@@ -201,7 +217,7 @@ class TwinTest2(World):
         target_pose = config["target_pose"]
         curr_js = config["current_js"]
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
-        if struct_name not in ["left_arm", "right_arm"]:
+        if struct_name not in self.robot.robot_structs:
             rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
             return 0, {}
         
@@ -315,7 +331,7 @@ class TwinTest2(World):
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
         z_min_threshold = config["z_min_threshold"] if "z_min_threshold" in config else 0.10  # 关节最低高度阈值
-        if struct_name not in ["left_arm", "right_arm"]:
+        if struct_name not in self.robot.robot_structs:
             rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
             return 0, {}
         
@@ -473,7 +489,7 @@ class TwinTest2(World):
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
         
-        if struct_name not in ["left_arm", "right_arm"]:
+        if struct_name not in self.robot.robot_structs:
             rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT SUPPORT CURRENT STRUCT: {struct_name}")
             return 0, {}, [], [] # 修正返回格式以匹配下文
 

@@ -24,15 +24,17 @@ from termcolor import cprint
 
 from core.config import HOST, HAND_PORT, HAND_CLOSE, HAND_OPEN
 
-SERVICE_SRC = "/left_hand/movement_control"
+_DEFAULT_self.service_src = "/left_hand/movement_control"
 
 
 class HandClient:
     """TCP client for the dexterous hand."""
 
-    def __init__(self, host: str = HOST, port: int = HAND_PORT):
+    def __init__(self, host: str = HOST, port: int = HAND_PORT,
+                 service_src: str = _DEFAULT_self.service_src):
         self.host = host
         self.port = port
+        self.service_src = service_src
         self.sock = None   # type: socket.socket | None
         self._hand_config = {
             "close": list(HAND_CLOSE),
@@ -73,17 +75,17 @@ class HandClient:
     # ------------------------------------------------------------------
     def open(self) -> dict:
         """Open the hand fully."""
-        cmd = {"src": SERVICE_SRC, "type": "set", "cmd": list(self._hand_config["open"])}
+        cmd = {"src": self.service_src, "type": "set", "cmd": list(self._hand_config["open"])}
         return self._send_cmd(cmd)
 
     def close(self) -> dict:
         """Close the hand (grasp gesture)."""
-        cmd = {"src": SERVICE_SRC, "type": "set", "cmd": list(self._hand_config["close"])}
+        cmd = {"src": self.service_src, "type": "set", "cmd": list(self._hand_config["close"])}
         return self._send_cmd(cmd)
 
     def get_state(self) -> dict:
         """Query the current hand motor state."""
-        cmd = {"src": SERVICE_SRC, "type": "get"}
+        cmd = {"src": self.service_src, "type": "get"}
         return self._send_cmd(cmd)
 
     def is_grasping(self) -> bool:

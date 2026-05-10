@@ -60,10 +60,7 @@ class GraspSkill(Skill):
         self.point_cloud = None
         self.self_pose_matrix = None
         self.final_grasp_pose_data = []
-        self.default_traj_js_rad = [
-            v / 180 * np.pi
-            for v in self.config.default_traj_js["grasp1"].values()
-        ]
+        self.default_traj_js_rad = self.config.get_default_js_rad("grasp1")
 
     # ------------------------------------------------------------------
     # AnyGrasp pose generation
@@ -302,7 +299,9 @@ class GraspSkill(Skill):
     # Twin-service helpers
     # ------------------------------------------------------------------
     def create_send_config_2(self, prep_pos, prep_orn, exec_pos, exec_orn,
-                             current_js_pose=None, struct="left_arm"):
+                             current_js_pose=None, struct=None):
+        if struct is None:
+            struct = self.config.arm_struct_name
         if current_js_pose is None:
             self._config = {
                 "target_pose": [

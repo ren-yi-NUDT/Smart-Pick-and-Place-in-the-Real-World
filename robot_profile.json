@@ -1,0 +1,33 @@
+{
+    "arm": {
+        "driver": "rm75",
+        "service_name": "/right_arm/movement_control",
+        "struct_name": "left_arm",
+        "num_joints": 7,
+        "joint_names": ["J1", "J2", "J3", "J4", "J5", "J6", "J7"],
+        "host": "127.0.0.1",
+        "port": 8010
+    },
+    "hand": {
+        "driver": "inspire",
+        "service_name": "/left_hand/movement_control",
+        "gestures": {
+            "close": [0, 0, 0, 460, 0, 0],
+            "open": [1000, 1000, 1000, 1000, 1000, 0]
+        },
+        "host": "127.0.0.1",
+        "port": 8000
+    },
+    "twin": {
+        "host": "127.0.0.1",
+        "port": 8020,
+        "urdf_path": "dependence/smart_pick_and_place_ws/src/rm_description/urdf/SingleArm/easy_single_arm_bullet.urdf",
+        "robot_config_path": "dependence/smart_pick_and_place_ws/src/rm_description/urdf/SingleArm/robot_config.json"
+    },
+    "frames": {
+        "base_link": "base_link",
+        "camera_link": "cam_link_grasp",
+        "hand_effector": "L_hand_endeffector",
+        "arm_end_link": "Link7"
+    }
+}

@@ -76,7 +76,11 @@ class ErdaijiRobot:
         self.collision_threshold = 0.001
         self.vis = vis
         
-        del self.robot_config['left_hand']
+        # Remove non-arm structs (hands, grippers, heads)
+        non_arm_keys = [k for k, v in self.robot_config.items()
+                        if isinstance(v, dict) and v.get("struct_type") != "arm"]
+        for k in non_arm_keys:
+            del self.robot_config[k]
         self.struct_list = list(self.robot_config.keys())
         rospy.loginfo(f"ROBOT STRUCT LIST: {self.struct_list}")
         
