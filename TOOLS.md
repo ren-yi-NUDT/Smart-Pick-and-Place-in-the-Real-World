@@ -93,7 +93,7 @@ sock.close()
 ### 获取图片 (一般方案是调用脚本获取桌面图片或用户手中图片)
 ```python
 # 快速获取单帧 RGB-D
-from camera import RealSenseCapture
+from core.camera import RealSenseCapture
 cam = RealSenseCapture(width=640, height=480, fps=30, save_path="./log")
 rgb, depth = cam.get_rgbd()
 # 自动保存 rgb.png 和 depth.png 到 save_path
@@ -130,6 +130,7 @@ image(prompt="列出图片中所有物品，包括：名称、位置（左/中/�
 
 ```bash
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py capture_at_handover
 ```
@@ -138,6 +139,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 
 ```bash
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py look_around
 ```
@@ -154,11 +156,11 @@ image(prompt="列出图中所有物品及其位置", image="/path/to/rgb.png")
 
 | 服务 | 端口 | 协议 | 说明 |
 |------|------|------|------|
-| 灵巧手 | 8000 | JSON | ROS 节点 (start1.bash) |
-| 机械臂 | 8010 | JSON | ROS 节点 (start1.bash) |
-| Twin规划 | 8020 | 长度头+JSON | twin.py (start2.bash) |
+| 灵巧手 | 8000 | JSON | ROS 节点 (start.bash 终端1) |
+| 机械臂 | 8010 | JSON | ROS 节点 (start.bash 终端1) |
+| Twin规划 | 8020 | 长度头+JSON | twin.py (start.bash 终端2) |
 
-**注意**: start3.bash 已废弃，改用 `run_skill.py` 作为主进程入口
+**启动服务**: `bash start.bash`
 
 ### anygrasp
 - **Python**: 3.9

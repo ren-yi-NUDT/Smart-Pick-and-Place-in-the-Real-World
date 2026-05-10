@@ -133,7 +133,7 @@ echo '{"command": "list"}' | \
 
 ## 前置条件
 
-- **ROS 服务已启动**: `bash start1.bash` (灵巧手 8000, 机械臂 8010)
+- **ROS 服务已启动**: `bash start.bash`
 - **机械臂已连接**: IP 192.168.1.19
 
 ## 安全规则

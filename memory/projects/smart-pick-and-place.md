@@ -7,14 +7,10 @@
 
 ## 快速启动
 ```bash
-# 终端1
-conda activate anygrasp && bash start1.bash
+bash start.bash  # 自动在2个终端启动 ROS服务(8000,8010) + Twin IK(8020)
 
-# 终端2
-conda activate anygrasp && bash start2.bash
-
-# 终端3
-conda activate anygrasp && python planner.py
+# 执行技能
+conda activate anygrasp && python run_skill.py <skill_name>
 ```
 
 ## 架构

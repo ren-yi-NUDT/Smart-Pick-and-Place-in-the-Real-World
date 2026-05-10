@@ -16,13 +16,13 @@ lsof -ti:8000,8010,8020  # 应返回3个PID
 
 # 2. 执行（所有模式统一入口）
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"object":"orange","container":"green bowl"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pick_and_place
 ```
 
 **服务启动** (如果未运行):
-- 终端1: `bash start1.bash` (8000灵巧手, 8010机械臂)
-- 终端2: `bash start2.bash` (8020 Twin IK)
+- `bash start.bash` (自动在2个终端启动所有服务)
 
 ## JSON 格式
 
@@ -42,6 +42,7 @@ echo '{"object":"orange","container":"green bowl"}' | /home/zz/anaconda3/envs/an
 
 ### fetch_from_user (从用户接收)
 ```bash
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 echo '{"container":"pink plate"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py fetch_from_user
 ```
 - **只需要 container**，物品由用户递给机械臂
@@ -59,15 +60,87 @@ echo '{"container":"pink plate"}' | /home/zz/anaconda3/envs/anygrasp/bin/python 
 ## 其它 skill 调用
 
 ```bash
-# 看桌上有什么
+# 看桌上有什么（执行后回到 grasp1 位）
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py look_around
 
-# 看用户手里有什么
+# 看用户手里有什么（执行后回到 grasp1 位）
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py capture_at_handover
+```
+
+> **注意**：`look_around` 和 `capture_at_handover` 执行后会直接输出 VLM 模型的分析结果（桌面上有什么物品及位置 / 用户手里拿的什么），**无需再用 image 工具重新分析**。直接使用 stdout 中的分析结果即可。
 
 # 查看所有可用 skill
 python3 run_skill.py list
 ```
+
+### 可组合调用（reset_pose 参数）
+
+`look_around` 和 `capture_at_handover` 支持 `reset_pose` 参数，用于技能链式调用：
+
+- `reset_pose="grasp1"`（默认）：执行后复位到指定位姿
+- `reset_pose=null`：跳过复位，由后续技能决定机械臂位置
+
+```bash
+# 示例：环顾后不复位，接着做其他操作
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+echo '{"reset_pose": null}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py look_around
+```
+
+## 原子技能
+
+> **重要：这些是原子技能，除非组合技能不可用的情况下，尽量使用组合技能 `pick_and_place` 来完成任务。**
+> 原子技能只完成单一步骤，不会自动衔接后续动作。
+
+### grasp — 单独抓取
+
+```bash
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+echo '{"object":"peach"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py grasp
+```
+- **object** (必需): 目标物品名称 (YOLO-World 类别名)
+- 流程：遍历观测位 → YOLO 检测 + AnyGrasp → 生成轨迹 → 抓取 → 握住
+- 抓取成功后物品留在手中，**不会自动放置**
+
+### trash — 扔垃圾
+
+```bash
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+echo '{"object":"wrapper","container":"trash"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py trash
+```
+- **前提**：物品已被 grasp 抓住
+- 流程：移动到 trash 位姿 → 松手 → 物品掉入垃圾桶区域
+
+### desk_place — 放桌面
+
+```bash
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+echo '{"object":"cup","container":"desk"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py desk_place
+```
+- **前提**：物品已被 grasp 抓住
+- 流程：随机选择 desk_pose_1/2/3 → 移动 → 松手
+
+### handover — 递给用户
+
+```bash
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+echo '{"object":"bottle","container":"person"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py handover
+```
+- **前提**：物品已被 grasp 抓住
+- 流程：经中间点平滑运动到 handover 位 → 松手
+- **注意**：手臂前方需有人接住
+
+### place — 放到容器
+
+```bash
+source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+echo '{"object":"orange","container":"green bowl"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py place
+```
+- **前提**：物品已被 grasp 抓住
+- 流程：YOLO 检测容器 → 计算容器 3D 位置 → Twin 轨迹 → 移动 → 松手
+
+## 判断流程
 
 ### 抓取请求判断流程
 1. **用户要求抓取物品** → 先回想记忆中桌上有什么
@@ -109,19 +182,6 @@ python3 run_skill.py list
 | `No grasp points found` | 跟用户说抓取失败，请求用户帮助 |
 | `Pose not reachable` | 系统自动重试，无需干预 |
 
-## 代码库架构
-
-```
-/home/zz/Code/Smart-Pick-and-Place-in-the-Real-World/
-├── core/                    # 共享基础设施
-├── skills/                  # 所有 skill 实现
-├── tools/                   # 开发工具 (pose_record, get_current_pose)
-├── run_skill.py             # 统一入口：python run_skill.py <skill名>
-├── twin_inference/          # 数字孪生 (独立进程)
-├── anygrasp_sdk/            # 抓取检测 SDK
-├── smart_pick_and_place_ws/ # ROS 工作空间
-└── robot_config.json        # 机器人配置
-```
 
 ## 其它
 

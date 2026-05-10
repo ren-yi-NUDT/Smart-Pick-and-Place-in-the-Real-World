@@ -16,8 +16,7 @@
 
 **架构**:
 ```
-终端1: bash start1.bash  # ROS服务 (8000灵巧手, 8010机械臂)
-终端2: bash start2.bash  # Twin IK服务 (8020)
+终端1+2: bash start.bash  # 自动在2个终端启动 ROS服务(8000,8010) + Twin IK(8020)
 执行: echo '{"object":"orange","container":"green bowl"}' | python run_skill.py pick_and_place
 ```
 
