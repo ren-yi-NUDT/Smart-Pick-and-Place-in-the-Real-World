@@ -15,16 +15,14 @@
 
 ## 运行系统
 
-系统需要通过 `start.bash` 启动 3 个并发进程：
+系统需要通过 `start.bash` 启动 2 个并发进程：
 
 ```bash
-./start.bash  # 在 3 个 gnome-terminal 中启动所有脚本
+./start.bash  # 在 2 个 gnome-terminal 中启动 ROS bringup 和 Twin IK 服务
 ```
 
-或单独运行：
-1. **start1.bash**：ROS bringup — 构建工作空间并启动 ROS 节点（机器人驱动、相机、灵巧手）
-2. **start2.bash**：孪生推理服务 — PyBullet 仿真用于逆运动学/轨迹生成（端口 8020）
-3. **start3.bash**：主规划器 — 调用 `run_skill.py` 执行技能
+- **终端1**：ROS bringup — 构建工作空间并启动 ROS 节点（机器人驱动、相机、灵巧手）
+- **终端2**：孪生推理服务 — PyBullet 仿真用于逆运动学/轨迹生成（端口 8020）
 
 **Conda 环境**：`anygrasp`（Python 3.9）
 
@@ -35,7 +33,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 
 **硬件 IP 地址**：
 - 机械臂：192.168.1.19
-- 灵巧手：192.168.11.210
+- 灵巧手：192.168.11.209
 
 ## 系统架构
 
@@ -153,9 +151,7 @@ Smart-Pick-and-Place-in-the-Real-World/
 │   ├── yolo_world/           # YOLO-World 模型
 │   └── smart_pick_and_place_ws/ # ROS catkin 工作空间
 │
-├── start1.bash               # 启动 ROS 服务
-├── start2.bash               # 启动 Twin IK 服务
-└── start.bash                # 一键启动全部
+├── start.bash                # 一键启动 ROS + Twin IK
 ```
 
 ## 关键文件

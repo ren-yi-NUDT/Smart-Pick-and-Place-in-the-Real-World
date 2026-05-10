@@ -11,7 +11,7 @@
 
 # since this file is sourced either use the provided _CATKIN_SETUP_DIR
 # or fall back to the destination set at configure time
-: ${_CATKIN_SETUP_DIR:=/home/zz/Code/Smart-Pick-and-Place-in-the-Real-World/smart_pick_and_place_ws/devel}
+: ${_CATKIN_SETUP_DIR:=/home/zz/Code/Smart-Pick-and-Place-in-the-Real-World/dependence/smart_pick_and_place_ws/devel}
 _SETUP_UTIL="$_CATKIN_SETUP_DIR/_setup_util.py"
 unset _CATKIN_SETUP_DIR
 
