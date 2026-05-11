@@ -384,3 +384,98 @@ Smart-Pick-and-Place-in-the-Real-World/
 - **Skill 的 `run()` 必须先检查 `kwargs` 再回退 stdin**：`run_skill.py` 从 stdin 读取 JSON 后以 `kwargs` 传入。Skill 应先检查 `kwargs`（`if kwargs.get("field"): data = kwargs`），仅在 `kwargs` 为空时才回退到 `self.json_parser.get_command()`。否则 stdin 已被消费，parser 读不到数据。
 - **位姿操作必须使用 Config 辅助方法**：不要直接访问关节名（`pose["J1"]`、`range(1, 8)`）或 `config.robot_config`，使用 `config.get_pose()`、`config.pose_to_list()`、`config.get_default_js_rad()`、`config.arm_struct_name` 等关节无关接口，确保 Skill 代码可跨臂复用。
 - **硬件访问通过 Driver 抽象层**：`self.arm` 和 `self.hand` 是 `ArmDriver` / `HandDriver` 抽象接口，不要直接导入 `ArmClient` 或 `HandClient`。适配新硬件时在 `core/drivers/` 中新增实现并注册到 `factory.py`。
+
+## 姊妹项目：IgrapeRobot3
+
+IgrapeRobot3（`/home/zz/Code/IgrapeRobot3/IgrapeRobot3-task_planner_v3.0/`）是本项目的姊妹项目，控制的是**天义(Tianyi)全尺寸人形机器人**，用于博物馆展厅导览讲解。两个项目共享部分硬件生态（Inspire 灵巧手、AnyGrasp 抓取、PyBullet 仿真），但架构思路不同。
+
+### 定位差异
+
+| 方面 | 本项目 (Smart-Pick-and-Place) | IgrapeRobot3 |
+|------|-------------------------------|-------------|
+| 硬件 | RM-75 桌面级 7DOF 单臂 | 天义人形：双 7DOF 臂 + 头 + 腰 + 腿 + 轮式底盘 |
+| ROS 版本 | ROS1 Noetic | ROS2 (Humble) |
+| 通信 | 原始 TCP socket (端口 8000/8010/8020) | ROS2 Action + Topic |
+| 架构 | Skill-DB + 统一 CLI 入口 | Agent 编排 + ActionSequence |
+| 任务 | 桌面抓取放置 | 博物馆导览（导航 + 讲解 + 抓取展品） |
+| 语音 | 无 | 完整 KWS+ASR+LLM+TTS 管线 |
+| 导航 | 无 | Slamware 轮式底盘自主导航 |
+| 硬件抽象 | Driver 抽象层（可跨臂适配） | 直接耦合硬件（关节 ID 硬编码） |
+
+### IgrapeRobot3 架构
+
+```
+Agent (agent/agent_node/agent_node.py)     ← 总控层，唯一决策者
+  ├─ ActionSequence runner → 编排硬件动作和音频播放
+  ├─ send_command() → ROS2 ActionClient → 各硬件 ActionServer
+  └─ get_state_callback() → 监听 lmam 语音指令，触发导航/讲解/抓取
+        │
+   ┌────┼────────────┬──────────────┐
+   ▼    ▼            ▼              ▼
+Chassis  Body        LMAM          LeftArm (预留)
+```
+
+- **Chassis** (`chassis/chassis_node/`): Slamware ROS SDK 轮式底盘，订阅 `/odom`，发布 `/move_to`。按预设 POI 坐标 (`record_poi.yaml`) 导航到 8 个 Landmark
+- **Body** (`body/body_node/`): 全身 22 个关节 + 双手 Inspire。关节按部位分组发布到 4 个 topic (`/head|arm|waist|leg/cmd_pos`)。包含 `@command` 装饰器注册的动作回调：`random_action`、`certain_action`、`flip_slide`、`grasp` 等
+- **LMAM** (`lmam/lmam_node/`): LLM-based Multi-modal Agent Module，语音交互核心
+
+### LMAM 语音交互管线
+
+```
+麦克风 → KWS 唤醒("小云小云") → ASR (faster-whisper-large-v3) → LLM 意图分类
+                                                                    │
+                                              ┌──────────────────────┤
+                                              ▼                      ▼
+                                         意图 A: 导航指令        意图 B: 知识问答
+                                         /move_to /manipulate    FAISS 向量检索
+                                         /leave /resume          (bge-large-zh-v1.5)
+                                              │                      │
+                                              ▼                      ▼
+                                         ROS2 StateMsg           TTS 合成播放
+                                         → Agent 执行            (MeloTTS, 端口 9009)
+```
+
+- **LLM 服务**: vLLM 本地部署在 `192.168.3.11:8088`，通过 OpenAI 兼容 API 调用
+- **意图分类** (SYSTEM_PROMPT0): A=指令, B=知识问答, C=闲聊
+- **知识库**: `museum.txt` → FAISS 向量库 (bge-large-zh-v1.5)，RAG 增强问答
+- **TTS**: MeloTTS 中文，通过 WebSocket (端口 9009) 推流到 Orin 播放
+- **状态机**: IDLE(等待唤醒) ↔ ACTIVE(语音交互)，支持讲解暂停/续播
+
+### 抓取子系统 (`body/utils_body/smart_grasp_planner.py`)
+
+与本项目思路相似但实现独立：
+
+- **PyBullet DIRECT 模式**（非 socket 服务），加载 `tianyi_10x_urdf_backup.urdf`
+- **3 段轨迹规划**：Approach1 (Y 偏移 10cm) → Approach2 (SLERP 旋转逼近) → Final (插入抓取)
+- **IK 求解**：`p.calculateInverseKinematics` + 自碰撞检测 (`has_self_collision`)
+- **选择策略**：优先最小旋转角度，其次最大垂直度 (grasp_dir_z dot [0,0,-1])
+- **AnyGrasp 服务**：远程 `ws://192.168.3.11:8775`
+- **相机服务**：Orin 端 `ws://192.168.3.16:8765`
+
+### 关节 ID 体系
+
+天义人形使用数字 ID 编码关节，按部位分段：
+
+| ID 范围 | 部位 | 关节 |
+|---------|------|------|
+| 1-9 | 头部 | roll(1), pitch(2), yaw(3) |
+| 11-17 | 左臂 | 7DOF (肩 pitch/roll/yaw → 肘 pitch/yaw → 腕 pitch/roll) |
+| 21-27 | 右臂 | 7DOF (同上) |
+| 31-32 | 腰部 | yaw(31), pitch(32) |
+| 51-52 | 腿部 | 两个 pitch 关节 |
+| 101-199 | 左手 | Inspire 手指 (实际 ID = 数字-100) |
+| 201-299 | 右手 | Inspire 手指 (实际 ID = 数字-200) |
+
+### 与本项目的共性技术
+
+1. **AnyGrasp + PyBullet IK 抓取管线**：两个项目都使用 AnyGrasp 生成抓取位姿，PyBullet 做逆运动学和碰撞检测，但本项目将 PyBullet 作为独立 socket 服务（孪生推理），IgrapeRobot3 在 body 节点内直接使用 PyBullet DIRECT 模式
+2. **Inspire 灵巧手控制**：本项目通过 Modbus，IgrapeRobot3 通过 ROS2 Topic `/inspire_hand/ctrl/`
+3. **预定义位姿 + 轨迹执行**：本项目使用 `robot_config.json`，IgrapeRobot3 使用 `actions.json`
+4. **多观察位姿重试**：两个项目都循环尝试多个观察位姿来找到可达的抓取方案
+
+### IgrapeRobot3 可借鉴的设计
+
+- **ActionSequence 编排模式**：将底盘移动、身体动作、音频播放组合为可复用的序列 (`action_sequence.py`)，适合复杂多步骤任务
+- **LMAM 语音模块**：如果需要为本项目添加语音交互，可参考其 KWS→ASR→LLM→TTS 管线
+- **ROS2 Action 协议**：比本项目原始 TCP socket 更规范，支持 feedback/cancel/result 生命周期
+- **`@command` 装饰器**：`body_node.py` 用装饰器注册命令回调，比 if-else 分发更清晰

@@ -22,13 +22,20 @@ from scipy.spatial.transform import Rotation as R
 # environment.  The functions that depend on them will fail gracefully.
 
 try:
-    import rospy
-    import tf
-    import tf2_ros
+    import rclpy
+    from rclpy.node import Node
+    from rclpy.duration import Duration
+    from tf2_ros import Buffer, TransformListener, LookupException, \
+        ConnectivityException, ExtrapolationException
+    from geometry_msgs.msg import TransformStamped
 except ImportError:
-    rospy = None
-    tf = None
-    tf2_ros = None
+    rclpy = None
+    Buffer = None
+    TransformListener = None
+    Duration = None
+    LookupException = None
+    ConnectivityException = None
+    ExtrapolationException = None
 
 try:
     import open3d as o3d
@@ -43,12 +50,35 @@ except ImportError:
 # ======================================================================
 
 class TransformationUtil:
-    """ROS-TF wrapper for looking up transforms between frames."""
+    """ROS 2 TF wrapper for looking up transforms between frames.
 
-    def __init__(self):
-        if rospy is None:
-            raise ImportError("rospy is required for TransformationUtil")
-        rospy.init_node("transformation_util")
+    Uses ``tf2_ros.Buffer`` + ``TransformListener`` (ROS 2 Humble).
+    Expects ``rclpy`` to be initialised before use.  Pass an existing
+    node via ``set_node()`` or create an internal one on first lookup.
+    """
+
+    def __init__(self, node=None):
+        if rclpy is None:
+            raise ImportError("rclpy / tf2_ros is required for TransformationUtil")
+        self._node = node
+        self._buffer = None
+        self._listener = None
+
+    def set_node(self, node):
+        """Inject an external ``rclpy.node.Node``."""
+        self._node = node
+        self._buffer = None
+        self._listener = None
+
+    def _ensure_listener(self):
+        if self._buffer is not None:
+            return
+        if self._node is None:
+            if not rclpy.ok():
+                rclpy.init(args=[])
+            self._node = Node("transformation_util")
+        self._buffer = Buffer()
+        self._listener = TransformListener(self._buffer, self._node)
 
     def get_transform_from_frame_to_frame(self, from_frame: str, to_frame: str):
         """Look up the homogeneous transform from *from_frame* to *to_frame*.
@@ -59,17 +89,21 @@ class TransformationUtil:
         transformation_euler : list  [tx, ty, tz, rx, ry, rz]  (radians)
         transformation_quat : list  [tx, ty, tz, qx, qy, qz, qw]
         """
-        listener = tf.TransformListener()
-        listener.waitForTransform(from_frame, to_frame, rospy.Time(), rospy.Duration(4.0))
+        self._ensure_listener()
 
         retries = 5
         backoff_factor = 0.5
 
         for i in range(retries):
             try:
-                (position, quaternion) = listener.lookupTransform(
-                    from_frame, to_frame, rospy.Time(0)
+                transform: TransformStamped = self._buffer.lookup_transform(
+                    from_frame, to_frame, rclpy.time.Time(),
                 )
+                t = transform.transform.translation
+                q = transform.transform.rotation
+                position = [t.x, t.y, t.z]
+                quaternion = [q.x, q.y, q.z, q.w]
+
                 translation_matrix = np.eye(4, 4)
                 orientation = R.from_quat(quaternion).as_matrix()
                 euler = R.from_quat(quaternion).as_euler("xyz", degrees=False)
@@ -81,11 +115,7 @@ class TransformationUtil:
                 ]
                 transformation_quat = position + quaternion
                 return translation_matrix, transformation_euler, transformation_quat
-            except (
-                tf2_ros.LookupException,
-                tf2_ros.ConnectivityException,
-                tf2_ros.ExtrapolationException,
-            ):
+            except (LookupException, ConnectivityException, ExtrapolationException):
                 time.sleep(backoff_factor * (i + 1))
 
         raise RuntimeError(
@@ -108,15 +138,33 @@ _RS_LEFT_FY = 392.26812744140625
 _RS_LEFT_CX = 325.4682312011719
 _RS_LEFT_CY = 242.28213500976562
 
+# Tianyi Orin camera intrinsics (from body/utils_body/utils.py)
+_TIANYI_FX = 605.2307
+_TIANYI_FY = 604.5292
+_TIANYI_CX = 327.3244
+_TIANYI_CY = 252.9691
+
+
+# Module-level default cam_type override (set during initialisation for Tianyi)
+_DEFAULT_CAM_TYPE = "right"
+
+
+def set_default_cam_type(cam_type: str):
+    """Override the default camera intrinsics type used by ``graspcam2pixel`` et al."""
+    global _DEFAULT_CAM_TYPE
+    _DEFAULT_CAM_TYPE = cam_type
+
 
 def _get_intrinsics(cam_type: str):
     if cam_type == "right":
         return _RS_RIGHT_FX, _RS_RIGHT_FY, _RS_RIGHT_CX, _RS_RIGHT_CY
+    elif cam_type == "tianyi":
+        return _TIANYI_FX, _TIANYI_FY, _TIANYI_CX, _TIANYI_CY
     else:
         return _RS_LEFT_FX, _RS_LEFT_FY, _RS_LEFT_CX, _RS_LEFT_CY
 
 
-def graspcam2pixel(grasping_pose, cam_type: str = "right"):
+def graspcam2pixel(grasping_pose, cam_type: str = None):
     """Project 3-D grasp translations to 2-D pixel coordinates.
 
     Parameters
@@ -130,6 +178,8 @@ def graspcam2pixel(grasping_pose, cam_type: str = "right"):
     points_screen : np.ndarray (N, 2)
     grasping_pose : the original list (unchanged)
     """
+    if cam_type is None:
+        cam_type = _DEFAULT_CAM_TYPE
     grasp_points = []
     for grasp in grasping_pose:
         translation = np.array(grasp["trans"])
@@ -147,7 +197,7 @@ def graspcam2pixel(grasping_pose, cam_type: str = "right"):
     return points_screen[:, :2], grasping_pose
 
 
-def pixel_to_camera_point(pixel_points, depth_image, cam_type: str = "right"):
+def pixel_to_camera_point(pixel_points, depth_image, cam_type: str = None):
     """Back-project pixel coordinates to 3-D camera-frame points using a
     depth image.
 
@@ -155,6 +205,8 @@ def pixel_to_camera_point(pixel_points, depth_image, cam_type: str = "right"):
     -------
     grasp_points_3d_m : np.ndarray (N, 3)  -- units: metres
     """
+    if cam_type is None:
+        cam_type = _DEFAULT_CAM_TYPE
     fx, fy, cx, cy = _get_intrinsics(cam_type)
     u_points = pixel_points[:, 0].astype(np.int16)
     v_points = pixel_points[:, 1].astype(np.int16)
@@ -169,7 +221,7 @@ def pixel_to_camera_point(pixel_points, depth_image, cam_type: str = "right"):
     return grasp_points_3d_m
 
 
-def pixel_to_camera_point2(pixel_points, depth_value_m, cam_type: str = "right"):
+def pixel_to_camera_point2(pixel_points, depth_value_m, cam_type: str = None):
     """Back-project pixel coordinates to 3-D camera-frame points using a
     scalar / array depth value (metres).
 
@@ -177,6 +229,8 @@ def pixel_to_camera_point2(pixel_points, depth_value_m, cam_type: str = "right")
     -------
     grasp_points_3d_m : np.ndarray (N, 3)
     """
+    if cam_type is None:
+        cam_type = _DEFAULT_CAM_TYPE
     fx, fy, cx, cy = _get_intrinsics(cam_type)
 
     u_points = pixel_points[:, 0]

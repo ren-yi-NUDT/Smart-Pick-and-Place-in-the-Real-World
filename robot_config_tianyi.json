@@ -1,0 +1,141 @@
+{
+    "default_traj_js": {
+        "grasp1": {
+            "shoulder_pitch_r_joint": -78.16,
+            "shoulder_roll_r_joint": -71.73,
+            "shoulder_yaw_r_joint": 64.54,
+            "elbow_pitch_r_joint": -111.49,
+            "elbow_yaw_r_joint": -85.20,
+            "wrist_pitch_r_joint": 13.21,
+            "wrist_roll_r_joint": 12.41
+        },
+        "grasp2": {
+            "shoulder_pitch_r_joint": -78.17,
+            "shoulder_roll_r_joint": -68.98,
+            "shoulder_yaw_r_joint": 73.03,
+            "elbow_pitch_r_joint": -114.19,
+            "elbow_yaw_r_joint": -76.79,
+            "wrist_pitch_r_joint": -1.11,
+            "wrist_roll_r_joint": 3.81
+        },
+        "grasp3": {
+            "shoulder_pitch_r_joint": -92.12,
+            "shoulder_roll_r_joint": -54.03,
+            "shoulder_yaw_r_joint": 90.02,
+            "elbow_pitch_r_joint": -100.19,
+            "elbow_yaw_r_joint": -121.52,
+            "wrist_pitch_r_joint": -1.13,
+            "wrist_roll_r_joint": 5.66
+        },
+        "grasp4": {
+            "shoulder_pitch_r_joint": 8.84,
+            "shoulder_roll_r_joint": -118.58,
+            "shoulder_yaw_r_joint": -27.70,
+            "elbow_pitch_r_joint": -104.05,
+            "elbow_yaw_r_joint": -114.47,
+            "wrist_pitch_r_joint": 0.05,
+            "wrist_roll_r_joint": 23.86
+        },
+        "place1": {
+            "shoulder_pitch_r_joint": -78.16,
+            "shoulder_roll_r_joint": -71.73,
+            "shoulder_yaw_r_joint": 64.54,
+            "elbow_pitch_r_joint": -111.49,
+            "elbow_yaw_r_joint": -85.20,
+            "wrist_pitch_r_joint": 13.21,
+            "wrist_roll_r_joint": 12.41
+        },
+        "place2": {
+            "shoulder_pitch_r_joint": -66.37,
+            "shoulder_roll_r_joint": -65.44,
+            "shoulder_yaw_r_joint": 81.53,
+            "elbow_pitch_r_joint": -97.98,
+            "elbow_yaw_r_joint": -80.55,
+            "wrist_pitch_r_joint": 2.02,
+            "wrist_roll_r_joint": 8.45
+        }
+    },
+    "handover_pose": {
+        "shoulder_pitch_r_joint": -66.26,
+        "shoulder_roll_r_joint": -14.07,
+        "shoulder_yaw_r_joint": 40.61,
+        "elbow_pitch_r_joint": -41.27,
+        "elbow_yaw_r_joint": -98.16,
+        "wrist_pitch_r_joint": -4.04,
+        "wrist_roll_r_joint": -0.70
+    },
+    "get_ready_to_handover_1st": {
+        "_comment": "PLACEHOLDER — record on robot",
+        "shoulder_pitch_r_joint": -78.16,
+        "shoulder_roll_r_joint": -71.73,
+        "shoulder_yaw_r_joint": 64.54,
+        "elbow_pitch_r_joint": -111.49,
+        "elbow_yaw_r_joint": -85.20,
+        "wrist_pitch_r_joint": 13.21,
+        "wrist_roll_r_joint": 12.41
+    },
+    "get_ready_to_handover_2nd": {
+        "_comment": "PLACEHOLDER — record on robot",
+        "shoulder_pitch_r_joint": -66.26,
+        "shoulder_roll_r_joint": -14.07,
+        "shoulder_yaw_r_joint": 40.61,
+        "elbow_pitch_r_joint": -41.27,
+        "elbow_yaw_r_joint": -98.16,
+        "wrist_pitch_r_joint": -4.04,
+        "wrist_roll_r_joint": -0.70
+    },
+    "throw_to_trash_pose": {
+        "_comment": "PLACEHOLDER — record on robot (using grasp pose c1 as reference)",
+        "shoulder_pitch_r_joint": 17.43,
+        "shoulder_roll_r_joint": -135.26,
+        "shoulder_yaw_r_joint": -29.40,
+        "elbow_pitch_r_joint": -91.51,
+        "elbow_yaw_r_joint": -65.44,
+        "wrist_pitch_r_joint": 10.72,
+        "wrist_roll_r_joint": 66.80
+    },
+    "look_over_what_in_user_hand_pose": {
+        "_comment": "PLACEHOLDER — record on robot",
+        "shoulder_pitch_r_joint": -78.16,
+        "shoulder_roll_r_joint": -71.73,
+        "shoulder_yaw_r_joint": 64.54,
+        "elbow_pitch_r_joint": -111.49,
+        "elbow_yaw_r_joint": -85.20,
+        "wrist_pitch_r_joint": 13.21,
+        "wrist_roll_r_joint": 12.41
+    },
+    "desk_pose_1": {
+        "_comment": "PLACEHOLDER — record on robot",
+        "shoulder_pitch_r_joint": -78.16,
+        "shoulder_roll_r_joint": -71.73,
+        "shoulder_yaw_r_joint": 64.54,
+        "elbow_pitch_r_joint": -111.49,
+        "elbow_yaw_r_joint": -85.20,
+        "wrist_pitch_r_joint": 13.21,
+        "wrist_roll_r_joint": 12.41
+    },
+    "desk_pose_2": {
+        "_comment": "PLACEHOLDER — record on robot",
+        "shoulder_pitch_r_joint": -78.17,
+        "shoulder_roll_r_joint": -68.98,
+        "shoulder_yaw_r_joint": 73.03,
+        "elbow_pitch_r_joint": -114.19,
+        "elbow_yaw_r_joint": -76.79,
+        "wrist_pitch_r_joint": -1.11,
+        "wrist_roll_r_joint": 3.81
+    },
+    "desk_pose_3": {
+        "_comment": "PLACEHOLDER — record on robot",
+        "shoulder_pitch_r_joint": -92.12,
+        "shoulder_roll_r_joint": -54.03,
+        "shoulder_yaw_r_joint": 90.02,
+        "elbow_pitch_r_joint": -100.19,
+        "elbow_yaw_r_joint": -121.52,
+        "wrist_pitch_r_joint": -1.13,
+        "wrist_roll_r_joint": 5.66
+    },
+    "base_link_name": "base",
+    "camera_link_name": "camera_link",
+    "hand_effector_name": "gripper_tcp",
+    "arm_end_link_name": "wrist_roll_r_link"
+}

@@ -106,6 +106,12 @@ def _fallback_profile():
             "hand_effector": "L_hand_endeffector",
             "arm_end_link": "Link7",
         },
+        "camera": {
+            "type": "realsense",
+        },
+        "perception": {
+            "anygrasp_ws_url": "",
+        },
     }
 
 

@@ -1,0 +1,38 @@
+{
+    "right_arm_tianyi": {
+        "struct_type": "arm",
+        "joint_names": [
+            "shoulder_pitch_r_joint",
+            "shoulder_roll_r_joint",
+            "shoulder_yaw_r_joint",
+            "elbow_pitch_r_joint",
+            "elbow_yaw_r_joint",
+            "wrist_pitch_r_joint",
+            "wrist_roll_r_joinst"
+        ],
+        "link_names": [
+            "shoulder_pitch_r_link",
+            "shoulder_roll_r_link",
+            "shoulder_yaw_r_link",
+            "elbow_pitch_r_link",
+            "elbow_yaw_r_link",
+            "wrist_pitch_r_link",
+            "wrist_roll_r_link",
+            "gripper_tcp"
+        ],
+        "controllable_joint_names": [
+            "shoulder_pitch_r_joint",
+            "shoulder_roll_r_joint",
+            "shoulder_yaw_r_joint",
+            "elbow_pitch_r_joint",
+            "elbow_yaw_r_joint",
+            "wrist_pitch_r_joint",
+            "wrist_roll_r_joinst"
+        ],
+        "end_link": "gripper_tcp",
+        "default_pose": {
+            "reset": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        },
+        "mimic": {}
+    }
+}

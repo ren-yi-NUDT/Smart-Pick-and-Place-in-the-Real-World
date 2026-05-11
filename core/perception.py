@@ -7,14 +7,19 @@ Usage:
     perc = Perception(
         yolo_model_path="/path/to/yolov8x-worldv2.pt",
         anygrasp_checkpoint="/path/to/checkpoint_detection.tar",
+        anygrasp_ws_url="ws://192.168.3.11:8775",  # for Tianyi remote AnyGrasp
     )
     detections = perc.detect_objects(rgb, class_names=["orange"])
     grasps = perc.detect_grasps(rgb, depth)
     filtered = perc.filter_grasps_by_detection(grasps, detections, rgb, class_name="orange")
 """
 
+import base64
+import io
+import json
 import os
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -38,6 +43,7 @@ class Perception:
         self,
         yolo_model_path: str = "",
         anygrasp_checkpoint: str = "",
+        anygrasp_ws_url: str = "",
         save_path: str = "",
     ):
         self.save_path = save_path
@@ -51,6 +57,9 @@ class Perception:
 
         # AnyGrasp is loaded lazily (heavy)
         self._anygrasp_fn = None
+
+        # Optional web-socket URL for remote AnyGrasp (Tianyi)
+        self.anygrasp_ws_url = anygrasp_ws_url
 
     # ------------------------------------------------------------------
     # YOLO-World
@@ -96,6 +105,9 @@ class Perception:
         list[dict]
             Each dict has keys ``"trans"``, ``"score"``, ``"rotation_matrix"``.
         """
+        if self.anygrasp_ws_url:
+            return self._detect_grasps_ws(rgb, depth, model)
+
         if self._anygrasp_fn is None:
             self._anygrasp_fn = _import_anygrasp()
         try:
@@ -107,6 +119,59 @@ class Perception:
         except Exception as e:
             cprint(f"[Perception] AnyGrasp failed: {e}", "red")
             return []
+
+    def _detect_grasps_ws(self, rgb, depth, model: str = "rs_right"):
+        """Call AnyGrasp via WebSocket (Tianyi deployment).
+
+        Encodes RGB→JPEG base64, Depth→PNG base64, sends to the AnyGrasp
+        WS server, and converts ``translation``/``rotation`` keys to
+        ``trans``/``rotation_matrix`` as expected by the skill layer.
+        """
+        import asyncio
+        import websockets
+
+        # Encode RGB as JPEG base64
+        _, rgb_buf = cv2.imencode(".jpg", rgb[..., ::-1])  # RGB→BGR for JPEG
+        rgb_b64 = base64.b64encode(rgb_buf.tobytes()).decode("utf-8")
+
+        # Encode depth as PNG base64 (mm, uint16)
+        if depth.dtype in (np.float32, np.float64):
+            depth_to_encode = (depth * 1000.0).astype("uint16")
+        else:
+            depth_to_encode = depth.astype("uint16")
+        _, depth_buf = cv2.imencode(".png", depth_to_encode)
+        depth_b64 = base64.b64encode(depth_buf.tobytes()).decode("utf-8")
+
+        async def _call():
+            async with websockets.connect(self.anygrasp_ws_url) as ws:
+                payload = json.dumps({"rgb": rgb_b64, "depth": depth_b64})
+                await ws.send(payload)
+                response = await ws.recv()
+                result = json.loads(response)
+                return result
+
+        try:
+            raw = asyncio.run(_call())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            raw = loop.run_until_complete(_call())
+
+        if not raw or not isinstance(raw, list):
+            return []
+
+        # Convert Tianyi WS format → skill-layer format
+        grasps = []
+        for item in raw:
+            grasp = {
+                "trans": np.array(item["translation"]),
+                "score": item.get("score", 0.0),
+                "rotation_matrix": np.array(item["rotation"]).reshape(3, 3),
+            }
+            grasps.append(grasp)
+
+        cprint(f"[Perception] WS AnyGrasp returned {len(grasps)} grasps", "green")
+        return grasps
 
     # ------------------------------------------------------------------
     # Combined filtering  (from Planner.filtering_pose)

@@ -1,0 +1,49 @@
+{
+    "arm": {
+        "driver": "tianyi",
+        "service_name": "/arm/cmd_pos",
+        "struct_name": "right_arm_tianyi",
+        "num_joints": 7,
+        "joint_names": [
+            "shoulder_pitch_r_joint",
+            "shoulder_roll_r_joint",
+            "shoulder_yaw_r_joint",
+            "elbow_pitch_r_joint",
+            "elbow_yaw_r_joint",
+            "wrist_pitch_r_joint",
+            "wrist_roll_r_joint"
+        ],
+        "host": null,
+        "port": null
+    },
+    "hand": {
+        "driver": "tianyi_inspire",
+        "service_name": "/inspire_hand/ctrl/right_hand",
+        "gestures": {
+            "open": [1.0, 1.0, 1.0, 1.0, 1.0, 0.5],
+            "close": [0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        },
+        "host": null,
+        "port": null
+    },
+    "twin": {
+        "host": "127.0.0.1",
+        "port": 8020,
+        "urdf_path": "/home/zz/Code/IgrapeRobot3/IgrapeRobot3-task_planner_v3.0/tianyi_description/urdf/tianyi_10x_urdf_backup.urdf",
+        "robot_config_path": "/home/zz/Code/Smart-Pick-and-Place-in-the-Real-World/twin_robot_config_tianyi.json"
+    },
+    "frames": {
+        "base_link": "base",
+        "camera_link": "camera_link",
+        "hand_effector": "gripper_tcp",
+        "arm_end_link": "wrist_roll_r_link"
+    },
+    "camera": {
+        "type": "websocket",
+        "ws_url": "ws://192.168.3.16:8765",
+        "timeout": 10
+    },
+    "perception": {
+        "anygrasp_ws_url": "ws://192.168.3.11:8775"
+    }
+}

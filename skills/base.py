@@ -106,12 +106,14 @@ class Skill(ABC):
     # ------------------------------------------------------------------
     @property
     def camera(self):
-        """Return an initialized RealSenseCapture instance."""
+        """Return an initialized camera (RealSense or WS, per profile)."""
         if self._camera is None:
-            from core.camera import RealSenseCapture
-            self._camera = RealSenseCapture(
-                width=640, height=480, fps=30, save_path=self.save_path
-            )
+            from core.camera import create_camera
+            from core.transforms import set_default_cam_type
+            cam_cfg = self.config.profile.get("camera", {})
+            if cam_cfg.get("type") == "websocket":
+                set_default_cam_type("tianyi")
+            self._camera = create_camera(self.config, save_path=self.save_path)
         return self._camera
 
     # ------------------------------------------------------------------
@@ -123,9 +125,11 @@ class Skill(ABC):
         if self._perception is None:
             from core.perception import Perception
             from core.config import DEFAULT_YOLO_MODEL, DEFAULT_ANYGRASP_CHECKPOINT
+            ws_url = self.config.profile.get("perception", {}).get("anygrasp_ws_url", "")
             self._perception = Perception(
                 yolo_model_path=DEFAULT_YOLO_MODEL,
                 anygrasp_checkpoint=DEFAULT_ANYGRASP_CHECKPOINT,
+                anygrasp_ws_url=ws_url,
             )
         return self._perception
 
