@@ -18,6 +18,8 @@ import time
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
+from core.abc import BaseTransforms
+
 # Optional heavy imports -- only needed when running with a ROS / Open3D
 # environment.  The functions that depend on them will fail gracefully.
 
@@ -42,7 +44,7 @@ except ImportError:
 # TransformationUtil  (from transformation.py)
 # ======================================================================
 
-class TransformationUtil:
+class TransformationUtil(BaseTransforms):
     """ROS-TF wrapper for looking up transforms between frames."""
 
     def __init__(self):

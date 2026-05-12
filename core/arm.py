@@ -22,6 +22,7 @@ import struct
 
 from termcolor import cprint
 
+from core.abc import BaseArm
 from core.config import HOST, ARM_PORT
 
 
@@ -37,7 +38,7 @@ def _send_cmd(sock: socket.socket, data: dict) -> dict:
     return resp
 
 
-class ArmClient:
+class ArmClient(BaseArm):
     """Stateless wrapper around the arm TCP service."""
 
     SERVICE_NAME = "/right_arm/movement_control"

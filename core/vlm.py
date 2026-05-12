@@ -12,8 +12,10 @@ import requests
 from PIL import Image
 from termcolor import cprint
 
+from core.abc import BaseVLM
 
-class VLMClient:
+
+class VLMClient(BaseVLM):
     """Thin wrapper around the GLM-4.5V chat-completion API."""
 
     DEFAULT_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"

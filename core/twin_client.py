@@ -21,10 +21,11 @@ import struct
 
 from termcolor import cprint
 
+from core.abc import BaseTwinClient
 from core.config import HOST, TWIN_PORT
 
 
-class TwinClient:
+class TwinClient(BaseTwinClient):
     """TCP client for the digital-twin trajectory generation service."""
 
     def __init__(self, host: str = HOST, port: int = TWIN_PORT):

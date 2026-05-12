@@ -1,0 +1,25 @@
+{
+    "pose_map": {
+        "grasp1": "new_camera_2",
+        "grasp2": "new_camera_1",
+        "grasp3": "new_camera_4",
+        "grasp4": "high_camera2",
+        "place1": "ppt1",
+        "place2": "ppt2"
+    },
+    "camera_ws_url": "ws://192.168.3.16:8765",
+    "grasp_ws_url": "ws://192.168.3.11:8775",
+    "igrape_root": "/home/zz/Code/IgrapeRobot3/IgrapeRobot3-task_planner_v3.0",
+    "camera_intrinsics": {
+        "fx": 605.2307,
+        "fy": 604.5292,
+        "cx": 327.3244,
+        "cy": 252.9691
+    },
+    "frame_names": {
+        "base_link": "base",
+        "camera_link": "camera_link",
+        "hand_effector": "right_hand_endeffector",
+        "arm_end_link": "Link7"
+    }
+}

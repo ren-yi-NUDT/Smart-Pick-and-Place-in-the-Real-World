@@ -10,6 +10,8 @@ Usage:
 import json
 import os
 
+from core.abc import BaseConfig
+
 # ---------------------------------------------------------------------------
 # Project root (the directory that contains robot_config.json)
 # ---------------------------------------------------------------------------
@@ -58,7 +60,7 @@ NAMED_POSES = [
 ]
 
 
-class Config:
+class Config(BaseConfig):
     """Loads and exposes all runtime configuration."""
 
     def __init__(self, config_path=None):

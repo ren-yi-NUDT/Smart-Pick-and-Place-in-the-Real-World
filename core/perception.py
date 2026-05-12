@@ -22,6 +22,7 @@ from PIL import Image
 from termcolor import cprint
 from ultralytics import YOLOWorld
 
+from core.abc import BasePerception
 from core.transforms import graspcam2pixel
 
 
@@ -31,7 +32,7 @@ def _import_anygrasp():
     return anygrasp_get_poses
 
 
-class Perception:
+class Perception(BasePerception):
     """Unified perception front-end combining YOLO-World and AnyGrasp."""
 
     def __init__(

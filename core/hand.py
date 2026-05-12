@@ -22,12 +22,13 @@ import time
 import numpy as np
 from termcolor import cprint
 
+from core.abc import BaseHand
 from core.config import HOST, HAND_PORT, HAND_CLOSE, HAND_OPEN
 
 SERVICE_SRC = "/left_hand/movement_control"
 
 
-class HandClient:
+class HandClient(BaseHand):
     """TCP client for the dexterous hand."""
 
     def __init__(self, host: str = HOST, port: int = HAND_PORT):

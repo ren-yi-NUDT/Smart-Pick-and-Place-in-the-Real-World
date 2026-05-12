@@ -44,8 +44,8 @@ class Skill(ABC):
     """
 
     def __init__(self, config_path="./robot_config.json", save_path="./log"):
-        from core.config import Config
-        self.config = Config(config_path)
+        from core.backends import create_config
+        self.config = create_config(config_path, save_path)
         self.config_path = config_path
         self.save_path = save_path
         os.makedirs(self.save_path, exist_ok=True)
@@ -68,12 +68,9 @@ class Skill(ABC):
     def arm(self):
         """Return an initialized ArmController + connected socket client."""
         if self._arm is None:
-            import socket
-            from core.config import HOST, ARM_PORT
-            from core.arm import ArmClient
-            client = ArmClient(HOST, ARM_PORT)
-            client.connect()
-            self._arm = client
+            from core.backends import create_arm
+            self._arm = create_arm()
+            self._arm.connect()
         return self._arm
 
     # ------------------------------------------------------------------
@@ -83,11 +80,9 @@ class Skill(ABC):
     def hand(self):
         """Return a connected HandClient."""
         if self._hand is None:
-            from core.config import HOST, HAND_PORT
-            from core.hand import HandClient
-            client = HandClient(HOST, HAND_PORT)
-            client.connect()
-            self._hand = client
+            from core.backends import create_hand
+            self._hand = create_hand()
+            self._hand.connect()
         return self._hand
 
     # ------------------------------------------------------------------
@@ -97,11 +92,9 @@ class Skill(ABC):
     def twin(self):
         """Return a connected TwinClient."""
         if self._twin is None:
-            from core.config import HOST, TWIN_PORT
-            from core.twin_client import TwinClient
-            client = TwinClient(HOST, TWIN_PORT)
-            client.connect()
-            self._twin = client
+            from core.backends import create_twin
+            self._twin = create_twin()
+            self._twin.connect()
         return self._twin
 
     # ------------------------------------------------------------------
@@ -109,12 +102,10 @@ class Skill(ABC):
     # ------------------------------------------------------------------
     @property
     def camera(self):
-        """Return an initialized RealSenseCapture instance."""
+        """Return an initialized camera capture instance."""
         if self._camera is None:
-            from core.camera import RealSenseCapture
-            self._camera = RealSenseCapture(
-                width=640, height=480, fps=30, save_path=self.save_path
-            )
+            from core.backends import create_camera
+            self._camera = create_camera(save_path=self.save_path)
         return self._camera
 
     # ------------------------------------------------------------------
@@ -124,12 +115,8 @@ class Skill(ABC):
     def perception(self):
         """Return a loaded PerceptionModule (YOLO-World + AnyGrasp)."""
         if self._perception is None:
-            from core.perception import Perception
-            from core.config import DEFAULT_YOLO_MODEL, DEFAULT_ANYGRASP_CHECKPOINT
-            self._perception = Perception(
-                yolo_model_path=DEFAULT_YOLO_MODEL,
-                anygrasp_checkpoint=DEFAULT_ANYGRASP_CHECKPOINT,
-            )
+            from core.backends import create_perception
+            self._perception = create_perception()
         return self._perception
 
     # ------------------------------------------------------------------
@@ -139,8 +126,8 @@ class Skill(ABC):
     def vlm(self):
         """Return a VLMClient for GLM-4.5V vision-language calls."""
         if self._vlm is None:
-            from core.vlm import VLMClient
-            self._vlm = VLMClient()
+            from core.backends import create_vlm
+            self._vlm = create_vlm()
         return self._vlm
 
     # ------------------------------------------------------------------
@@ -150,8 +137,8 @@ class Skill(ABC):
     def transforms(self):
         """Return a TransformationUtil instance (ROS tf2)."""
         if self._transforms is None:
-            from core.transforms import TransformationUtil
-            self._transforms = TransformationUtil()
+            from core.backends import create_transforms
+            self._transforms = create_transforms()
         return self._transforms
 
     # ------------------------------------------------------------------

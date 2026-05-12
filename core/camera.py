@@ -12,12 +12,13 @@ Usage:
 import os
 
 import cv2
+from core.abc import BaseCamera
 import numpy as np
 import pyrealsense2 as rs
 from PIL import Image
 
 
-class RealSenseCapture:
+class RealSenseCapture(BaseCamera):
     """Capture a single aligned RGB-D frame from an Intel RealSense camera."""
 
     def __init__(
