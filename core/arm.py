@@ -34,7 +34,7 @@ def _send_cmd(sock: socket.socket, data: dict) -> dict:
     sock.sendall(length_prefix)
     sock.sendall(data_bytes)
     resp = json.loads(sock.recv(1024).decode("utf-8"))
-    cprint(f"Control arm response: {resp}", "red")
+    cprint(f"Control arm response: {resp}", "cyan")
     return resp
 
 

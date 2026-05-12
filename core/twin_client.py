@@ -77,7 +77,7 @@ class TwinClient(BaseTwinClient):
             data_bytes += chunk
 
         resp = json.loads(data_bytes.decode("utf-8"))
-        cprint(f"Control twin response: {resp}", "red")
+        cprint(f"Control twin response: {resp}", "cyan")
         return resp
 
     # ------------------------------------------------------------------

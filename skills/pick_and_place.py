@@ -171,7 +171,7 @@ class PickAndPlaceSkill(Skill):
                     final_grasps.append(g_pose)
                 cprint(
                     f"*********** Class name {class_names} ****************** "
-                    f"Grasp pose number: {len(final_grasps)} ******************", "red")
+                    f"Grasp pose number: {len(final_grasps)} ******************", "green")
                 ans = True
             else:
                 cprint(f"Found objects ({class_name}) but NO grasp points inside them.", "yellow")

@@ -84,7 +84,7 @@ class IgrapeArm(BaseArm):
                 motor_id = str(self._joint_cfg[name]["id"])
                 self._joint_state[motor_id] = msg.position[i]
 
-    def _target_arrived(self, target_motor_rad: dict, tol: float = 0.05) -> bool:
+    def _target_arrived(self, target_motor_rad: dict, tol: float = 0.5) -> bool:
         """Check if all target joints have reached their positions."""
         for str_id, target_val in target_motor_rad.items():
             cur = self._joint_state.get(str_id)

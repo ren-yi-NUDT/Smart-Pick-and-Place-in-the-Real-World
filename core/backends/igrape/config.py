@@ -59,13 +59,17 @@ class IgrapeConfig(BaseConfig):
                     self.robot_config[igrape_name] = converted
 
     def get_pose(self, name):
-        """Return a named pose dict {'J1': deg, ..., 'J7': deg}."""
-        # Check mapped poses first
-        pose = self.default_traj_js.get(name)
+        """Return a named pose dict {'J1': deg, ..., 'J7': deg}.
+
+        Search order matches CLAUDE.md: top-level (robot_config) first,
+        then default_traj_js.
+        """
+        # Check top-level (all Igrape actions) first
+        pose = self.robot_config.get(name)
         if pose is not None:
             return pose
-        # Then check all actions (by Igrape name)
-        return self.robot_config.get(name)
+        # Then check mapped poses (default_traj_js)
+        return self.default_traj_js.get(name)
 
     def get_named_poses(self) -> dict:
         return dict(self.default_traj_js)

@@ -66,7 +66,7 @@ class HandClient(BaseHand):
         msg = json.dumps(data).encode("utf-8")
         self.sock.sendall(msg)
         resp = json.loads(self.sock.recv(1024).decode("utf-8"))
-        cprint(f"Control hand response: {resp}", "red")
+        cprint(f"Control hand response: {resp}", "cyan")
         return resp
 
     # ------------------------------------------------------------------

@@ -67,6 +67,15 @@ class IgrapeTwinClient(BaseTwinClient):
             return self._ik_check(cnfg)
         raise ValueError(f"Unknown twin service type: {srv_type}")
 
+    def _send_cmd(self, data: dict) -> dict:
+        """Compatibility method for skills/base.py send_cmd_twin.
+
+        Parses the twin service protocol and dispatches to call_service.
+        """
+        srv_type = data.get("type", "")
+        cnfg = data.get("cnfg", {})
+        return self.call_service(srv_type, cnfg)
+
     def generate_trajectory2(self, cnfg: dict) -> dict:
         """Generate a joint-space trajectory for the given target EE poses.
 
