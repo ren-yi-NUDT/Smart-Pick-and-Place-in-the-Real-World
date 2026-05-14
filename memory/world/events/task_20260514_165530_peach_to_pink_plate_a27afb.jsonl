@@ -1,0 +1,8 @@
+{"time": 1778748930.8608193, "type": "action", "payload": {"type": "memory_setup", "command": {"object": "peach", "container": "pink plate"}, "time": 1778748930.8608186}}
+{"time": 1778748930.8612087, "type": "status", "payload": {"status": "ready"}}
+{"time": 1778748930.8615005, "type": "action", "payload": {"type": "parse_input", "input": {"object": "peach", "container": "pink plate"}, "time": 1778748930.861495}}
+{"time": 1778748930.861848, "type": "critic", "payload": {"stage": "before_grasp", "approved": true, "target_object": "peach", "robot_state": {"holding": null}, "missing": [], "risks": [], "next_action": "run_grasp", "time": 1778748930.8618467}}
+{"time": 1778748955.050304, "type": "action", "payload": {"type": "grasp", "result": {"success": false, "object": "peach"}, "time": 1778748955.0503018}}
+{"time": 1778748955.0507476, "type": "observation", "payload": {"source": "world_model_critic.verify_grasp", "robot_state": {"holding": null}, "time": 1778748955.050747}}
+{"time": 1778748955.0511107, "type": "verification", "payload": {"stage": "after_grasp", "success": false, "expected": {"robot_holding_target": true}, "observed": {"holding": null, "grasp_result": {"success": false, "object": "peach"}}, "target_object": "peach", "verified_object": null, "memory_update_policy": "do_not_set_holding", "next_action": "retry_or_reobserve", "time": 1778748955.051105}}
+{"time": 1778748955.051418, "type": "failure", "payload": {"stage": "after_grasp", "reason": "grasp failed or grasp success not verified", "target_object": "peach", "grasp_result": {"success": false, "object": "peach"}, "time": 1778748955.0514169}}

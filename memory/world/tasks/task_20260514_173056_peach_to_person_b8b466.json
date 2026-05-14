@@ -1,0 +1,188 @@
+{
+  "memory_id": "task_20260514_173056_peach_to_person_b8b466",
+  "created_at": 1778751056.6204937,
+  "updated_at": 1778751087.5862913,
+  "command": {
+    "object": "peach",
+    "container": "person"
+  },
+  "mode": "handover",
+  "task_goal": {
+    "object": "peach",
+    "container": "person",
+    "source": "workspace"
+  },
+  "robot_state": {
+    "holding": "peach",
+    "last_action": {
+      "type": "handover",
+      "result": {
+        "success": true,
+        "type": "handover",
+        "container": "person",
+        "hand_opened": false
+      },
+      "time": 1778751087.5836997
+    }
+  },
+  "object_index": {},
+  "container_index": {},
+  "spatial_relations": [],
+  "observation_history": [
+    {
+      "source": "world_model_critic.verify_grasp",
+      "robot_state": {
+        "holding": "peach"
+      },
+      "time": 1778751075.7363455
+    }
+  ],
+  "action_history": [
+    {
+      "type": "memory_setup",
+      "command": {
+        "object": "peach",
+        "container": "person"
+      },
+      "time": 1778751056.6204977
+    },
+    {
+      "type": "parse_input",
+      "input": {
+        "object": "peach",
+        "container": "person"
+      },
+      "time": 1778751056.6211448
+    },
+    {
+      "type": "grasp",
+      "result": {
+        "success": true,
+        "hand_closed": true,
+        "finger_deviation": 2670.0,
+        "object": "peach"
+      },
+      "time": 1778751075.7357996
+    },
+    {
+      "type": "handover",
+      "result": {
+        "success": true,
+        "type": "handover",
+        "container": "person",
+        "hand_opened": false
+      },
+      "time": 1778751087.5836997
+    }
+  ],
+  "critic_records": [
+    {
+      "stage": "before_grasp",
+      "approved": true,
+      "target_object": "peach",
+      "robot_state": {
+        "holding": null
+      },
+      "missing": [],
+      "risks": [],
+      "next_action": "run_grasp",
+      "time": 1778751056.6214213
+    },
+    {
+      "stage": "before_handover",
+      "approved": true,
+      "mode": "handover",
+      "target_container": "person",
+      "robot_state": {
+        "holding": "peach"
+      },
+      "missing": [],
+      "risks": [],
+      "next_action": "handover",
+      "time": 1778751075.7373898
+    }
+  ],
+  "verification_records": [
+    {
+      "stage": "after_grasp",
+      "success": true,
+      "expected": {
+        "robot_holding_target": true,
+        "min_finger_deviation": 5.0
+      },
+      "observed": {
+        "hand_closed": true,
+        "finger_deviation": 2670.0,
+        "trajectory_ok": true,
+        "evidence_holding": true,
+        "grasp_result": {
+          "success": true,
+          "hand_closed": true,
+          "finger_deviation": 2670.0,
+          "object": "peach"
+        }
+      },
+      "target_object": "peach",
+      "verified_object": "peach",
+      "memory_update_policy": "set_holding",
+      "next_action": "critic_before_destination",
+      "time": 1778751075.7369833
+    },
+    {
+      "stage": "after_destination_action",
+      "success": false,
+      "mode": "handover",
+      "expected": {
+        "robot_released_object": true,
+        "hand_opened": true
+      },
+      "observed": {
+        "hand_opened": false,
+        "trajectory_ok": true,
+        "evidence_released": false,
+        "holding_before": "peach",
+        "holding_after": "peach",
+        "action_result": {
+          "success": true,
+          "type": "handover",
+          "container": "person",
+          "hand_opened": false
+        }
+      },
+      "memory_update_policy": "do_not_clear_holding",
+      "next_action": "replan_or_safe_recover",
+      "time": 1778751087.5854635
+    }
+  ],
+  "failure_records": [
+    {
+      "stage": "after_destination_action",
+      "reason": "destination trajectory executed but hand open not confirmed",
+      "mode": "handover",
+      "holding_before": "peach",
+      "target_container": "person",
+      "action_result": {
+        "success": true,
+        "type": "handover",
+        "container": "person",
+        "hand_opened": false
+      },
+      "time": 1778751087.5847826
+    },
+    {
+      "stage": "after_destination_action",
+      "reason": "destination action not verified by real-world evidence",
+      "mode": "handover",
+      "holding_before": "peach",
+      "target_container": "person",
+      "action_result": {
+        "success": true,
+        "type": "handover",
+        "container": "person",
+        "hand_opened": false
+      },
+      "time": 1778751087.586216
+    }
+  ],
+  "status": "blocked_or_failed"
+}

@@ -1,0 +1,2 @@
+{"time": 1778747474.0679872, "type": "action", "payload": {"type": "memory_setup", "command": {"object": "peach", "container": "person"}, "time": 1778747474.0679862}}
+{"time": 1778747474.0683303, "type": "status", "payload": {"status": "ready"}}

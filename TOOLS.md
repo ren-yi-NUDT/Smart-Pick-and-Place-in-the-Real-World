@@ -130,7 +130,6 @@ image(prompt="列出图片中所有物品，包括：名称、位置（左/中/�
 
 ```bash
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py capture_at_handover
 ```
@@ -139,13 +138,12 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 
 ```bash
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py look_around
 ```
 
 ### 使用 image 工具检测
-*注意: 调用获取物品图片的脚本之后需要先cp到/home/zz/.openclaw/workspace下才能调用image工具识别*
+*注意: run_skill.py 中已内置 cd 到项目根目录并配置 sys.path，vlm 会直接分析并输出结果，无需再用 image 工具重新分析。如果真的需要外用 image 工具，图片默认保存到 ./log/rgb.png*
 ```
 image(prompt="列出图中所有物品及其位置", image="/path/to/rgb.png")
 ```

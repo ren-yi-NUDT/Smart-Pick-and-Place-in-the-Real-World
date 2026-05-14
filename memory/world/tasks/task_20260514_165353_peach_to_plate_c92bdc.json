@@ -1,0 +1,65 @@
+{
+  "memory_id": "task_20260514_165353_peach_to_plate_c92bdc",
+  "created_at": 1778748833.3393862,
+  "updated_at": 1778748833.3406146,
+  "command": {
+    "object": "peach",
+    "container": "plate"
+  },
+  "mode": "normal_place",
+  "task_goal": {
+    "object": "peach",
+    "container": "plate",
+    "source": "workspace"
+  },
+  "robot_state": {
+    "holding": null,
+    "last_action": {
+      "type": "parse_input",
+      "input": {
+        "object": "peach",
+        "container": "plate"
+      },
+      "time": 1778748833.3403168
+    }
+  },
+  "object_index": {},
+  "container_index": {},
+  "spatial_relations": [],
+  "observation_history": [],
+  "action_history": [
+    {
+      "type": "memory_setup",
+      "command": {
+        "object": "peach",
+        "container": "plate"
+      },
+      "time": 1778748833.33939
+    },
+    {
+      "type": "parse_input",
+      "input": {
+        "object": "peach",
+        "container": "plate"
+      },
+      "time": 1778748833.3403168
+    }
+  ],
+  "critic_records": [
+    {
+      "stage": "before_grasp",
+      "approved": true,
+      "target_object": "peach",
+      "robot_state": {
+        "holding": null
+      },
+      "missing": [],
+      "risks": [],
+      "next_action": "run_grasp",
+      "time": 1778748833.3405716
+    }
+  ],
+  "verification_records": [],
+  "failure_records": [],
+  "status": "ready"
+}

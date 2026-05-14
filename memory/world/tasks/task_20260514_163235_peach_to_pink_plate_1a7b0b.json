@@ -1,0 +1,65 @@
+{
+  "memory_id": "task_20260514_163235_peach_to_pink_plate_1a7b0b",
+  "created_at": 1778747555.9750314,
+  "updated_at": 1778747590.0859702,
+  "command": {
+    "object": "peach",
+    "container": "pink plate"
+  },
+  "mode": "normal_place",
+  "task_goal": {
+    "object": "peach",
+    "container": "pink plate",
+    "source": "workspace"
+  },
+  "robot_state": {
+    "holding": null,
+    "last_action": {
+      "type": "place",
+      "result": {
+        "success": true
+      },
+      "time": 1778747590.0858095
+    }
+  },
+  "object_index": {},
+  "container_index": {},
+  "spatial_relations": [],
+  "observation_history": [],
+  "action_history": [
+    {
+      "type": "memory_setup",
+      "command": {
+        "object": "peach",
+        "container": "pink plate"
+      },
+      "time": 1778747555.9750354
+    },
+    {
+      "type": "parse_input",
+      "input": {
+        "object": "peach",
+        "container": "pink plate"
+      },
+      "time": 1778747555.9756095
+    },
+    {
+      "type": "grasp",
+      "result": {
+        "success": true
+      },
+      "time": 1778747579.5359309
+    },
+    {
+      "type": "place",
+      "result": {
+        "success": true
+      },
+      "time": 1778747590.0858095
+    }
+  ],
+  "critic_records": [],
+  "verification_records": [],
+  "failure_records": [],
+  "status": "ready"
+}

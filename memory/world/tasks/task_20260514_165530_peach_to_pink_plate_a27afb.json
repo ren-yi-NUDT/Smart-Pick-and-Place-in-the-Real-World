@@ -1,0 +1,112 @@
+{
+  "memory_id": "task_20260514_165530_peach_to_pink_plate_a27afb",
+  "created_at": 1778748930.8608148,
+  "updated_at": 1778748955.0514598,
+  "command": {
+    "object": "peach",
+    "container": "pink plate"
+  },
+  "mode": "normal_place",
+  "task_goal": {
+    "object": "peach",
+    "container": "pink plate",
+    "source": "workspace"
+  },
+  "robot_state": {
+    "holding": null,
+    "last_action": {
+      "type": "grasp",
+      "result": {
+        "success": false,
+        "object": "peach"
+      },
+      "time": 1778748955.0503018
+    }
+  },
+  "object_index": {},
+  "container_index": {},
+  "spatial_relations": [],
+  "observation_history": [
+    {
+      "source": "world_model_critic.verify_grasp",
+      "robot_state": {
+        "holding": null
+      },
+      "time": 1778748955.050747
+    }
+  ],
+  "action_history": [
+    {
+      "type": "memory_setup",
+      "command": {
+        "object": "peach",
+        "container": "pink plate"
+      },
+      "time": 1778748930.8608186
+    },
+    {
+      "type": "parse_input",
+      "input": {
+        "object": "peach",
+        "container": "pink plate"
+      },
+      "time": 1778748930.861495
+    },
+    {
+      "type": "grasp",
+      "result": {
+        "success": false,
+        "object": "peach"
+      },
+      "time": 1778748955.0503018
+    }
+  ],
+  "critic_records": [
+    {
+      "stage": "before_grasp",
+      "approved": true,
+      "target_object": "peach",
+      "robot_state": {
+        "holding": null
+      },
+      "missing": [],
+      "risks": [],
+      "next_action": "run_grasp",
+      "time": 1778748930.8618467
+    }
+  ],
+  "verification_records": [
+    {
+      "stage": "after_grasp",
+      "success": false,
+      "expected": {
+        "robot_holding_target": true
+      },
+      "observed": {
+        "holding": null,
+        "grasp_result": {
+          "success": false,
+          "object": "peach"
+        }
+      },
+      "target_object": "peach",
+      "verified_object": null,
+      "memory_update_policy": "do_not_set_holding",
+      "next_action": "retry_or_reobserve",
+      "time": 1778748955.051105
+    }
+  ],
+  "failure_records": [
+    {
+      "stage": "after_grasp",
+      "reason": "grasp failed or grasp success not verified",
+      "target_object": "peach",
+      "grasp_result": {
+        "success": false,
+        "object": "peach"
+      },
+      "time": 1778748955.0514169
+    }
+  ],
+  "status": "blocked_or_failed"
+}

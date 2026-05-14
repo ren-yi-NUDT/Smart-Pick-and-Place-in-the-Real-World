@@ -19,6 +19,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pose_execute
 ```
 
+> 注意: pose_execute 直接连接 socket 服务器 (127.0.0.1:8010/8000)，**不需要 source ROS 环境**
+
 ## 执行动作序列（从 stdin 传入）
 
 ```bash

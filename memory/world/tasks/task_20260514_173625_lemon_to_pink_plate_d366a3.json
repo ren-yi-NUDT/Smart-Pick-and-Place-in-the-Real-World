@@ -1,0 +1,174 @@
+{
+  "memory_id": "task_20260514_173625_lemon_to_pink_plate_d366a3",
+  "created_at": 1778751385.6765356,
+  "updated_at": 1778751423.839104,
+  "command": {
+    "object": "lemon",
+    "container": "pink plate"
+  },
+  "mode": "normal_place",
+  "task_goal": {
+    "object": "lemon",
+    "container": "pink plate",
+    "source": "workspace"
+  },
+  "robot_state": {
+    "holding": "lemon",
+    "last_action": {
+      "type": "place",
+      "result": {
+        "success": false,
+        "type": "unknown",
+        "container": "pink plate",
+        "hand_opened": false
+      },
+      "time": 1778751423.837739
+    }
+  },
+  "object_index": {},
+  "container_index": {},
+  "spatial_relations": [],
+  "observation_history": [
+    {
+      "source": "world_model_critic.verify_grasp",
+      "robot_state": {
+        "holding": "lemon"
+      },
+      "time": 1778751406.2906642
+    }
+  ],
+  "action_history": [
+    {
+      "type": "memory_setup",
+      "command": {
+        "object": "lemon",
+        "container": "pink plate"
+      },
+      "time": 1778751385.6765392
+    },
+    {
+      "type": "parse_input",
+      "input": {
+        "object": "lemon",
+        "container": "pink plate"
+      },
+      "time": 1778751385.677154
+    },
+    {
+      "type": "grasp",
+      "result": {
+        "success": true,
+        "hand_closed": true,
+        "finger_deviation": 2662.0,
+        "object": "lemon"
+      },
+      "time": 1778751406.2897546
+    },
+    {
+      "type": "place",
+      "result": {
+        "success": false,
+        "type": "unknown",
+        "container": "pink plate",
+        "hand_opened": false
+      },
+      "time": 1778751423.837739
+    }
+  ],
+  "critic_records": [
+    {
+      "stage": "before_grasp",
+      "approved": true,
+      "target_object": "lemon",
+      "robot_state": {
+        "holding": null
+      },
+      "missing": [],
+      "risks": [],
+      "next_action": "run_grasp",
+      "time": 1778751385.6774657
+    },
+    {
+      "stage": "before_normal_place",
+      "approved": true,
+      "mode": "normal_place",
+      "target_container": "pink plate",
+      "robot_state": {
+        "holding": "lemon"
+      },
+      "missing": [],
+      "risks": [],
+      "next_action": "place",
+      "time": 1778751406.2918339
+    }
+  ],
+  "verification_records": [
+    {
+      "stage": "after_grasp",
+      "success": true,
+      "expected": {
+        "robot_holding_target": true,
+        "min_finger_deviation": 5.0
+      },
+      "observed": {
+        "hand_closed": true,
+        "finger_deviation": 2662.0,
+        "trajectory_ok": true,
+        "evidence_holding": true,
+        "grasp_result": {
+          "success": true,
+          "hand_closed": true,
+          "finger_deviation": 2662.0,
+          "object": "lemon"
+        }
+      },
+      "target_object": "lemon",
+      "verified_object": "lemon",
+      "memory_update_policy": "set_holding",
+      "next_action": "critic_before_destination",
+      "time": 1778751406.2912161
+    },
+    {
+      "stage": "after_destination_action",
+      "success": false,
+      "mode": "normal_place",
+      "expected": {
+        "robot_released_object": true,
+        "hand_opened": true
+      },
+      "observed": {
+        "hand_opened": false,
+        "trajectory_ok": false,
+        "evidence_released": false,
+        "holding_before": "lemon",
+        "holding_after": "lemon",
+        "action_result": {
+          "success": false,
+          "type": "unknown",
+          "container": "pink plate",
+          "hand_opened": false
+        }
+      },
+      "memory_update_policy": "do_not_clear_holding",
+      "next_action": "replan_or_safe_recover",
+      "time": 1778751423.8382764
+    }
+  ],
+  "failure_records": [
+    {
+      "stage": "after_destination_action",
+      "reason": "destination action not verified by real-world evidence",
+      "mode": "normal_place",
+      "holding_before": "lemon",
+      "target_container": "pink plate",
+      "action_result": {
+        "success": false,
+        "type": "unknown",
+        "container": "pink plate",
+        "hand_opened": false
+      },
+      "time": 1778751423.8390572
+    }
+  ],
+  "status": "blocked_or_failed"
+}

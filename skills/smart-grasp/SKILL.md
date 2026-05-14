@@ -16,13 +16,23 @@ lsof -ti:8000,8010,8020  # 应返回3个PID
 
 # 2. 执行（所有模式统一入口）
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World && \
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"object":"orange","container":"green bowl"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pick_and_place
 ```
 
+> run_skill.py 会自动 chdir 到项目根目录并配置 sys.path，一般不需要手动 source ROS 环境
+
 **服务启动** (如果未运行):
-- `bash start.bash` (自动在2个终端启动所有服务)
+- `bash start.bash` (自动在多个终端启动所有服务)
+
+### 新增：pick_and_place_v2（世界记忆+自我评估版）
+```bash
+echo '{"object":"orange","container":"green bowl"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py pick_and_place_v2
+```
+- 整合了世界记忆系统和世界模型批评器
+- 自动评估每个阶段（抓取前/后、放置前/后）
+- 支持 mock 模式和重试逻辑
+- **注意**：v2 仍在试用阶段，日常工作优先使用 `pick_and_place` 原版
 
 ## JSON 格式
 
@@ -42,7 +52,7 @@ echo '{"object":"orange","container":"green bowl"}' | /home/zz/anaconda3/envs/an
 
 ### fetch_from_user (从用户接收)
 ```bash
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"container":"pink plate"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py fetch_from_user
 ```
 - **只需要 container**，物品由用户递给机械臂
@@ -61,15 +71,15 @@ echo '{"container":"pink plate"}' | /home/zz/anaconda3/envs/anygrasp/bin/python 
 
 ```bash
 # 看桌上有什么（执行后回到 grasp1 位）
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py look_around
 
 # 看用户手里有什么（执行后回到 grasp1 位）
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py capture_at_handover
 ```
 
-> **注意**：`look_around` 和 `capture_at_handover` 执行后会直接输出 VLM 模型的分析结果（桌面上有什么物品及位置 / 用户手里拿的什么），**无需再用 image 工具重新分析**。直接使用 stdout 中的分析结果即可。
+> **注意**：`look_around` 和 `capture_at_handover` 内置 GLM-4.5V VLM 分析，执行后直接输出分析结果（桌面上有什么物品及位置 / 用户手里拿的什么），**无需再用 image 工具重新分析**。直接使用 stdout 中的分析结果即可。
 
 # 查看所有可用 skill
 python3 run_skill.py list
@@ -84,7 +94,7 @@ python3 run_skill.py list
 
 ```bash
 # 示例：环顾后不复位，接着做其他操作
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"reset_pose": null}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py look_around
 ```
 
@@ -96,7 +106,7 @@ echo '{"reset_pose": null}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_sk
 ### grasp — 单独抓取
 
 ```bash
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"object":"peach"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py grasp
 ```
 - **object** (必需): 目标物品名称 (YOLO-World 类别名)
@@ -106,7 +116,7 @@ echo '{"object":"peach"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skil
 ### trash — 扔垃圾
 
 ```bash
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"object":"wrapper","container":"trash"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py trash
 ```
 - **前提**：物品已被 grasp 抓住
@@ -115,7 +125,7 @@ echo '{"object":"wrapper","container":"trash"}' | /home/zz/anaconda3/envs/anygra
 ### desk_place — 放桌面
 
 ```bash
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"object":"cup","container":"desk"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py desk_place
 ```
 - **前提**：物品已被 grasp 抓住
@@ -124,7 +134,7 @@ echo '{"object":"cup","container":"desk"}' | /home/zz/anaconda3/envs/anygrasp/bi
 ### handover — 递给用户
 
 ```bash
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"object":"bottle","container":"person"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py handover
 ```
 - **前提**：物品已被 grasp 抓住
@@ -134,7 +144,7 @@ echo '{"object":"bottle","container":"person"}' | /home/zz/anaconda3/envs/anygra
 ### place — 放到容器
 
 ```bash
-source dependence/smart_pick_and_place_ws/devel/setup.bash && \
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib && \
 echo '{"object":"orange","container":"green bowl"}' | /home/zz/anaconda3/envs/anygrasp/bin/python run_skill.py place
 ```
 - **前提**：物品已被 grasp 抓住

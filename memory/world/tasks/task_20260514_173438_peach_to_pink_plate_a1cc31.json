@@ -1,0 +1,124 @@
+{
+  "memory_id": "task_20260514_173438_peach_to_pink_plate_a1cc31",
+  "created_at": 1778751278.912012,
+  "updated_at": 1778751304.5979373,
+  "command": {
+    "object": "peach",
+    "container": "pink plate"
+  },
+  "mode": "normal_place",
+  "task_goal": {
+    "object": "peach",
+    "container": "pink plate",
+    "source": "workspace"
+  },
+  "robot_state": {
+    "holding": null,
+    "last_action": {
+      "type": "grasp",
+      "result": {
+        "success": false,
+        "hand_closed": false,
+        "finger_deviation": 0.0,
+        "object": "peach"
+      },
+      "time": 1778751304.5964894
+    }
+  },
+  "object_index": {},
+  "container_index": {},
+  "spatial_relations": [],
+  "observation_history": [
+    {
+      "source": "world_model_critic.verify_grasp",
+      "robot_state": {
+        "holding": null
+      },
+      "time": 1778751304.597043
+    }
+  ],
+  "action_history": [
+    {
+      "type": "memory_setup",
+      "command": {
+        "object": "peach",
+        "container": "pink plate"
+      },
+      "time": 1778751278.9120162
+    },
+    {
+      "type": "parse_input",
+      "input": {
+        "object": "peach",
+        "container": "pink plate"
+      },
+      "time": 1778751278.9126756
+    },
+    {
+      "type": "grasp",
+      "result": {
+        "success": false,
+        "hand_closed": false,
+        "finger_deviation": 0.0,
+        "object": "peach"
+      },
+      "time": 1778751304.5964894
+    }
+  ],
+  "critic_records": [
+    {
+      "stage": "before_grasp",
+      "approved": true,
+      "target_object": "peach",
+      "robot_state": {
+        "holding": null
+      },
+      "missing": [],
+      "risks": [],
+      "next_action": "run_grasp",
+      "time": 1778751278.9130065
+    }
+  ],
+  "verification_records": [
+    {
+      "stage": "after_grasp",
+      "success": false,
+      "expected": {
+        "robot_holding_target": true,
+        "min_finger_deviation": 5.0
+      },
+      "observed": {
+        "hand_closed": false,
+        "finger_deviation": 0.0,
+        "trajectory_ok": false,
+        "evidence_holding": false,
+        "grasp_result": {
+          "success": false,
+          "hand_closed": false,
+          "finger_deviation": 0.0,
+          "object": "peach"
+        }
+      },
+      "target_object": "peach",
+      "verified_object": null,
+      "memory_update_policy": "do_not_set_holding",
+      "next_action": "retry_or_reobserve",
+      "time": 1778751304.597433
+    }
+  ],
+  "failure_records": [
+    {
+      "stage": "after_grasp",
+      "reason": "grasp not verified by real-world evidence",
+      "target_object": "peach",
+      "grasp_result": {
+        "success": false,
+        "hand_closed": false,
+        "finger_deviation": 0.0,
+        "object": "peach"
+      },
+      "time": 1778751304.5978801
+    }
+  ],
+  "status": "blocked_or_failed"
+}

@@ -1,0 +1,176 @@
+{
+  "memory_id": "task_20260514_174715_unknown_object_to_unknown_container_f906a1",
+  "created_at": 1778752035.0781913,
+  "updated_at": 1778752050.6371715,
+  "command": {
+    "sequence": [
+      {
+        "hand": "open",
+        "delay": 0.3
+      },
+      {
+        "arm": "palm_toward_user",
+        "delay": 0.1
+      },
+      {
+        "arm": "palm_toward_user_right",
+        "delay": 0.1
+      },
+      {
+        "arm": "palm_toward_user",
+        "delay": 0.1
+      },
+      {
+        "arm": "palm_toward_user_right",
+        "delay": 0.1
+      },
+      {
+        "arm": "home",
+        "delay": 0.5
+      },
+      {
+        "arm": "grasp-ready",
+        "delay": 0.5
+      }
+    ],
+    "skill": "pose_execute"
+  },
+  "mode": "normal_place",
+  "task_goal": {
+    "object": null,
+    "container": null,
+    "source": "workspace"
+  },
+  "robot_state": {
+    "holding": null,
+    "last_action": {
+      "type": "pose_execute_critic",
+      "critic": {
+        "success": true,
+        "failure_count": 0,
+        "resolved_failures": 0,
+        "unresolved_failures": 0,
+        "conditions": {
+          "grasp_success": true,
+          "destination_action_success": true,
+          "robot_not_holding": true,
+          "no_unresolved_failures": true
+        },
+        "object": null,
+        "container": null,
+        "mode": "unknown"
+      },
+      "time": 1778752050.6371126
+    }
+  },
+  "object_index": {},
+  "container_index": {},
+  "spatial_relations": [],
+  "observation_history": [],
+  "action_history": [
+    {
+      "type": "memory_setup",
+      "command": {
+        "sequence": [
+          {
+            "hand": "open",
+            "delay": 0.3
+          },
+          {
+            "arm": "palm_toward_user",
+            "delay": 0.1
+          },
+          {
+            "arm": "palm_toward_user_right",
+            "delay": 0.1
+          },
+          {
+            "arm": "palm_toward_user",
+            "delay": 0.1
+          },
+          {
+            "arm": "palm_toward_user_right",
+            "delay": 0.1
+          },
+          {
+            "arm": "home",
+            "delay": 0.5
+          },
+          {
+            "arm": "grasp-ready",
+            "delay": 0.5
+          }
+        ],
+        "skill": "pose_execute"
+      },
+      "time": 1778752035.0781946
+    },
+    {
+      "type": "pose_execute_start",
+      "input": {
+        "sequence": [
+          {
+            "hand": "open",
+            "delay": 0.3
+          },
+          {
+            "arm": "palm_toward_user",
+            "delay": 0.1
+          },
+          {
+            "arm": "palm_toward_user_right",
+            "delay": 0.1
+          },
+          {
+            "arm": "palm_toward_user",
+            "delay": 0.1
+          },
+          {
+            "arm": "palm_toward_user_right",
+            "delay": 0.1
+          },
+          {
+            "arm": "home",
+            "delay": 0.5
+          },
+          {
+            "arm": "grasp-ready",
+            "delay": 0.5
+          }
+        ]
+      },
+      "time": 1778752035.079068
+    },
+    {
+      "type": "pose_execute_result",
+      "result": {
+        "success": true,
+        "raw": "{'success': True, 'info': {'sequence': True}}"
+      },
+      "time": 1778752050.6364083
+    },
+    {
+      "type": "pose_execute_critic",
+      "critic": {
+        "success": true,
+        "failure_count": 0,
+        "resolved_failures": 0,
+        "unresolved_failures": 0,
+        "conditions": {
+          "grasp_success": true,
+          "destination_action_success": true,
+          "robot_not_holding": true,
+          "no_unresolved_failures": true
+        },
+        "object": null,
+        "container": null,
+        "mode": "unknown"
+      },
+      "time": 1778752050.6371126
+    }
+  ],
+  "critic_records": [],
+  "verification_records": [],
+  "failure_records": [],
+  "status": "ready"
+}

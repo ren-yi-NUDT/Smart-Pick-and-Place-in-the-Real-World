@@ -1,0 +1,5 @@
+{"time": 1778747555.9750361, "type": "action", "payload": {"type": "memory_setup", "command": {"object": "peach", "container": "pink plate"}, "time": 1778747555.9750354}}
+{"time": 1778747555.9753704, "type": "status", "payload": {"status": "ready"}}
+{"time": 1778747555.9756107, "type": "action", "payload": {"type": "parse_input", "input": {"object": "peach", "container": "pink plate"}, "time": 1778747555.9756095}}
+{"time": 1778747579.535937, "type": "action", "payload": {"type": "grasp", "result": {"success": true}, "time": 1778747579.5359309}}
+{"time": 1778747590.0858133, "type": "action", "payload": {"type": "place", "result": {"success": true}, "time": 1778747590.0858095}}

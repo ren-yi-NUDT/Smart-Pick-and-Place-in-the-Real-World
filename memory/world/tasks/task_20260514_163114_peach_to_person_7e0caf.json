@@ -1,0 +1,44 @@
+{
+  "memory_id": "task_20260514_163114_peach_to_person_7e0caf",
+  "created_at": 1778747474.0679824,
+  "updated_at": 1778747474.0683734,
+  "command": {
+    "object": "peach",
+    "container": "person"
+  },
+  "mode": "handover",
+  "task_goal": {
+    "object": "peach",
+    "container": "person",
+    "source": "workspace"
+  },
+  "robot_state": {
+    "holding": null,
+    "last_action": {
+      "type": "memory_setup",
+      "command": {
+        "object": "peach",
+        "container": "person"
+      },
+      "time": 1778747474.0679862
+    }
+  },
+  "object_index": {},
+  "container_index": {},
+  "spatial_relations": [],
+  "observation_history": [],
+  "action_history": [
+    {
+      "type": "memory_setup",
+      "command": {
+        "object": "peach",
+        "container": "person"
+      },
+      "time": 1778747474.0679862
+    }
+  ],
+  "critic_records": [],
+  "verification_records": [],
+  "failure_records": [],
+  "status": "ready"
+}

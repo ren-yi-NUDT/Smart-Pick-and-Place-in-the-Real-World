@@ -1,0 +1,4 @@
+{"time": 1778748833.339391, "type": "action", "payload": {"type": "memory_setup", "command": {"object": "peach", "container": "plate"}, "time": 1778748833.33939}}
+{"time": 1778748833.340016, "type": "status", "payload": {"status": "ready"}}
+{"time": 1778748833.340322, "type": "action", "payload": {"type": "parse_input", "input": {"object": "peach", "container": "plate"}, "time": 1778748833.3403168}}
+{"time": 1778748833.340577, "type": "critic", "payload": {"stage": "before_grasp", "approved": true, "target_object": "peach", "robot_state": {"holding": null}, "missing": [], "risks": [], "next_action": "run_grasp", "time": 1778748833.3405716}}
