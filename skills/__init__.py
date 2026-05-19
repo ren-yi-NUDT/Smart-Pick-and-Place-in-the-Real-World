@@ -9,4 +9,5 @@ from skills import (
     handover,
     trash,
     desk_place,
+    grasp_to_drawer,
 )

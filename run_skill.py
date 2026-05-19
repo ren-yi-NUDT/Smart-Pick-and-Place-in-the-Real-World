@@ -11,6 +11,7 @@ import sys
 import json
 import argparse
 import os
+from termcolor import cprint
 
 
 def main():
@@ -51,6 +52,7 @@ def main():
         except json.JSONDecodeError:
             pass
 
+    cprint(f"[run_skill] Executing: {args.skill} | kwargs={kwargs}", "cyan")
     result = skill.run(**kwargs)
     if result is False:
         print("Skill execution failed")

@@ -68,10 +68,15 @@ class Skill(ABC):
     def arm(self):
         """Return an initialized ArmController + connected socket client."""
         if self._arm is None:
-            import socket
-            from core.config import HOST, ARM_PORT
             from core.arm import ArmClient
-            client = ArmClient(HOST, ARM_PORT)
+            if self.config._is_new_format:
+                left_cfg = self.config.get_arm_config("left")
+                host = self.config.shared.get("host", "127.0.0.1")
+                port = left_cfg.get("arm_port", 8010)
+            else:
+                from core.config import HOST, ARM_PORT
+                host, port = HOST, ARM_PORT
+            client = ArmClient(host, port)
             client.connect()
             self._arm = client
         return self._arm
@@ -83,9 +88,15 @@ class Skill(ABC):
     def hand(self):
         """Return a connected HandClient."""
         if self._hand is None:
-            from core.config import HOST, HAND_PORT
             from core.hand import HandClient
-            client = HandClient(HOST, HAND_PORT)
+            if self.config._is_new_format:
+                left_cfg = self.config.get_arm_config("left")
+                host = self.config.shared.get("host", "127.0.0.1")
+                port = left_cfg.get("hand_port", 8000)
+            else:
+                from core.config import HOST, HAND_PORT
+                host, port = HOST, HAND_PORT
+            client = HandClient(host, port)
             client.connect()
             self._hand = client
         return self._hand
@@ -271,3 +282,89 @@ class Skill(ABC):
     def run(self, **kwargs):
         """Execute the skill.  Subclasses must override."""
         pass
+
+
+# ---------------------------------------------------------------------------
+# Dual-Arm Skill Base
+# ---------------------------------------------------------------------------
+class DualArmSkill(Skill):
+    """
+    Base class for dual-arm skills.
+
+    Holds two :class:`ArmSide` instances (``left`` / ``right``) plus a
+    :class:`DualArmSync` for coordinated operations.  Shared resources
+    (camera, twin, perception, vlm, transforms, etc.) are inherited from
+    :class:`Skill`.
+    """
+
+    def __init__(self, config_path="./robot_config.json", save_path="./log"):
+        super().__init__(config_path, save_path)
+        from core.arm_side import ArmSide
+        from core.sync import DualArmSync
+
+        if not self.config._is_new_format:
+            raise RuntimeError(
+                "DualArmSkill requires the new dual-arm config format "
+                "(top-level 'arms' key in robot_config.json). "
+                f"Found keys: {list(self.config._raw.keys())}"
+            )
+
+        host = self.config.shared.get("host", "127.0.0.1")
+        self.left = ArmSide("left", self.config.get_arm_config("left"), host=host)
+        self.right = ArmSide("right", self.config.get_arm_config("right"), host=host)
+        self.sync = DualArmSync()
+
+    # ------------------------------------------------------------------
+    # Convenience: move both arms in parallel
+    # ------------------------------------------------------------------
+    def move_both(self, left_pose_type=None, right_pose_type=None, speed=20):
+        """Move both arms to their respective named poses simultaneously."""
+        from threading import Thread
+
+        def _move_arm(arm_side, pose_name, spd):
+            pose = arm_side.get_pose(pose_name)
+            arm_side.arm.move_to_named_pose(pose, speed=spd)
+
+        t1 = Thread(target=_move_arm, args=(self.left, left_pose_type, speed))
+        t2 = Thread(target=_move_arm, args=(self.right, right_pose_type, speed))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+    # ------------------------------------------------------------------
+    # Convenience: inter-arm handover
+    # ------------------------------------------------------------------
+    def handover(self, from_side="left", to_side="right"):
+        """
+        Transfer an object from one arm to the other.
+
+        Both arms move to the handover pose pair in parallel, the *giver*
+        opens its hand, and the *receiver* closes.
+        """
+        from threading import Thread
+
+        # Retrieve the handover pose pair from config
+        key = f"{from_side}_to_{to_side}_handover"
+        poses = self.config.get_dual_arm_pose(key)
+        left_pose = poses.get("left_pose")
+        right_pose = poses.get("right_pose")
+        if left_pose is None or right_pose is None:
+            raise KeyError(
+                f"Dual-arm handover pose '{key}' must contain both "
+                f"'left_pose' and 'right_pose', got: {list(poses.keys())}"
+            )
+
+        # Move both arms to their handover positions in parallel
+        t1 = Thread(target=self.left.arm.move_to_named_pose, args=(left_pose,))
+        t2 = Thread(target=self.right.arm.move_to_named_pose, args=(right_pose,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        # Giver opens, receiver closes
+        giver = self.left if from_side == "left" else self.right
+        receiver = self.right if from_side == "left" else self.left
+        giver.hand.open()
+        receiver.hand.close()
