@@ -1,6 +1,9 @@
 .vscode/
 anygrasp_sdk/.vscode/
 anygrasp_sdk/grasp_tracking/
+
+# Large model files (symlinked to ~/Code/model_cache/)
+*.tar
 smart_pick_and_place_ws/devel/
 smart_pick_and_place_ws/*/CMakeLists.txt
 log/
