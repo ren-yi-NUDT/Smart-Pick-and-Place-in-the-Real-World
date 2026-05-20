@@ -32,7 +32,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 ```
 
 **硬件 IP 地址**：
-- 机械臂：192.168.1.19
+- 左臂（灵巧手）：192.168.1.19，Socket 端口 8010
+- 右臂（夹爪）：192.168.1.18，Socket 端口 8011
 - 灵巧手：192.168.11.209
 
 ## 系统架构
@@ -194,7 +195,7 @@ Smart-Pick-and-Place-in-the-Real-World/
 | `src/rm_65_pkg/src/mount_camera.py` | 相机安装/标定节点 |
 | `src/rm_65_pkg/src/inspire_hand_bringup.py` | Inspire 灵巧手 ROS 节点 |
 | `src/rm_65_pkg/src/hand_controller_modbus.py` | 通过 Modbus 协议控制灵巧手 |
-| `src/rm_description/urdf/SingleArm/` | 仿真用 URDF 模型和机器人配置 |
+| `src/rm_description/urdf/LeftArm/` | 仿真用 URDF 模型和机器人配置 |
 
 ## Socket 通信协议
 
@@ -257,7 +258,7 @@ Smart-Pick-and-Place-in-the-Real-World/
 
 - YOLO-World：`dependence/yolo_world/yolov8x-worldv2.pt`
 - AnyGrasp：`dependence/anygrasp_sdk/checkpoint_detection.tar`
-- URDF（孪生模型）：`dependence/smart_pick_and_place_ws/src/rm_description/urdf/SingleArm/easy_single_arm_bullet.urdf`
+- URDF（孪生模型）：`dependence/smart_pick_and_place_ws/src/rm_description/urdf/LeftArm/left_arm_bullet.urdf`
 
 ## 流水线流程 (pick_and_place)
 
@@ -283,6 +284,30 @@ Smart-Pick-and-Place-in-the-Real-World/
 3. 等待用户放入物品（初始等待 1s + 重试等待 3s）
 4. 闭合手，验证抓取（手指位置差值检测）
 5. 执行放置（内联执行，模式同 pick_and_place）
+
+## 位姿录制
+
+使用 `tools/pose_record.py` 直连机械臂 SDK 读取当前关节角度，保存到 `recorded_poses.json`。
+
+```bash
+conda activate anygrasp
+
+# 录制左臂位姿（默认）
+python3 tools/pose_record.py record --name grasp1 --desc "抓取位1"
+
+# 交互式连续录制左臂
+python3 tools/pose_record.py record -i
+
+# 录制右臂位姿（--arm right 指定 192.168.1.18）
+python3 tools/pose_record.py record --name grasp1 --arm right
+python3 tools/pose_record.py record -i --arm right
+
+# 查看 / 删除已录制位姿
+python3 tools/pose_record.py list
+python3 tools/pose_record.py delete --name grasp1
+```
+
+**操作流程**：开启示教模式 → 手动将机械臂拖到目标位姿 → 运行录制命令 → 位姿自动保存。录制完成后需手动将位姿复制到 `robot_config.json` 对应的 left/right arm 配置中。
 
 ## 开发原则
 

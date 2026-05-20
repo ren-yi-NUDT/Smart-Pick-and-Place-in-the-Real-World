@@ -38,8 +38,8 @@ class TwinTest2(World):
     def __init__(self, vis=True):
         self.vis = vis
         self.camera_refresh_freq = 50
-        urdf_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf/SingleArm")
-        self.robot_path = os.path.join(urdf_dir, "easy_single_arm_bullet.urdf")
+        urdf_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf/LeftArm")
+        self.robot_path = os.path.join(urdf_dir, "left_arm_bullet.urdf")
         self.robot_config_path = os.path.join(urdf_dir, "robot_config.json")
         self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0), robot_path = self.robot_path, config_path = self.robot_config_path, fixed_robot = True, vis=self.vis)        
 

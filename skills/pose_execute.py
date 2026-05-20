@@ -5,17 +5,21 @@
 ============
 通过技能框架注册，负责机械臂位姿回放、灵巧手手势执行和动作序列播放。
 
-使用 socket 服务器 (arm :8010, hand :8000) 发送控制指令。
-从 recorded_poses.json 读取已录制的位姿数据。
+支持双臂独立控制和并行执行。位姿从 recorded_poses/{left,right}.json 加载，
+通过 socket 服务器（左臂 :8010，右臂 :8011）发送控制指令。
 
 命令接口 (run kwargs):
-    {"command": "play",  "name": "home",  "speed": 30}
-    {"command": "play",  "name": "home",  "speed": 30, "block": true}
-    {"command": "list"}
+    {"command": "play",  "name": "home",  "arm": "left", "speed": 30}
+    {"command": "play",  "name": "home",  "arm": "right", "speed": 30, "block": true}
+    {"command": "list",  "arm": "left"}
     {"command": "play",  "sequence": "path/to/sequence.json"}
     {"command": "play",  "sequence": "<json string>", "sequence_is_string": true}
     {"command": "play",  "hand": "open"}
     {"command": "play",  "hand": [0,0,1000,1000,0,0]}
+    {"command": "play",  "parallel": [
+        {"name": "handover_pose", "arm": "left", "speed": 30},
+        {"name": "home", "arm": "right", "speed": 30}
+    ]}
 
 手势格式支持:
     - 预设名称: "open", "close", "peace", "rock", "pointing", "thumbs_up", "ok", "grab"
@@ -29,6 +33,7 @@ import json
 import socket
 import struct
 import time
+from threading import Thread
 from termcolor import cprint
 
 from skills.base import Skill, register_skill
@@ -37,13 +42,13 @@ from skills.base import Skill, register_skill
 # 常量
 # ---------------------------------------------------------------------------
 
-DEFAULT_POSE_FILE = os.path.join(
+POSES_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "recorded_poses.json",
+    "recorded_poses",
 )
 
 ARM_SERVER_HOST = "127.0.0.1"
-ARM_SERVER_PORT = 8010
+ARM_PORTS = {"left": 8010, "right": 8011}
 HAND_SERVER_HOST = "127.0.0.1"
 HAND_SERVER_PORT = 8000
 
@@ -65,9 +70,9 @@ HAND_GESTURES = {
 # 辅助函数
 # ---------------------------------------------------------------------------
 
-def _load_poses(pose_file=None):
-    """加载已保存的位姿"""
-    pose_file = pose_file or DEFAULT_POSE_FILE
+def _load_poses(arm="left"):
+    """加载已保存的位姿（从 recorded_poses/{arm}.json）"""
+    pose_file = os.path.join(POSES_DIR, f"{arm}.json")
     if os.path.exists(pose_file):
         with open(pose_file, "r") as f:
             return json.load(f)
@@ -169,46 +174,52 @@ def _send_hand_command(sock, gesture):
 @register_skill("pose_execute")
 class PoseExecuteSkill(Skill):
     """
-    位姿执行技能
+    位姿执行技能（双臂 + 并行）
 
     通过 socket 服务器回放已录制的机械臂位姿、执行灵巧手手势、播放动作序列。
+    支持通过 arm 参数指定左/右臂，以及通过 parallel 参数并行执行多个动作。
 
     使用:
         skill = PoseExecuteSkill()
-        skill.run(command="play", name="home", speed=30)
-        skill.run(command="list")
+        skill.run(command="play", name="home", arm="left", speed=30)
+        skill.run(command="play", name="home", arm="right", speed=30)
+        skill.run(command="list", arm="left")
         skill.run(command="play", hand="open")
         skill.run(command="play", sequence="sequence.json")
+        skill.run(command="play", parallel=[
+            {"name": "handover_pose", "arm": "left"},
+            {"name": "home", "arm": "right"},
+        ])
     """
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        # self.arm and self.hand are injected by the skill framework (socket connections)
-        # If not injected, connections are created on first use
-        self._arm_sock = None
+        self._arm_socks = {}   # {"left": sock, "right": sock}
         self._hand_sock = None
 
-    # -- 连接管理 (fallback) --
+    # -- 连接管理 --
 
-    @property
-    def arm_sock(self):
-        """获取机械臂 socket 连接 (独立的 raw socket，不走 base.py 的 ArmClient)"""
-        if self._arm_sock is None:
+    def _get_arm_sock(self, arm="left"):
+        """获取指定臂的 socket 连接"""
+        if arm not in self._arm_socks or self._arm_socks[arm] is None:
+            port = ARM_PORTS.get(arm, 8010)
             try:
-                self._arm_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._arm_sock.connect((ARM_SERVER_HOST, ARM_SERVER_PORT))
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(120)
+                sock.connect((ARM_SERVER_HOST, port))
+                self._arm_socks[arm] = sock
                 cprint(
-                    f"[pose_execute] 已连接机械臂服务 {ARM_SERVER_HOST}:{ARM_SERVER_PORT}",
+                    f"[pose_execute] 已连接 {arm} 臂服务 {ARM_SERVER_HOST}:{port}",
                     "green",
                 )
             except Exception as e:
-                cprint(f"[pose_execute] 连接机械臂服务失败: {e}", "red")
-                self._arm_sock = None
-        return self._arm_sock
+                cprint(f"[pose_execute] 连接 {arm} 臂服务失败: {e}", "red")
+                self._arm_socks[arm] = None
+        return self._arm_socks[arm]
 
     @property
     def hand_sock(self):
-        """获取灵巧手 socket 连接 (独立的 raw socket，不走 base.py 的 HandClient)"""
+        """获取灵巧手 socket 连接"""
         if self._hand_sock is None:
             try:
                 self._hand_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -231,12 +242,14 @@ class PoseExecuteSkill(Skill):
         Args:
             **kwargs:
                 command (str): "play" 或 "list"
-                name (str): 位姿名称 (command="play" 时用于播放单个位姿)
+                name (str): 位姿名称
+                arm (str): "left" 或 "right" (默认 "left")
                 speed (int): 移动速度 0-100 (默认 30)
                 block (bool): 是否阻塞等待 (默认 True)
                 sequence (str): 序列文件路径或 JSON 字符串
                 sequence_is_string (bool): sequence 是 JSON 字符串而非文件路径
                 hand: 手势输入 (预设名/数组/字典)
+                parallel (list): 并行动作列表，每项含 name/arm/speed 等
 
         Returns:
             dict: {"success": bool, "info": str}
@@ -244,10 +257,16 @@ class PoseExecuteSkill(Skill):
         command = kwargs.get("command", "play")
 
         if command == "list":
-            return self.list_poses()
+            arm = kwargs.get("arm", "left")
+            return self.list_poses(arm)
 
         elif command == "play":
             results = {}
+
+            # 并行执行
+            parallel = kwargs.get("parallel")
+            if parallel is not None:
+                results["parallel"] = self.play_parallel(parallel)
 
             # 播放灵巧手手势
             hand = kwargs.get("hand")
@@ -263,12 +282,13 @@ class PoseExecuteSkill(Skill):
             # 播放单个位姿
             name = kwargs.get("name")
             if name is not None:
+                arm = kwargs.get("arm", "left")
                 speed = kwargs.get("speed", 30)
                 block = kwargs.get("block", True)
-                results["pose"] = self.play_pose(name, speed, block)
+                results["pose"] = self.play_pose(name, arm, speed, block)
 
             if not results:
-                return {"success": False, "info": "未指定 name/sequence/hand 参数"}
+                return {"success": False, "info": "未指定 name/sequence/hand/parallel 参数"}
 
             return {
                 "success": all(r for r in results.values() if isinstance(r, bool)),
@@ -280,41 +300,89 @@ class PoseExecuteSkill(Skill):
 
     # -- 位姿播放 --
 
-    def play_pose(self, name, speed=30, block=True):
+    def play_pose(self, name, arm="left", speed=30, block=True):
         """
         执行预设位姿
 
         Args:
             name: 位姿名称
+            arm: "left" 或 "right"
             speed: 移动速度 (0-100)
             block: 是否阻塞等待完成
 
         Returns:
             bool: 是否执行成功
         """
-        poses = _load_poses()
+        poses = _load_poses(arm)
 
         if name not in poses:
-            cprint(f"[pose_execute] 未找到位姿: {name}", "red")
+            cprint(f"[pose_execute] [{arm}] 未找到位姿: {name}", "red")
             return False
 
         pose_data = poses[name]
         joint_angles = pose_data["joint_angles_deg"]
 
-        sock = self.arm_sock
+        sock = self._get_arm_sock(arm)
         if sock is None:
-            cprint("[pose_execute] 无可用机械臂连接", "red")
+            cprint(f"[pose_execute] [{arm}] 无可用连接", "red")
             return False
 
         try:
             resp = _send_arm_command(sock, joint_angles, speed, block)
-            cprint(f"[pose_execute] 执行位姿 {name}: {resp}", "green")
+            cprint(f"[pose_execute] [{arm}] 执行位姿 {name}: {resp}", "green")
             return resp.get("value", False)
         except Exception as e:
-            cprint(f"[pose_execute] 执行位姿失败: {e}", "red")
-            # 重置连接以便下次重连
-            self._arm_sock = None
+            cprint(f"[pose_execute] [{arm}] 执行位姿失败: {e}", "red")
+            self._arm_socks[arm] = None
             return False
+
+    # -- 并行执行 --
+
+    def play_parallel(self, actions):
+        """
+        并行执行多个动作
+
+        Args:
+            actions: 动作列表，每项是一个 dict，支持:
+                - {"name": "pose_name", "arm": "left", "speed": 30}
+                - {"hand": "open"}
+                - {"name": "pose_name", "arm": "right", "speed": 20}
+
+        Returns:
+            bool: 是否全部执行成功
+        """
+        if not actions:
+            cprint("[pose_execute] parallel 动作列表为空", "red")
+            return False
+
+        cprint(f"[pose_execute] 并行执行 {len(actions)} 个动作", "cyan")
+        results = [None] * len(actions)
+
+        def _execute(idx, action):
+            name = action.get("name")
+            hand = action.get("hand")
+            if name is not None:
+                arm = action.get("arm", "left")
+                speed = action.get("speed", 30)
+                results[idx] = self.play_pose(name, arm, speed, block=True)
+            elif hand is not None:
+                results[idx] = self.play_hand_gesture(hand)
+
+        threads = []
+        for i, action in enumerate(actions):
+            t = Thread(target=_execute, args=(i, action))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        all_ok = all(r for r in results if isinstance(r, bool))
+        cprint(
+            f"[pose_execute] 并行执行完成: {results}",
+            "green" if all_ok else "red",
+        )
+        return all_ok
 
     # -- 灵巧手手势 --
 
@@ -359,10 +427,17 @@ class PoseExecuteSkill(Skill):
 
         Returns:
             bool: 是否全部执行成功
+
+        序列中每步支持:
+            - "arm_pose": 位姿名称（旧格式，默认左臂）
+            - "name": 位姿名称 + "arm": "left"/"right"
+            - "hand": 手势
+            - "parallel": 并行动作列表
+            - "speed": 速度
+            - "delay": 延时
         """
         try:
             if isinstance(sequence_input, (list, dict)):
-                # 已经是解析好的数据
                 seq_data = sequence_input if isinstance(sequence_input, dict) else {"sequence": sequence_input}
             elif is_file:
                 with open(sequence_input, "r") as f:
@@ -386,20 +461,26 @@ class PoseExecuteSkill(Skill):
         for i, step in enumerate(sequence):
             cprint(f"\n=== 步骤 {i+1}/{len(sequence)} ===", "yellow")
 
-            # 执行灵巧手 (先执行手)
+            # 并行子步骤
+            parallel = step.get("parallel")
+            if parallel is not None:
+                if not self.play_parallel(parallel):
+                    all_ok = False
+
+            # 灵巧手 (先执行手)
             hand_gesture = step.get("hand")
             if hand_gesture is not None:
                 if not self.play_hand_gesture(hand_gesture):
                     all_ok = False
 
-            # 执行机械臂
-            arm_pose = step.get("arm")
+            # 机械臂（支持新旧格式）
+            arm_pose = step.get("arm_pose") or step.get("name")
             if arm_pose is not None:
+                arm = step.get("arm", "left")
                 speed = step.get("speed", 30)
-                if not self.play_pose(arm_pose, speed):
+                if not self.play_pose(arm_pose, arm, speed):
                     all_ok = False
 
-            # 延时
             delay = step.get("delay", 0.5)
             time.sleep(delay)
 
@@ -408,15 +489,15 @@ class PoseExecuteSkill(Skill):
 
     # -- 查询 --
 
-    def list_poses(self):
-        """列出所有已录制的位姿"""
-        poses = _load_poses()
+    def list_poses(self, arm="left"):
+        """列出已录制的位姿"""
+        poses = _load_poses(arm)
 
         if not poses:
-            cprint("[pose_execute] 没有已录制的位姿", "yellow")
-            return {"success": True, "info": "没有已录制的位姿", "poses": {}}
+            cprint(f"[pose_execute] [{arm}] 没有已录制的位姿", "yellow")
+            return {"success": True, "info": f"{arm}臂没有已录制的位姿", "poses": {}}
 
-        cprint(f"\n已录制的位姿 ({len(poses)} 个):", "cyan")
+        cprint(f"\n[{arm}臂] 已录制的位姿 ({len(poses)} 个):", "cyan")
         print("=" * 60)
         for name, data in poses.items():
             desc = data.get("description", "N/A")
@@ -426,6 +507,6 @@ class PoseExecuteSkill(Skill):
 
         return {
             "success": True,
-            "info": f"共 {len(poses)} 个位姿",
+            "info": f"{arm}臂共 {len(poses)} 个位姿",
             "poses": list(poses.keys()),
         }

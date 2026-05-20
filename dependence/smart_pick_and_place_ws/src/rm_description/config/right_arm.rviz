@@ -1,0 +1,248 @@
+Panels:
+  - Class: rviz/Displays
+    Help Height: 70
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /RobotModel1
+      Splitter Ratio: 0.6676470637321472
+    Tree Height: 371
+  - Class: rviz/Selection
+    Name: Selection
+  - Class: rviz/Tool Properties
+    Expanded: ~
+    Name: Tool Properties
+    Splitter Ratio: 0.5886790156364441
+  - Class: rviz/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: rviz/Time
+    Name: Time
+    SyncMode: 0
+    SyncSource: ""
+Preferences:
+  PromptSaveOnExit: true
+Toolbars:
+  toolButtonStyle: 2
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 10
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Class: rviz/RobotModel
+      Collision Enabled: false
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        R_Link1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link3:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link4:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link5:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link6:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link7:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_arm_end_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_base:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_cam_link_grasp:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_gripper_base:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_gripper_endeffector:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_robot_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+      Name: RobotModel
+      Robot Description: robot_description
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+    - Class: rviz/TF
+      Enabled: true
+      Filter (blacklist): ""
+      Filter (whitelist): R_
+      Frame Timeout: 15
+      Frames:
+        All Enabled: false
+        R_Link1:
+          Value: false
+        R_Link2:
+          Value: false
+        R_Link3:
+          Value: false
+        R_Link4:
+          Value: false
+        R_Link5:
+          Value: false
+        R_Link6:
+          Value: true
+        R_Link7:
+          Value: true
+        R_arm_end_link:
+          Value: false
+        R_base:
+          Value: true
+        R_base_link:
+          Value: false
+        R_cam_link_grasp:
+          Value: true
+        R_gripper_base:
+          Value: true
+        R_gripper_endeffector:
+          Value: true
+        R_robot_base_link:
+          Value: false
+      Marker Alpha: 1
+      Marker Scale: 0.20000000298023224
+      Name: TF
+      Show Arrows: false
+      Show Axes: true
+      Show Names: false
+      Tree:
+        R_base:
+          R_base_link:
+            R_robot_base_link:
+              R_Link1:
+                R_Link2:
+                  R_Link3:
+                    R_Link4:
+                      R_Link5:
+                        R_Link6:
+                          R_Link7:
+                            R_arm_end_link:
+                              {}
+                            R_cam_link_grasp:
+                              {}
+                            R_gripper_base:
+                              R_gripper_endeffector:
+                                {}
+      Update Interval: 0
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Default Light: true
+    Fixed Frame: R_base_link
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+      Hide Inactive Objects: true
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 1.5225180387496948
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Field of View: 0.7853981852531433
+      Focal Point:
+        X: 0.3415312170982361
+        Y: -0.04112822562456131
+        Z: 0.2325979471206665
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.15520265698432922
+      Target Frame: <Fixed Frame>
+      Yaw: 0.7086080312728882
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: true
+  Height: 742
+  Hide Left Dock: true
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd0000000100000000000003bc00000276fc0200000005fb000000100044006900730070006c006100790073000000003d000000c9000000c900fffffffb0000001200530065006c0065006300740069006f006e000000010c0000005c0000005c00fffffffb0000001e0054006f006f006c002000500072006f0070006500720074006900650073000000016e0000005c0000005c00fffffffb0000000a0056006900650077007300000001d0000000a4000000a400fffffffb0000000800540069006d0065000000027a000000390000003900ffffff0000034a0000028c00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Selection:
+    collapsed: true
+  Time:
+    collapsed: true
+  Tool Properties:
+    collapsed: true
+  Views:
+    collapsed: true
+  Width: 842
+  X: 1030
+  Y: 27
