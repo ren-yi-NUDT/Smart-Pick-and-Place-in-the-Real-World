@@ -17,8 +17,6 @@ class HandoverSkill(Skill):
             return False
 
         cprint("=============== Moving to handover pose =============", "cyan")
-
-        # 分段移动，每段单点 block，服务端自己平滑插值
         if pose_1st is not None:
             self.control_arm(pose_type="get_ready_to_handover_1st", speed=15)
         if pose_2nd is not None:
@@ -28,8 +26,13 @@ class HandoverSkill(Skill):
         cprint("=============== Reached handover pose =============", "green")
         time.sleep(0.5)
         self.control_hand(cmd_type="open")
-        cprint("=============== Opened hand for handover =============", "green")
-        time.sleep(1)
-        self.control_arm(pose_type="grasp1", speed=30)
-        cprint("=============== Returned to safe pose =============", "cyan")
+        time.sleep(2)
+
+        cprint("=============== Retracing path back =============", "cyan")
+        if pose_2nd is not None:
+            self.control_arm(pose_type="get_ready_to_handover_2nd", speed=15)
+        if pose_1st is not None:
+            self.control_arm(pose_type="get_ready_to_handover_1st", speed=15)
+        self.control_arm(pose_type="home", speed=30)
+        cprint("=============== Returned to home =============", "green")
         return True

@@ -20,13 +20,7 @@ Usage (CLI):
 import os
 import copy
 import time
-import json
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from datetime import datetime
-from PIL import Image
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 
@@ -35,11 +29,6 @@ from core.transforms import (
     graspcam2pixel,
     self_rotation_np,
     rpy_to_vector,
-    transform_world_to_camera,
-    self_rotation_inv,
-    visualization,
-    pixel_to_camera_point,
-    pixel_to_camera_point2,
 )
 
 
@@ -57,43 +46,19 @@ class GraspSkill(Skill):
         super().__init__(**kw)
         self.rgb = None
         self.depth = None
-        self.point_cloud = None
-        self.self_pose_matrix = None
-        self.final_grasp_pose_data = []
-        self.default_traj_js_rad = [
-            v / 180 * np.pi
-            for v in self.config.default_traj_js["grasp1"].values()
-        ]
-
-    # ------------------------------------------------------------------
-    # AnyGrasp pose generation
-    # ------------------------------------------------------------------
-    def get_pose_and_save(self, rgb, depth):
-        """Run AnyGrasp inference on an RGB-D pair."""
-        try:
-            from anygrasp_sdk.grasp_detection.anygrasp_get_poses import (
-                anygrasp_get_poses,
-            )
-            from core.config import DEFAULT_ANYGRASP_CHECKPOINT
-            anygrasp_pose, self.point_cloud = anygrasp_get_poses(
-                DEFAULT_ANYGRASP_CHECKPOINT, rgb, depth
-            )
-            return anygrasp_pose
-        except Exception:
-            return False
 
     # ------------------------------------------------------------------
     # YOLO-World filtering
     # ------------------------------------------------------------------
-    def filtering_pose(self, anygrasp_pose, class_name="", image="", return_label=False, vis=True):
-        class_name_list = [cls for cls in class_name.split(",")]
-        detections = self.perception.detect_objects(image, class_name_list, conf=0.2)
+    def filtering_pose(self, anygrasp_pose, class_name="", image=""):
+        detections = self.perception.detect_objects(image, class_name, conf=0.2)
 
         grasp_points, grasp_pose_cam = graspcam2pixel(anygrasp_pose)
         valid_indices = set()
         final_grasps = []
         valid_boxes = []
         ans = False
+
         if len(detections):
             det = detections[0][:4]
             x1, y1, x2, y2 = det
@@ -105,11 +70,9 @@ class GraspSkill(Skill):
 
             if len(valid_indices):
                 sorted_indices = sorted(list(valid_indices))
+                class_name_list = [cls for cls in class_name.split(",")]
                 for i in sorted_indices:
                     g_pose = grasp_pose_cam[i]
-                    if return_label:
-                        if isinstance(g_pose, dict):
-                            g_pose["label"] = class_name_list
                     final_grasps.append(g_pose)
                 cprint(
                     f"*********** Class name {class_name_list} ****************** "
@@ -118,41 +81,9 @@ class GraspSkill(Skill):
                 )
                 ans = True
             else:
-                cprint(
-                    f"Found objects ({class_name_list}) but NO grasp points inside them.",
-                    "yellow",
-                )
+                cprint(f"Found objects ({class_name}) but NO grasp points inside them.", "yellow")
         else:
-            cprint(f"No object detected for class: {class_name_list}", "yellow")
-
-        if vis:
-            plt.figure(figsize=(10, 8))
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            plt.imshow(image)
-            ax = plt.gca()
-
-            for box in valid_boxes:
-                bx1, by1, bx2, by2 = box
-                ax.add_patch(
-                    plt.Rectangle((bx1, by1), bx2 - bx1, by2 - by1,
-                                  fill=False, color="red", linewidth=2)
-                )
-                ax.text(bx1, by1 - 5, str(class_name_list), color="red",
-                        fontsize=10, weight="bold")
-
-            if final_grasps:
-                for idx in valid_indices:
-                    plt.plot(grasp_points[idx][0], grasp_points[idx][1],
-                             "g*", markersize=8, label="Valid")
-            else:
-                if len(grasp_points) > 0:
-                    plt.plot(grasp_points[:, 0], grasp_points[:, 1],
-                             "b.", markersize=6, alpha=0.5)
-            plt.title(f"{class_name_list}: {len(valid_boxes)} objects, {len(final_grasps)} grasps")
-            plt.axis("off")
-            save_filename = f"filtered_rgb_{timestamp}_{class_name}.png"
-            plt.savefig(os.path.join(self.save_path, save_filename))
-            plt.close()
+            cprint(f"No object detected for class: {class_name}", "yellow")
 
         return final_grasps if ans else []
 
@@ -168,68 +99,12 @@ class GraspSkill(Skill):
         )
         if cos_theta > 0:
             transformed_pose_world = transformed_pose_world @ np.array([
-                [-1, 0, 0, 0],
-                [0, -1, 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1],
+                [-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]
             ])
         return transformed_pose_world
 
-    def publish_single_pose(self, transform_matrix, child_frame_id,
-                            parent_frame_id="base_link"):
-        import rospy
-        from geometry_msgs.msg import TransformStamped
-        if transform_matrix.shape != (4, 4):
-            rospy.logerr("Input matrix must be 4x4.")
-            return
-        translation = transform_matrix[:3, 3]
-        rotation_matrix = transform_matrix[:3, :3]
+    def transform_anygrasp_pose(self, anygrasp_pose, _visualization=True):
         try:
-            quat = R.from_matrix(rotation_matrix).as_quat()
-        except Exception as e:
-            rospy.logerr(f"Cannot convert rotation matrix to quaternion: {e}")
-            return
-        t = TransformStamped()
-        t.header.stamp = rospy.Time.now()
-        t.header.frame_id = parent_frame_id
-        t.child_frame_id = child_frame_id
-        t.transform.translation.x = translation[0]
-        t.transform.translation.y = translation[1]
-        t.transform.translation.z = translation[2]
-        t.transform.rotation.x = quat[0]
-        t.transform.rotation.y = quat[1]
-        t.transform.rotation.z = quat[2]
-        t.transform.rotation.w = quat[3]
-        self.tf_broadcaster.sendTransform([t])
-        rospy.loginfo(f"Published pose to RViz: {child_frame_id}, parent: {parent_frame_id}")
-
-    def publish_grasp_transforms(self, parent_frame="base_link"):
-        from geometry_msgs.msg import TransformStamped
-        transforms_list = []
-        for i, (original_id, item) in enumerate(self.final_grasp_pose_data[:]):
-            pose_matrix = item["transformed_pose_world"]
-            translation = pose_matrix[:3, 3]
-            rotation_matrix = pose_matrix[:3, :3]
-            quat = R.from_matrix(rotation_matrix).as_quat()
-            t = TransformStamped()
-            t.header.stamp = rospy.Time(0)
-            t.header.frame_id = parent_frame
-            t.child_frame_id = f"grasp_pose_hand_endeffector_{i}"
-            t.transform.translation.x = translation[0]
-            t.transform.translation.y = translation[1]
-            t.transform.translation.z = translation[2]
-            t.transform.rotation.x = quat[0]
-            t.transform.rotation.y = quat[1]
-            t.transform.rotation.z = quat[2]
-            t.transform.rotation.w = quat[3]
-            transforms_list.append(t)
-        if transforms_list:
-            self.tf_broadcaster.sendTransform(transforms_list)
-
-    def transform_anygrasp_pose(self, anygrasp_pose, _visualization=True,
-                                return_labels=False):
-        try:
-            import rospy
             eval_score = {}
             for id, data in enumerate(anygrasp_pose[:]):
                 grasp_translation = data["trans"]
@@ -243,9 +118,9 @@ class GraspSkill(Skill):
                     [0, 1, 0, 0], [-1, 0, 0, 0],
                     [0, 0, 1, 0], [0, 0, 0, 1],
                 ])
-                self.self_pose_matrix = self_rotation_np(self_pose_matrix)
+                self_pose_matrix = self_rotation_np(self_pose_matrix)
 
-                transformed_pose_camera = grasp_transformation_matrix @ self.self_pose_matrix
+                transformed_pose_camera = grasp_transformation_matrix @ self_pose_matrix
                 transformed_pose_world = self.T_base_to_cam @ transformed_pose_camera
                 transformed_pose_world = self.transform_x_axis(transformed_pose_world)
 
@@ -253,83 +128,16 @@ class GraspSkill(Skill):
                 eval_score[id]["score"] = data["score"]
                 eval_score[id]["transformed_pose_world"] = transformed_pose_world
                 eval_score[id]["original_pose"] = anygrasp_pose[id]
-                if return_labels:
-                    eval_score[id]["label"] = data["label"]
 
-            self.final_grasp_pose_data = sorted(
+            final_grasp_pose_data = sorted(
                 eval_score.items(), key=lambda x: x[1]["score"], reverse=True
             )
-
-            self.publish_grasp_transforms(parent_frame="base_link")
-
-            if return_labels:
-                return (
-                    [self.final_grasp_pose_data[i][1]["transformed_pose_world"]
-                     for i in range(len(self.final_grasp_pose_data))],
-                    [self.final_grasp_pose_data[i][1]["label"]
-                     for i in range(len(self.final_grasp_pose_data))],
-                )
-            else:
-                return [
-                    self.final_grasp_pose_data[i][1]["transformed_pose_world"]
-                    for i in range(len(self.final_grasp_pose_data))
-                ]
+            return [
+                final_grasp_pose_data[i][1]["transformed_pose_world"]
+                for i in range(len(final_grasp_pose_data))
+            ]
         except Exception:
-            return [], None
-
-    def visualization_3d_grasping_pose(self, grasping_pose_world,
-                                       translation_matrix2=None):
-        pose_matrix = grasping_pose_world
-        print(
-            f"Pose of grasping in root frame: {pose_matrix}\n"
-            f"{R.from_matrix(pose_matrix[:3, :3]).as_euler('xyz', degrees=False)}"
-        )
-        pose_c = transform_world_to_camera(pose_matrix, self.T_base_to_cam)
-        self_rot_inv = self_rotation_inv(self.self_pose_matrix)
-        rot_g = np.dot(pose_c[:3, :3], self_rot_inv)
-        translation_matrix = np.eye(4, 4)
-        translation_matrix[0:3, 0:3] = rot_g
-        translation_matrix[0:3, 3] = pose_c[:3, 3]
-        if translation_matrix2 is None:
-            visualization(self.point_cloud, translation_matrix)
-        else:
-            visualization(
-                self.point_cloud,
-                np.concatenate((translation_matrix, translation_matrix2), axis=0),
-            )
-
-    # ------------------------------------------------------------------
-    # Twin-service helpers
-    # ------------------------------------------------------------------
-    def create_send_config_2(self, prep_pos, prep_orn, exec_pos, exec_orn,
-                             current_js_pose=None, struct="left_arm"):
-        if current_js_pose is None:
-            self._config = {
-                "target_pose": [
-                    [prep_pos[0], prep_pos[1], prep_pos[2],
-                     prep_orn[0], prep_orn[1], prep_orn[2], prep_orn[3]],
-                    [exec_pos[0], exec_pos[1], exec_pos[2],
-                     exec_orn[0], exec_orn[1], exec_orn[2], exec_orn[3]],
-                ],
-                "current_js": list(self.default_traj_js_rad),
-                "struct": struct,
-            }
-        else:
-            self._config = {
-                "target_pose": [
-                    [prep_pos[0], prep_pos[1], prep_pos[2],
-                     prep_orn[0], prep_orn[1], prep_orn[2], prep_orn[3]],
-                    [exec_pos[0], exec_pos[1], exec_pos[2],
-                     exec_orn[0], exec_orn[1], exec_orn[2], exec_orn[3]],
-                ],
-                "current_js": list(current_js_pose),
-                "struct": struct,
-            }
-
-    def create_twin_service(self, type=None, cnfg=None):
-        cmd = {"srv": "twin_inference", "type": type, "cnfg": cnfg}
-        resp = self.send_cmd_twin(self.twin, cmd)
-        return resp
+            return []
 
     # ------------------------------------------------------------------
     # Grasp execution
@@ -356,13 +164,27 @@ class GraspSkill(Skill):
             execution_grasping_pos[:3, :3]
         ).as_quat()
 
-        self.create_send_config_2(
-            preparasion_grasping_pos_position,
-            preparasion_grasping_pos_orientation,
-            execution_grasping_pos_position,
-            execution_grasping_pos_orientation,
-        )
-        rsp = self.create_twin_service(type="trajectory_generation2", cnfg=self._config)
+        default_traj_js_rad = [
+            data / 180 * np.pi
+            for data in self.config.default_traj_js[idx].values()
+        ]
+        cnfg = {
+            "target_pose": [
+                [preparasion_grasping_pos_position[0], preparasion_grasping_pos_position[1],
+                 preparasion_grasping_pos_position[2], preparasion_grasping_pos_orientation[0],
+                 preparasion_grasping_pos_orientation[1], preparasion_grasping_pos_orientation[2],
+                 preparasion_grasping_pos_orientation[3]],
+                [execution_grasping_pos_position[0], execution_grasping_pos_position[1],
+                 execution_grasping_pos_position[2], execution_grasping_pos_orientation[0],
+                 execution_grasping_pos_orientation[1], execution_grasping_pos_orientation[2],
+                 execution_grasping_pos_orientation[3]],
+            ],
+            "current_js": default_traj_js_rad,
+            "struct": "left_arm",
+        }
+        rsp = self.send_cmd_twin(self.twin, {
+            "srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg
+        })
         state = rsp["value"]
 
         if state:
@@ -377,10 +199,7 @@ class GraspSkill(Skill):
             cprint("=============== Reach post grasping pose =============")
             return True
         else:
-            twin_info = rsp.get("info", {})
-            cprint(f"********************* Grasp pose not reachable: "
-                   f"collided={twin_info.get('is_collided', '?')}, "
-                   f"delta_xyz={twin_info.get('delta_xyz', '?')} *********************", "red")
+            cprint("********************* Grasp pose not reachable *********************", "red")
             return False
 
     # ------------------------------------------------------------------
@@ -416,7 +235,7 @@ class GraspSkill(Skill):
                 f"{self.save_path} ===================",
                 "cyan",
             )
-            anygrasp_pose = self.get_pose_and_save(self.rgb, self.depth)
+            anygrasp_pose = self.perception.detect_grasps(self.rgb, self.depth)
             cprint(
                 f"G=================== Generate the grasping pose and save it "
                 f"in file: {self.save_path}/result.json ===================",

@@ -24,6 +24,7 @@
         <node name="rviz_right" pkg="rviz" type="rviz" args="-d $(find rm_description)/config/right_arm.rviz" />
     </group>
 
-    <!-- Right arm hardware node -->
+    <!-- Right arm hardware nodes -->
     <node pkg="rm_65_pkg" type="arm_75_bringup_right.py" name="arm_75_bringup_right" output="screen" />
+    <node pkg="rm_65_pkg" type="mount_camera_right.py" name="mount_camera_erdaiji_grasp_right" output="screen" />
 </launch>

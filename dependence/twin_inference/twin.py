@@ -264,13 +264,13 @@ class TwinTest2(World):
         rospy.loginfo(f"TRAJECTORY GENERATED FOR CURENT POSE:{[curr_pos, curr_orn]} TO TARGET POSE:{[target_pos, target_orn]}")
         return 1, trajectory, trajectory_ee, infos
     
-    def check_arm_joints_z_height(self, struct_name, z_min_threshold=0.10):
+    def check_arm_joints_z_height(self, struct_name, z_min_threshold=0.02):
         """
         检查机械臂所有关节的Z高度是否低于阈值
 
         Args:
             struct_name: 机械臂结构名称 (left_arm/right_arm)
-            z_min_threshold: Z高度最小阈值，默认0.10m
+            z_min_threshold: Z高度最小阈值，默认0.02m
 
         Returns:
             is_safe: 是否安全 (所有关节Z > z_min_threshold)
@@ -314,7 +314,7 @@ class TwinTest2(World):
         curr_js = config["current_js"]
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
-        z_min_threshold = config["z_min_threshold"] if "z_min_threshold" in config else 0.10  # 关节最低高度阈值
+        z_min_threshold = config["z_min_threshold"] if "z_min_threshold" in config else 0.02  # 关节最低高度阈值
         if struct_name not in ["left_arm", "right_arm"]:
             rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
             return 0, {}

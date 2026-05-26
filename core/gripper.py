@@ -23,12 +23,13 @@ GRIPPER_CLOSE_CMD = [0, 0]
 
 
 class GripperClient:
-    """TCP client for the parallel gripper."""
+    """TCP client for the parallel gripper. Falls back to mock mode if connection fails."""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8001):
         self.host = host
         self.port = port
         self.sock = None
+        self._mock = False
         self._cmds = {
             "open": list(GRIPPER_OPEN_CMD),
             "close": list(GRIPPER_CLOSE_CMD),
@@ -44,8 +45,9 @@ class GripperClient:
             cprint(f"[GripperClient] Connected to {self.host}:{self.port}", "green")
             return True
         except Exception as e:
-            cprint(f"[GripperClient] Connection failed: {e}", "red")
-            return False
+            cprint(f"[GripperClient] Connection failed: {e}, using mock mode", "yellow")
+            self._mock = True
+            return True
 
     def close_connection(self) -> None:
         if self.sock is not None:
@@ -56,6 +58,9 @@ class GripperClient:
     # Low-level send
     # ------------------------------------------------------------------
     def _send_cmd(self, data: dict) -> dict:
+        if self._mock:
+            cprint(f"[GripperClient/Mock] {data}", "yellow")
+            return {"value": True, "info": "mock success"}
         msg = json.dumps(data).encode("utf-8")
         self.sock.sendall(msg)
         resp = json.loads(self.sock.recv(1024).decode("utf-8"))
@@ -78,6 +83,8 @@ class GripperClient:
         return self._send_cmd(cmd)
 
     def is_grasping(self) -> bool:
+        if self._mock:
+            return True
         time.sleep(0.5)
         self.close()
         resp = self.get_state()

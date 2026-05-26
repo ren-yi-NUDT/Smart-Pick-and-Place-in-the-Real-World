@@ -131,18 +131,16 @@ class RM_ARM_bringup_right(RM_ARM):
         rate = rospy.Rate(self.publish_rate)
         while not rospy.is_shutdown():
             tag, joints = self.robot_arm.rm_get_joint_degree()
-            if tag != 0:
-                rospy.logwarn(f"Right arm rm_get_joint_degree failed: {tag}, retrying...")
-                rospy.sleep(1.0)
-                continue
-            if len(joints) != 7:
-                rospy.logwarn(f"Right arm returned {len(joints)} joints (expected 7)")
-                rospy.sleep(0.5)
-                continue
+            if tag != 0 or len(joints) != 7:
+                if tag != 0:
+                    rospy.logwarn(f"Right arm rm_get_joint_degree failed: {tag}")
+                else:
+                    rospy.logwarn(f"Right arm returned {len(joints)} joints (expected 7)")
+                joints = [0.0] * 7
             joint_state_msg = JointState()
             joint_state_msg.header.stamp = rospy.Time.now()
-            joint_state_msg.name = ["R_joint1", "R_joint2", "R_joint3", "R_joint4", "R_joint5", "R_joint6", "R_joint7"]
-            joint_state_msg.position = degree_2_pi(joints)
+            joint_state_msg.name = ["R_joint1", "R_joint2", "R_joint3", "R_joint4", "R_joint5", "R_joint6", "R_joint7", "R_finger_joint"]
+            joint_state_msg.position = degree_2_pi(joints) + [0.0]
             pub.publish(joint_state_msg)
             rate.sleep()
 

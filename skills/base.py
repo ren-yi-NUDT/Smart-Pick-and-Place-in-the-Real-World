@@ -120,13 +120,30 @@ class Skill(ABC):
     # ------------------------------------------------------------------
     @property
     def camera(self):
-        """Return an initialized RealSenseCapture instance."""
+        """Return an initialized RealSenseCapture instance (default: left arm camera)."""
         if self._camera is None:
-            from core.camera import RealSenseCapture
-            self._camera = RealSenseCapture(
-                width=640, height=480, fps=30, save_path=self.save_path
-            )
+            self._camera = self._make_camera("left")
         return self._camera
+
+    def _make_camera(self, side="left"):
+        """Create a RealSenseCapture bound to the camera of the given arm side."""
+        from core.camera import RealSenseCapture
+        serial = ""
+        if self.config._is_new_format:
+            arm_cfg = self.config.get_arm_config(side)
+            serial = arm_cfg.get("camera_serial", "")
+        self._camera_for_side = side
+        return RealSenseCapture(
+            width=640, height=480, fps=30, save_path=self.save_path, serial=serial,
+        )
+
+    def get_camera(self, side):
+        """Return a RealSenseCapture for the requested arm side, caching per side."""
+        if not hasattr(self, "_cameras"):
+            self._cameras = {}
+        if side not in self._cameras:
+            self._cameras[side] = self._make_camera(side)
+        return self._cameras[side]
 
     # ------------------------------------------------------------------
     # Lazy property: perception (YOLO-World model)
@@ -240,13 +257,23 @@ class Skill(ABC):
     def control_arm(self, pose_type=None, trajectory=None, speed=20):
         """Move the arm to a named pose or along a joint-space trajectory."""
         import numpy as np
+        from core.transition import is_transition_allowed
         try:
             arm = self.arm
             if pose_type is not None:
                 pose = self.config.get_pose(pose_type)
                 if pose is None:
                     raise KeyError(f"Pose '{pose_type}' not found in config")
+                adjacency = self.config.get_arm_config("left").get("transition_adjacency", "free")
+                last_pose = getattr(self, "_last_named_pose", "home")
+                if not is_transition_allowed(last_pose, pose_type, adjacency):
+                    from termcolor import cprint
+                    cprint(f"[transition] {last_pose} → {pose_type} not allowed, routing through home", "yellow")
+                    home_pose = self.config.get_pose("home")
+                    if home_pose:
+                        arm.move_to_named_pose(home_pose, speed=speed)
                 arm.move_to_named_pose(pose, speed=speed)
+                self._last_named_pose = pose_type
             elif trajectory is not None:
                 arm.execute_trajectory(trajectory, speed=speed)
             return True
@@ -270,9 +297,10 @@ class Skill(ABC):
             )
         )
 
-    def get_camera_obs(self):
-        """Capture a single RGB-D frame."""
-        rgb, depth = self.camera.get_rgbd()
+    def get_camera_obs(self, side="left"):
+        """Capture a single RGB-D frame from the specified arm's camera."""
+        cam = self.get_camera(side)
+        rgb, depth = cam.get_rgbd()
         return rgb, depth
 
     # ------------------------------------------------------------------

@@ -10,6 +10,7 @@ Usage:
 """
 
 import os
+from datetime import datetime
 
 import cv2
 import numpy as np
@@ -27,16 +28,18 @@ class RealSenseCapture:
         fps: int = 30,
         enable_align: bool = True,
         save_path: str = "",
+        serial: str = "",
     ):
         self.width = width
         self.height = height
         self.fps = fps
         self.enable_align = enable_align
         self.save_path = save_path
+        self.serial = serial
         if self.save_path and not os.path.exists(self.save_path):
             os.makedirs(self.save_path, exist_ok=True)
 
-    def get_rgbd(self, idx: int = 0):
+    def get_rgbd(self):
         """
         Capture a single aligned RGB-D pair.
 
@@ -47,6 +50,9 @@ class RealSenseCapture:
         """
         pipeline = rs.pipeline()
         config = rs.config()
+
+        if self.serial:
+            config.enable_device(self.serial)
 
         config.enable_stream(rs.stream.depth, self.width, self.height, rs.format.z16, self.fps)
         config.enable_stream(rs.stream.color, self.width, self.height, rs.format.bgr8, self.fps)
@@ -76,9 +82,13 @@ class RealSenseCapture:
 
         pipeline.stop()
 
-        # Save to disk (same behaviour as original)
+        # Save to disk with timestamp to avoid overwriting
         if self.save_path:
-            Image.fromarray(rgb).save(os.path.join(self.save_path, "rgb.png"))
-            Image.fromarray(depth).save(os.path.join(self.save_path, "depth.png"))
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            tag = self.serial[-4:] if self.serial else "cam"
+            rgb_name = f"rgb_{tag}_{ts}.png"
+            depth_name = f"depth_{tag}_{ts}.png"
+            Image.fromarray(rgb).save(os.path.join(self.save_path, rgb_name))
+            Image.fromarray(depth).save(os.path.join(self.save_path, depth_name))
 
         return rgb, depth
