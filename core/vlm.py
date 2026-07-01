@@ -7,6 +7,7 @@ Extracted from the duplicated code in look_around.py and capture_at_handover.py.
 """
 
 import io
+import os
 import base64
 import requests
 from PIL import Image
@@ -18,11 +19,11 @@ class VLMClient:
 
     DEFAULT_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     DEFAULT_MODEL = "glm-4.5v"
-    DEFAULT_TOKEN = "REDACTED_GLM_TOKEN"
+    ENV_TOKEN = "GLM_API_TOKEN"
 
     def __init__(self, api_url=None, api_token=None, model=None):
         self.api_url = api_url or self.DEFAULT_API_URL
-        self.api_token = api_token or self.DEFAULT_TOKEN
+        self.api_token = api_token or os.environ.get(self.ENV_TOKEN)
         self.model = model or self.DEFAULT_MODEL
 
     # ------------------------------------------------------------------
@@ -53,6 +54,14 @@ class VLMClient:
                 "...\n\n"
                 '备注：你看到的"红色水果"是粉红色桃子'
             )
+
+        if not self.api_token:
+            cprint(
+                f"[VLM] Missing API token. Set ${self.ENV_TOKEN} env var "
+                f"or pass api_token=... to VLMClient().",
+                "red",
+            )
+            return None
 
         try:
             pil_image = Image.fromarray(rgb_image)
