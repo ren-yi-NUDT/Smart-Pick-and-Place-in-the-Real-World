@@ -10,4 +10,5 @@ from skills import (
     trash,
     desk_place,
     grasp_to_drawer,
+    cartesian_move,
 )

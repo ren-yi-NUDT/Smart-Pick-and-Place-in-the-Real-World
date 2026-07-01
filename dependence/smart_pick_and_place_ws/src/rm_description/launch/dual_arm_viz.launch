@@ -1,0 +1,24 @@
+<launch>
+  <!-- Standalone dual-arm visualization with joint_state_publisher_gui.
+       Use this for offline URDF inspection / manual joint control.
+       No real hardware required. -->
+
+  <arg name="gui" default="true" />
+
+  <param name="robot_description" textfile="$(find rm_description)/urdf/dual_arm.urdf" />
+
+  <!-- GUI slider for each joint -->
+  <node name="joint_state_publisher_gui" pkg="joint_state_publisher_gui"
+        type="joint_state_publisher_gui" if="$(arg gui)" />
+  <node name="joint_state_publisher" pkg="joint_state_publisher"
+        type="joint_state_publisher" unless="$(arg gui)">
+    <param name="rate" value="30" />
+    <param name="use_gui" value="false" />
+  </node>
+
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher" />
+
+  <node name="rviz" pkg="rviz" type="rviz"
+        args="-d $(find rm_description)/config/dual_arm.rviz" />
+</launch>

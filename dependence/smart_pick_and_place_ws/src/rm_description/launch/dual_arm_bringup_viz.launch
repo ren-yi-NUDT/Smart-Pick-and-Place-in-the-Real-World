@@ -1,0 +1,22 @@
+<launch>
+  <!-- Dual-arm visualization with real hardware joint states.
+       Requires bringup.launch to be running first (provides /joint_states
+       and /right_joint_states topics).
+       Merges both topics and drives the combined dual_arm URDF in a single RViz window. -->
+
+  <param name="robot_description" textfile="$(find rm_description)/urdf/dual_arm.urdf" />
+
+  <!-- Merge /joint_states + /right_joint_states -> /dual_joint_states -->
+  <node name="joint_state_relay" pkg="rm_description"
+        type="joint_state_relay.py" output="screen">
+    <param name="rate" value="30.0" />
+  </node>
+
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher">
+    <remap from="joint_states" to="dual_joint_states" />
+  </node>
+
+  <node name="rviz_dual" pkg="rviz" type="rviz"
+        args="-d $(find rm_description)/config/dual_arm.rviz" />
+</launch>

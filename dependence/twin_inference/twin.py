@@ -2,6 +2,7 @@
 
 import os, sys
 sys.path.append(os.path.dirname(__file__))
+import argparse
 import rospy
 import numpy as np
 import json
@@ -35,12 +36,16 @@ def visualize_pose(pos, orn, d = 1):
 SUPPORTED_TWIN_SRV_TYPE = ["reachability_check", "collision_check", "IK_calculation","trajectory_generation" , "trajectory_generation2"]
 
 class TwinTest2(World):
-    def __init__(self, vis=True):
+    def __init__(self, vis=True, mode='dual'):
         self.vis = vis
         self.camera_refresh_freq = 50
-        urdf_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf/LeftArm")
-        self.robot_path = os.path.join(urdf_dir, "left_arm_bullet.urdf")
-        self.robot_config_path = os.path.join(urdf_dir, "robot_config.json")
+        urdf_base_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf")
+        if mode == 'single':
+            self.robot_path = os.path.join(urdf_base_dir, "LeftArm/left_arm_bullet.urdf")
+            self.robot_config_path = os.path.join(urdf_base_dir, "LeftArm/robot_config.json")
+        else:
+            self.robot_path = os.path.join(urdf_base_dir, "dual_arm.urdf")
+            self.robot_config_path = os.path.join(urdf_base_dir, "dual_arm_robot_config.json")
         self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0), robot_path = self.robot_path, config_path = self.robot_config_path, fixed_robot = True, vis=self.vis)        
 
         self.srv_name = "twin_inference"
@@ -673,7 +678,14 @@ def on_press(key):
 
 
 if __name__ == '__main__':
-    world = TwinTest2(vis=True)
+    argv = rospy.myargv()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', choices=['single', 'dual'], default='dual',
+                        help='Robot mode: single (left arm only) or dual (both arms)')
+    args, _ = parser.parse_known_args(argv[1:])
+
+    rospy.init_node('twin_inference', anonymous=True)
+    world = TwinTest2(vis=True, mode=args.mode)
     world.reset()
     
     key_board_listener = keyboard.Listener(on_press=on_press)

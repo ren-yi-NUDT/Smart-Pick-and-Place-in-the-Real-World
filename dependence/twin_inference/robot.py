@@ -76,7 +76,9 @@ class ErdaijiRobot:
         self.collision_threshold = 0.001
         self.vis = vis
         
-        del self.robot_config['left_hand']
+        keys_to_remove = [k for k, v in self.robot_config.items() if v.get("struct_type") != "arm"]
+        for k in keys_to_remove:
+            del self.robot_config[k]
         self.struct_list = list(self.robot_config.keys())
         rospy.loginfo(f"ROBOT STRUCT LIST: {self.struct_list}")
         
@@ -221,11 +223,28 @@ class ErdaijiRobot:
             rospy.loginfo(f"ROBOT STRUCTURE {struct_name.upper()} DEFINED:")
 
         
+        # Hold all non-arm controllable joints (hand/gripper) at position 0
+        # PyBullet doesn't support URDF <mimic> tags, so these joints would swing freely under gravity
+        arm_joint_ids = set()
+        for struct_name in self.struct_list:
+            arm_joint_ids.update(self.robot_structs[struct_name].controllable_joint_ids)
+        for jid in self.controllable_joints:
+            if jid not in arm_joint_ids:
+                p.setJointMotorControl2(self.id, jid, p.POSITION_CONTROL, targetPosition=0.0, force=50.0)
+        rospy.loginfo(f"HELD {len(self.controllable_joints) - len(arm_joint_ids)} NON-ARM JOINTS AT POSITION 0")
+
         # construct collision pairs
         ignore_pair_set = set()
         for struct_name in self.struct_list:
-            if self.robot_config[struct_name]["struct_type"] == "hand":
-                ig_set = set(combinations([self.linkName_to_id[l] for l in self.robot_config[struct_name]["link_names"]], 2))
+            struct_cfg = self.robot_config[struct_name]
+            # exclude hand/gripper struct internal pairs
+            if struct_cfg["struct_type"] == "hand":
+                ig_set = set(combinations([self.linkName_to_id[l] for l in struct_cfg["link_names"]], 2))
+                ignore_pair_set |= ig_set
+            # exclude end-effector internal pairs (gripper, dexterous hand)
+            if "end_effector_links" in struct_cfg:
+                ee_ids = [self.linkName_to_id[l] for l in struct_cfg["end_effector_links"] if l in self.linkName_to_id]
+                ig_set = set(combinations(ee_ids, 2))
                 ignore_pair_set |= ig_set
         # print(ignore_pair_set)
         

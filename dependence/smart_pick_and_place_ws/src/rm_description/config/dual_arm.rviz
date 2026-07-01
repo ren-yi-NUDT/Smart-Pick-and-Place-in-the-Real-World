@@ -1,0 +1,588 @@
+Panels:
+  - Class: rviz/Displays
+    Help Height: 78
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /TF1
+      Splitter Ratio: 0.5
+    Tree Height: 363
+  - Class: rviz/Selection
+    Name: Selection
+  - Class: rviz/Tool Properties
+    Expanded:
+      - /2D Pose Estimate1
+      - /2D Nav Goal1
+      - /Publish Point1
+    Name: Tool Properties
+    Splitter Ratio: 0.5886790156364441
+  - Class: rviz/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: rviz/Time
+    Name: Time
+    SyncMode: 0
+    SyncSource: ""
+Preferences:
+  PromptSaveOnExit: true
+Toolbars:
+  toolButtonStyle: 2
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Class: rviz/RobotModel
+      Collision Enabled: false
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        L_hand_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        L_hand_endeffector:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        Link Tree Style: Links in Alphabetic Order
+        Link1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        Link2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        Link3:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        Link4:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        Link5:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        Link6:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        Link7:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link3:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link4:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link5:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link6:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_Link7:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_arm_end_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_base:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_cam_link_grasp:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_gripper_base:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_gripper_endeffector:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        R_left_inner_finger:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_left_inner_knuckle:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_left_outer_finger:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_left_outer_knuckle:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_right_inner_finger:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_right_inner_knuckle:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_right_outer_finger:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_right_outer_knuckle:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        R_robot_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        arm_end_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        base:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        left_index_1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_index_2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_little_1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_little_2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_middle_1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_middle_2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_ring_1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_ring_2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_thumb_1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_thumb_2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_thumb_3:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_thumb_swing:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        table_leg_bl:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        table_leg_br:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        table_leg_fl:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        table_leg_fr:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        table_top:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        world:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+      Name: RobotModel
+      Robot Description: robot_description
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+    - Class: rviz/TF
+      Enabled: true
+      Filter (blacklist): ""
+      Filter (whitelist): ""
+      Frame Timeout: 15
+      Frames:
+        All Enabled: false
+        L_hand_base_link:
+          Value: true
+        L_hand_endeffector:
+          Value: true
+        Link1:
+          Value: true
+        Link2:
+          Value: true
+        Link3:
+          Value: true
+        Link4:
+          Value: true
+        Link5:
+          Value: true
+        Link6:
+          Value: true
+        Link7:
+          Value: true
+        R_Link1:
+          Value: true
+        R_Link2:
+          Value: true
+        R_Link3:
+          Value: true
+        R_Link4:
+          Value: true
+        R_Link5:
+          Value: true
+        R_Link6:
+          Value: true
+        R_Link7:
+          Value: true
+        R_arm_end_link:
+          Value: true
+        R_base:
+          Value: true
+        R_base_link:
+          Value: true
+        R_cam_link_grasp:
+          Value: true
+        R_gripper_base:
+          Value: true
+        R_gripper_endeffector:
+          Value: true
+        R_left_inner_finger:
+          Value: true
+        R_left_inner_knuckle:
+          Value: true
+        R_left_outer_finger:
+          Value: true
+        R_left_outer_knuckle:
+          Value: true
+        R_right_inner_finger:
+          Value: true
+        R_right_inner_knuckle:
+          Value: true
+        R_right_outer_finger:
+          Value: true
+        R_right_outer_knuckle:
+          Value: true
+        R_robot_base_link:
+          Value: true
+        arm_end_link:
+          Value: true
+        base:
+          Value: true
+        base_link:
+          Value: true
+        cam_link_grasp:
+          Value: true
+        left_index_1:
+          Value: true
+        left_index_2:
+          Value: true
+        left_little_1:
+          Value: true
+        left_little_2:
+          Value: true
+        left_middle_1:
+          Value: true
+        left_middle_2:
+          Value: true
+        left_ring_1:
+          Value: true
+        left_ring_2:
+          Value: true
+        left_thumb_1:
+          Value: true
+        left_thumb_2:
+          Value: true
+        left_thumb_3:
+          Value: true
+        left_thumb_swing:
+          Value: true
+        robot_base_link:
+          Value: true
+        table_leg_bl:
+          Value: true
+        table_leg_br:
+          Value: true
+        table_leg_fl:
+          Value: true
+        table_leg_fr:
+          Value: true
+        table_top:
+          Value: true
+        world:
+          Value: true
+      Marker Alpha: 1
+      Marker Scale: 0.20000000298023224
+      Name: TF
+      Show Arrows: false
+      Show Axes: true
+      Show Names: false
+      Tree:
+        world:
+          base:
+            R_base:
+              R_base_link:
+                R_robot_base_link:
+                  R_Link1:
+                    R_Link2:
+                      R_Link3:
+                        R_Link4:
+                          R_Link5:
+                            R_Link6:
+                              R_Link7:
+                                R_arm_end_link:
+                                  {}
+                                R_cam_link_grasp:
+                                  {}
+                                R_gripper_base:
+                                  R_gripper_endeffector:
+                                    {}
+                                  R_left_inner_knuckle:
+                                    R_left_inner_finger:
+                                      {}
+                                  R_left_outer_knuckle:
+                                    R_left_outer_finger:
+                                      {}
+                                  R_right_inner_knuckle:
+                                    R_right_inner_finger:
+                                      {}
+                                  R_right_outer_knuckle:
+                                    R_right_outer_finger:
+                                      {}
+            base_link:
+              robot_base_link:
+                Link1:
+                  Link2:
+                    Link3:
+                      Link4:
+                        Link5:
+                          Link6:
+                            Link7:
+                              L_hand_base_link:
+                                L_hand_endeffector:
+                                  {}
+                                left_index_1:
+                                  left_index_2:
+                                    {}
+                                left_little_1:
+                                  left_little_2:
+                                    {}
+                                left_middle_1:
+                                  left_middle_2:
+                                    {}
+                                left_ring_1:
+                                  left_ring_2:
+                                    {}
+                                left_thumb_swing:
+                                  left_thumb_1:
+                                    left_thumb_2:
+                                      left_thumb_3:
+                                        {}
+                              arm_end_link:
+                                {}
+                              cam_link_grasp:
+                                {}
+          table_leg_bl:
+            {}
+          table_leg_br:
+            {}
+          table_leg_fl:
+            {}
+          table_leg_fr:
+            {}
+          table_top:
+            {}
+      Update Interval: 0
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Default Light: true
+    Fixed Frame: world
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+      Hide Inactive Objects: true
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+    - Class: rviz/SetInitialPose
+      Theta std deviation: 0.2617993950843811
+      Topic: /initialpose
+      X std deviation: 0.5
+      Y std deviation: 0.5
+    - Class: rviz/SetGoal
+      Topic: /move_base_simple/goal
+    - Class: rviz/PublishPoint
+      Single click: true
+      Topic: /clicked_point
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 2.6442978382110596
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Field of View: 0.7853981852531433
+      Focal Point:
+        X: 0.5
+        Y: 0.30000001192092896
+        Z: 0.30000001192092896
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.3350004553794861
+      Target Frame: <Fixed Frame>
+      Yaw: 3.9763803482055664
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd0000000400000000000001560000035afc0200000008fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073000000003d0000035a000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261000000010000021b0000035afc0200000007fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a0049006d006100670065000000003d0000035a0000000000000000fb0000000a0049006d0061006700650000000187000001420000000000000000fb0000000a0049006d00610067006500000001ed000001aa0000000000000000fb0000000a0049006d006100670065000000003d0000035a0000000000000000fb0000000a0056006900650077007300000001e2000001b5000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000004b00000003efc0100000002fb0000000800540069006d00650100000000000004b0000003bc00fffffffb0000000800540069006d00650100000000000004500000000000000000000004b0000002e600000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Selection:
+    collapsed: false
+  Time:
+    collapsed: false
+  Tool Properties:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 1200
+  X: 72
+  Y: 27

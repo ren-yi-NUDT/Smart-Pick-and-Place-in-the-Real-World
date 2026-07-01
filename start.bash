@@ -18,4 +18,4 @@ conda activate anygrasp
 python3 twin.py
 exec bash"
 
-echo "Started ROS Bringup + Twin IK in separate terminals."
+echo "Started ROS Bringup (with dual-arm viz) + Twin IK in separate terminals."

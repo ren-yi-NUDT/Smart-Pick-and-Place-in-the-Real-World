@@ -1,28 +1,14 @@
 <launch>
-  <!-- <arg
-    name="model" />
-  <arg
-    name="gui"
-    default="False" /> -->
-  <arg
-    name="gui"
-    default="True" /> 
-  <param name="robot_description" command="$(find xacro)/xacro $(find rm_description)/urdf/erdaiji/easy_dual_arm.urdf" />
-  <param
-    name="use_gui"
-    value="$(arg gui)" />
-  <node
-    name="joint_state_publisher"
-    pkg="joint_state_publisher"
-    type="joint_state_publisher" />
-  <node
-    name="robot_state_publisher"
-    pkg="robot_state_publisher"
-    type="robot_state_publisher" />
-  <!-- <node pkg="joint_state_publisher_gui" type="joint_state_publisher_gui" name="joint_state_publisher_gui" output="screen" /> -->
-  <node
-    name="rviz"
-    pkg="rviz"
-    type="rviz"
-    args="-d $(find rm_description)/config/RM65.rviz" />
+  <!-- Simple dual-arm visualization (standalone, no hardware).
+       Superseded by dual_arm_viz.launch but kept for quick testing. -->
+  <param name="robot_description" textfile="$(find rm_description)/urdf/dual_arm.urdf" />
+  <node name="joint_state_publisher" pkg="joint_state_publisher"
+        type="joint_state_publisher">
+    <param name="rate" value="30" />
+    <param name="use_gui" value="true" />
+  </node>
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher" />
+  <node name="rviz" pkg="rviz" type="rviz"
+        args="-d $(find rm_description)/config/dual_arm.rviz" />
 </launch>

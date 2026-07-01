@@ -14,6 +14,9 @@ for rm_description robot</p>
   <depend>robot_state_publisher</depend>
   <depend>rviz</depend>
   <depend>joint_state_publisher</depend>
+  <depend>joint_state_publisher_gui</depend>
+  <depend>rospy</depend>
+  <depend>sensor_msgs</depend>
   <depend>gazebo</depend>
   <export>
     <architecture_independent />

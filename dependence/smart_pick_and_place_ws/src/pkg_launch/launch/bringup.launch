@@ -5,8 +5,6 @@
         <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
             <remap from="joint_states" to="/joint_states" />
         </node>
-        <!-- Left arm RViz -->
-        <node name="rviz_left" pkg="rviz" type="rviz" args="-d $(find rm_description)/config/left_arm.rviz" />
     </group>
 
     <!-- Left arm hardware nodes (outside namespace to keep original topic names) -->
@@ -20,11 +18,22 @@
         <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
             <remap from="joint_states" to="/right_joint_states" />
         </node>
-        <!-- Right arm RViz -->
-        <node name="rviz_right" pkg="rviz" type="rviz" args="-d $(find rm_description)/config/right_arm.rviz" />
     </group>
 
     <!-- Right arm hardware nodes -->
     <node pkg="rm_65_pkg" type="arm_75_bringup_right.py" name="arm_75_bringup_right" output="screen" />
     <node pkg="rm_65_pkg" type="mount_camera_right.py" name="mount_camera_erdaiji_grasp_right" output="screen" />
+
+    <!-- ==================== COMBINED DUAL-ARM VIZ (replaces separate left/right RViz) ==================== -->
+    <param name="robot_description" textfile="$(find rm_description)/urdf/dual_arm.urdf" />
+
+    <node name="joint_state_relay" pkg="rm_description" type="joint_state_relay.py" output="screen">
+        <param name="rate" value="30.0" />
+    </node>
+
+    <node name="robot_state_publisher_dual" pkg="robot_state_publisher" type="robot_state_publisher">
+        <remap from="joint_states" to="dual_joint_states" />
+    </node>
+
+    <node name="rviz_dual" pkg="rviz" type="rviz" args="-d $(find rm_description)/config/dual_arm.rviz" />
 </launch>

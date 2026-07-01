@@ -12,3 +12,6 @@ foreach(dir config launch meshes urdf)
 	install(DIRECTORY ${dir}/
 		DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/${dir})
 endforeach(dir)
+
+install(PROGRAMS scripts/joint_state_relay.py
+	DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
