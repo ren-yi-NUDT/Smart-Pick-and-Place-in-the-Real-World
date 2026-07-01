@@ -134,6 +134,6 @@ class Hand_bringup():
 
 if __name__ == "__main__":
     config_path = "robot_config.json"
-    urdf_dir  = os.path.join(os.path.dirname(__file__), '../../rm_description/urdf/LeftArm')
+    urdf_dir  = os.path.join(os.path.dirname(__file__), '../../rm_description/urdf')
     hand = Hand_bringup(config_path=os.path.join(urdf_dir, config_path))
     hand.publish_joint_state()

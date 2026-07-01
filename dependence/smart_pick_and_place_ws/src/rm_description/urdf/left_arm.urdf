@@ -68,7 +68,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/base_link_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/base_link_l.STL" />
       </geometry>
       <material
         name="">
@@ -82,7 +82,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/base_link_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/base_link_l.STL" />
       </geometry>
     </collision>
   </link>
@@ -109,7 +109,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link1_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link1_l.STL" />
       </geometry>
       <material
         name="">
@@ -123,7 +123,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link1_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link1_l.STL" />
       </geometry>
     </collision>
   </link>
@@ -167,7 +167,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link2_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link2_l.STL" />
       </geometry>
       <material
         name="">
@@ -181,7 +181,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link2_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link2_l.STL" />
       </geometry>
     </collision>
   </link>
@@ -225,7 +225,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link3_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link3_l.STL" />
       </geometry>
       <material
         name="">
@@ -239,7 +239,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link3_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link3_l.STL" />
       </geometry>
     </collision>
   </link>
@@ -283,7 +283,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link4_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link4_l.STL" />
       </geometry>
       <material
         name="">
@@ -297,7 +297,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link4_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link4_l.STL" />
       </geometry>
     </collision>
   </link>
@@ -341,7 +341,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link5_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link5_l.STL" />
       </geometry>
       <material
         name="">
@@ -355,7 +355,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link5_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link5_l.STL" />
       </geometry>
     </collision>
   </link>
@@ -399,7 +399,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link6_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link6_l.STL" />
       </geometry>
       <material
         name="">
@@ -413,7 +413,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link6_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link6_l.STL" />
       </geometry>
     </collision>
   </link>
@@ -457,7 +457,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link7_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link7_l.STL" />
       </geometry>
       <material
         name="">
@@ -471,7 +471,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/rm75_6f/link7_l.STL" />
+          filename="package://rm_description/meshes/rm75_6f/link7_l.STL" />
       </geometry>
     </collision>
   </link>
@@ -538,7 +538,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/l_base_link.STL" />
+          filename="package://rm_description/meshes/inspire_hand/l_base_link.STL" />
       </geometry>
       <material
         name="">
@@ -552,7 +552,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/l_base_link.STL" />
+          filename="package://rm_description/meshes/inspire_hand/l_base_link.STL" />
       </geometry>
     </collision>
   </link>
@@ -579,7 +579,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_thumb_swing.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_thumb_swing.STL" />
       </geometry>
       <material
         name="">
@@ -593,7 +593,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_thumb_swing.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_thumb_swing.STL" />
       </geometry>
     </collision>
   </link>
@@ -637,7 +637,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_thumb_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_thumb_1.STL" />
       </geometry>
       <material
         name="">
@@ -651,7 +651,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_thumb_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_thumb_1.STL" />
       </geometry>
     </collision>
   </link>
@@ -695,7 +695,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_thumb_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_thumb_2.STL" />
       </geometry>
       <material
         name="">
@@ -709,7 +709,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_thumb_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_thumb_2.STL" />
       </geometry>
     </collision>
   </link>
@@ -757,7 +757,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_thumb_3.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_thumb_3.STL" />
       </geometry>
       <material
         name="">
@@ -771,7 +771,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_thumb_3.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_thumb_3.STL" />
       </geometry>
     </collision>
   </link>
@@ -819,7 +819,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_index_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_index_1.STL" />
       </geometry>
       <material
         name="">
@@ -833,7 +833,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_index_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_index_1.STL" />
       </geometry>
     </collision>
   </link>
@@ -877,7 +877,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_index_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_index_2.STL" />
       </geometry>
       <material
         name="">
@@ -891,7 +891,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_index_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_index_2.STL" />
       </geometry>
     </collision>
   </link>
@@ -939,7 +939,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_middle_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_middle_1.STL" />
       </geometry>
       <material
         name="">
@@ -953,7 +953,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_middle_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_middle_1.STL" />
       </geometry>
     </collision>
   </link>
@@ -997,7 +997,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_middle_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_middle_2.STL" />
       </geometry>
       <material
         name="">
@@ -1011,7 +1011,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_middle_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_middle_2.STL" />
       </geometry>
     </collision>
   </link>
@@ -1059,7 +1059,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_ring_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_ring_1.STL" />
       </geometry>
       <material
         name="">
@@ -1073,7 +1073,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_ring_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_ring_1.STL" />
       </geometry>
     </collision>
   </link>
@@ -1117,7 +1117,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_ring_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_ring_2.STL" />
       </geometry>
       <material
         name="">
@@ -1131,7 +1131,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_ring_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_ring_2.STL" />
       </geometry>
     </collision>
   </link>
@@ -1179,7 +1179,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_little_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_little_1.STL" />
       </geometry>
       <material
         name="">
@@ -1193,7 +1193,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_little_1.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_little_1.STL" />
       </geometry>
     </collision>
   </link>
@@ -1237,7 +1237,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_little_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_little_2.STL" />
       </geometry>
       <material
         name="">
@@ -1251,7 +1251,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://rm_description/meshes/singlearm/inspire_hand/left_little_2.STL" />
+          filename="package://rm_description/meshes/inspire_hand/left_little_2.STL" />
       </geometry>
     </collision>
   </link>

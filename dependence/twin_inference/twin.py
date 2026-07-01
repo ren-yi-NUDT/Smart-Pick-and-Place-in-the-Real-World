@@ -41,8 +41,8 @@ class TwinTest2(World):
         self.camera_refresh_freq = 50
         urdf_base_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf")
         if mode == 'single':
-            self.robot_path = os.path.join(urdf_base_dir, "LeftArm/left_arm_bullet.urdf")
-            self.robot_config_path = os.path.join(urdf_base_dir, "LeftArm/robot_config.json")
+            self.robot_path = os.path.join(urdf_base_dir, "left_arm_bullet.urdf")
+            self.robot_config_path = os.path.join(urdf_base_dir, "robot_config.json")
         else:
             self.robot_path = os.path.join(urdf_base_dir, "dual_arm.urdf")
             self.robot_config_path = os.path.join(urdf_base_dir, "dual_arm_robot_config.json")
