@@ -85,6 +85,11 @@ class GraspSkill(Skill):
         else:
             cprint(f"No object detected for class: {class_name}", "yellow")
 
+        self._save_grasp_visualization(
+            image, grasp_points, valid_indices, valid_boxes,
+            [cls for cls in class_name.split(",")] if class_name else [],
+        )
+
         return final_grasps if ans else []
 
     # ------------------------------------------------------------------

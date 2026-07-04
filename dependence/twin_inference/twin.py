@@ -36,31 +36,74 @@ def visualize_pose(pos, orn, d = 1):
 SUPPORTED_TWIN_SRV_TYPE = ["reachability_check", "collision_check", "IK_calculation","trajectory_generation" , "trajectory_generation2"]
 
 class TwinTest2(World):
-    def __init__(self, vis=True, mode='dual'):
+    """单进程只加载一条臂的 IK 服务。
+
+    通过 --side {left,right} 指定本进程服务哪条臂，--port 指定监听端口。
+    左臂默认端口 8020，右臂默认端口 8021。每个进程只载入对应的单臂 URDF
+    (base 在原点)，target_pose 直接对应臂基座系，避免联合 URDF 的偏移问题。
+    """
+
+    DEFAULT_PORT = {"left": 8020, "right": 8021}
+    STRUCT_NAME  = {"left": "left_arm", "right": "right_arm"}
+
+    def __init__(self, vis=True, side="left", port=None):
         self.vis = vis
+        self.side = side
         self.camera_refresh_freq = 50
+        if side not in ("left", "right"):
+            raise ValueError(f"side must be 'left' or 'right', got: {side}")
+
         urdf_base_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf")
-        if mode == 'single':
-            self.robot_path = os.path.join(urdf_base_dir, "left_arm_bullet.urdf")
-            self.robot_config_path = os.path.join(urdf_base_dir, "robot_config.json")
+        if side == "left":
+            self.urdf_path = os.path.join(urdf_base_dir, "left_arm_bullet.urdf")
+            self.config_path = os.path.join(urdf_base_dir, "robot_config.json")
         else:
-            self.robot_path = os.path.join(urdf_base_dir, "dual_arm.urdf")
-            self.robot_config_path = os.path.join(urdf_base_dir, "dual_arm_robot_config.json")
-        self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0), robot_path = self.robot_path, config_path = self.robot_config_path, fixed_robot = True, vis=self.vis)        
+            self.urdf_path = os.path.join(urdf_base_dir, "right_arm.urdf")
+            self.config_path = os.path.join(urdf_base_dir, "right_arm_robot_config.json")
+
+        # struct_name 由 side 决定，client 传入的 struct 仅用于校验
+        self.struct_name = self.STRUCT_NAME[side]
+
+        # ErdaijiRobot 实例在 setup() 里 p.connect() 之后才创建
+        self.robot = None
 
         self.srv_name = "twin_inference"
-        self.server_ip = '0.0.0.0'
-        self.server_port = 8020
+        self.server_ip = '127.0.0.1'
+        self.server_port = port if port is not None else self.DEFAULT_PORT[side]
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.server_ip, self.server_port))
         self.server_socket.listen(5)
 
         self.socket_thread = threading.Thread(target=self.socket_server_worker)
-        self.socket_thread.daemon = True 
+        self.socket_thread.daemon = True
         self.socket_thread.start()
 
         self.setup()
+
+    # ------------------------------------------------------------------ #
+    # Single-robot setup
+    # ------------------------------------------------------------------ #
+    def setup(self):
+        """Override World.setup to load only this process's single-arm URDF at origin."""
+        self.num_step = 0
+        self.physicsClient = p.connect(p.GUI if self.vis else p.DIRECT)
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+        p.setGravity(0, 0, -10)
+        p.resetDebugVisualizerCamera(
+            cameraDistance=2.7, cameraYaw=63, cameraPitch=-44,
+            cameraTargetPosition=[0, 0, 0],
+        )
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1)
+        self.planeID = p.loadURDF("plane.urdf")
+
+        # 单臂 URDF base 在原点，IK target_pose 直接对应臂基座系
+        self.robot = ErdaijiRobot(
+            (0.0, 0.0, 0.0), (0, 0, 0),
+            robot_path=self.urdf_path, config_path=self.config_path,
+            fixed_robot=True, vis=self.vis,
+        )
+        self.robot.load_robot()
 
     def socket_server_worker(self):
         """Socket 监听循环"""
@@ -148,9 +191,9 @@ class TwinTest2(World):
             info = {}
         
         # reset robot back to current pose
-        self.robot.robot_structs[struct_name].reset_by_joint_states(curr_js)
-        self.robot.robot_structs[struct_name].move_joint(curr_js)
-        self.step()    
+        self.robot.robot_structs[self.struct_name].reset_by_joint_states(curr_js)
+        self.robot.robot_structs[self.struct_name].move_joint(curr_js)
+        self.step()
             
         return_dict = {}
         return_dict["srv"] = srv_name
@@ -160,26 +203,26 @@ class TwinTest2(World):
         return return_dict_str
     
     def reachability_check(self, config):
-    
+
         struct_name = config["struct"]
         target_pose = config["target_pose"]
         curr_js = config["current_js"]
-        if struct_name not in ["left_arm", "right_arm"]:
-            rospy.logwarn(f"TWIN INFERENCER 'reachaibility' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
+        if struct_name != self.struct_name:
+            rospy.logwarn(f"TWIN INFERENCER '{self.side}' side got mismatched struct: {struct_name}")
             return 0, {}
-        
+
         # reset robot to target pose
         pos, orn = target_pose[:3], target_pose[3:]
         if self.vis:
             visualize_pose(pos, orn)
 
-        self.robot.robot_structs[struct_name].reset_by_ee_pose_self(pos, orn, js = curr_js)
-        self.step()        
-        
-        # condition check  
-        target_js = self.robot.robot_structs[struct_name].get_joint_pose()
-        is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[struct_name].check_reach(pos, orn, xyz_threshold =0.01, rpy_threshold = 0.01)
-        
+        self.robot.robot_structs[self.struct_name].reset_by_ee_pose_self(pos, orn, js = curr_js)
+        self.step()
+
+        # condition check
+        target_js = self.robot.robot_structs[self.struct_name].get_joint_pose()
+        is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[self.struct_name].check_reach(pos, orn, xyz_threshold =0.01, rpy_threshold = 0.01)
+
         is_collide, collide_id = self.robot.check_collision()
         
         # update info
@@ -201,29 +244,29 @@ class TwinTest2(World):
     
     
     def linear_traj_generation(self, config):
-                
+
         struct_name = config["struct"]
         target_pose = config["target_pose"]
         curr_js = config["current_js"]
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
-        if struct_name not in ["left_arm", "right_arm"]:
-            rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
-            return 0, {}
-        
+        if struct_name != self.struct_name:
+            rospy.logwarn(f"TWIN INFERENCER '{self.side}' side got mismatched struct: {struct_name}")
+            return 0, [], [], []
+
         # get target
         target_pos, target_orn = target_pose[:3], target_pose[3:]
         if self.vis:
             visualize_pose(target_pos, target_orn)
-                    
+
         # reset robot back to current pose
-        self.robot.robot_structs[struct_name].reset_by_joint_states(curr_js)
-        self.robot.robot_structs[struct_name].move_joint(curr_js)
+        self.robot.robot_structs[self.struct_name].reset_by_joint_states(curr_js)
+        self.robot.robot_structs[self.struct_name].move_joint(curr_js)
         self.step()
-        
+
         # get curr
-        curr_pos, curr_orn = self.robot.robot_structs[struct_name].get_end_link_pose_self()
-        # curr_R = R.from_quat(curr_orn)        
-        
+        curr_pos, curr_orn = self.robot.robot_structs[self.struct_name].get_end_link_pose_self()
+        # curr_R = R.from_quat(curr_orn)
+
         delta_xyz = np.linalg.norm(target_pos - curr_pos)
         loop_num  = max(int(np.floor(delta_xyz/interval_threshold)), 1)
         intermediate_js = copy.copy(curr_js)
@@ -232,23 +275,23 @@ class TwinTest2(World):
         infos = []
         intermediate_orn_list = slerp(curr_orn, target_orn, loop_num+1)
         trajectory_ee = []
-        
+
         for l in range(loop_num):
              # get and visualize intermediate pose
             intermediate_pos= curr_pos + (target_pos - curr_pos)*((l+1)/loop_num)
-            intermediate_orn = intermediate_orn_list[l + 1]#R.slerp((l+1)/20, curr_R, target_R).as_quat() 
+            intermediate_orn = intermediate_orn_list[l + 1]#R.slerp((l+1)/20, curr_R, target_R).as_quat()
             if self.vis:
                 visualize_pose(intermediate_pos, intermediate_orn, d = 100)
-            
+
             # reset robot to interval pose
-            self.robot.robot_structs[struct_name].reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
-            self.step()            
-            
-            # condition check  
-            intermediate_js = self.robot.robot_structs[struct_name].get_joint_pose()
-            is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[struct_name].check_reach(intermediate_pos, intermediate_orn
+            self.robot.robot_structs[self.struct_name].reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
+            self.step()
+
+            # condition check
+            intermediate_js = self.robot.robot_structs[self.struct_name].get_joint_pose()
+            is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[self.struct_name].check_reach(intermediate_pos, intermediate_orn
                                                                                                , xyz_threshold =0.01, rpy_threshold = 0.01)
-            
+
             is_collide, collide_id = self.robot.check_collision()
             
             trajectory.append(list(intermediate_js))
@@ -269,12 +312,11 @@ class TwinTest2(World):
         rospy.loginfo(f"TRAJECTORY GENERATED FOR CURENT POSE:{[curr_pos, curr_orn]} TO TARGET POSE:{[target_pos, target_orn]}")
         return 1, trajectory, trajectory_ee, infos
     
-    def check_arm_joints_z_height(self, struct_name, z_min_threshold=0.02):
+    def check_arm_joints_z_height(self, z_min_threshold=0.02):
         """
-        检查机械臂所有关节的Z高度是否低于阈值
+        检查本进程机械臂所有关节的Z高度是否低于阈值
 
         Args:
-            struct_name: 机械臂结构名称 (left_arm/right_arm)
             z_min_threshold: Z高度最小阈值，默认0.02m
 
         Returns:
@@ -282,7 +324,7 @@ class TwinTest2(World):
             unsafe_links: 低于阈值的关节名称列表 [(link_name, z_value), ...]
             min_z: 最低的Z值
         """
-        arm_struct = self.robot.robot_structs[struct_name]
+        arm_struct = self.robot.robot_structs[self.struct_name]
         # 获取机械臂关节对应的link ID
         # 排除 base_link 和 arm_end_link，只检查 Link1-Link7
         arm_link_ids = arm_struct.link_ids
@@ -320,10 +362,10 @@ class TwinTest2(World):
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
         z_min_threshold = config["z_min_threshold"] if "z_min_threshold" in config else 0.02  # 关节最低高度阈值
-        if struct_name not in ["left_arm", "right_arm"]:
-            rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
-            return 0, {}
-        
+        if struct_name != self.struct_name:
+            rospy.logwarn(f"TWIN INFERENCER '{self.side}' side got mismatched struct: {struct_name}")
+            return 0, [], [], []
+
         # get target
         target_pos_list = []
         target_orn_list = []
@@ -333,10 +375,10 @@ class TwinTest2(World):
             target_orn_list.append(target_orn)
             if self.vis:
                 visualize_pose(target_pos, target_orn)
-                    
+
         # reset robot back to current pose
-        self.robot.robot_structs[struct_name].reset_by_joint_states(curr_js)
-        self.robot.robot_structs[struct_name].move_joint(curr_js)
+        self.robot.robot_structs[self.struct_name].reset_by_joint_states(curr_js)
+        self.robot.robot_structs[self.struct_name].move_joint(curr_js)
         self.step()
         # reset robot to target_poses
         infos = []
@@ -345,16 +387,16 @@ class TwinTest2(World):
         z_safes = []
         js_fake = copy.deepcopy(curr_js)
         for target_pos, target_orn in zip(target_pos_list, target_orn_list):
-            self.robot.robot_structs[struct_name].reset_by_ee_pose_self(target_pos, target_orn, js = js_fake)
+            self.robot.robot_structs[self.struct_name].reset_by_ee_pose_self(target_pos, target_orn, js = js_fake)
             self.step()
-            js_fake = self.robot.robot_structs[struct_name].get_joint_pose()            
-            
+            js_fake = self.robot.robot_structs[self.struct_name].get_joint_pose()
+
             # condition check for target IK
-            is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[struct_name].check_reach(target_pos, target_orn
+            is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[self.struct_name].check_reach(target_pos, target_orn
                                                                                                 , xyz_threshold =0.01, rpy_threshold = 0.01)
             is_collide, collide_id = self.robot.check_collision()
             # 检查关节Z高度是否安全
-            is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(struct_name, z_min_threshold)
+            is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(z_min_threshold)
             info = {}
             info["is_reached"] = int(is_reach)
             info["delta_xyz"] = delta_xyz
@@ -387,33 +429,33 @@ class TwinTest2(World):
                 return 0, [], [], infos
         
         # reset robot back to current pose
-        self.robot.robot_structs[struct_name].reset_by_joint_states(curr_js)
-        self.robot.robot_structs[struct_name].move_joint(curr_js)
+        self.robot.robot_structs[self.struct_name].reset_by_joint_states(curr_js)
+        self.robot.robot_structs[self.struct_name].move_joint(curr_js)
         self.step()
-        
+
         # get curr
-        curr_pos, curr_orn = self.robot.robot_structs[struct_name].get_end_link_pose_self()        
-        
+        curr_pos, curr_orn = self.robot.robot_structs[self.struct_name].get_end_link_pose_self()
+
         trajectory  = []
         trajectory_ee = []
         infos = []
         trajectory.append(curr_js)
         trajectory_ee.append(list(curr_pos)+list(curr_orn))
-        
+
         fake_pos = copy.copy(curr_pos)
         fake_orn = copy.copy(curr_orn)
         fake_js = copy.copy(curr_js)
-        
+
         for target_pos, target_orn in zip(target_pos_list, target_orn_list):
             # generate traj from fake pose to target
             target_pos_arr, target_orn_arr = np.array(target_pos), np.array(target_orn)
             delta_xyz = np.linalg.norm(target_pos_arr - fake_pos)
             loop_num  = max(int(np.floor(delta_xyz/interval_threshold)), 1)
-            
+
             intermediate_pos_list = [fake_pos + (target_pos_arr - fake_pos)*((l+1)/loop_num) for l in range(loop_num)]
             intermediate_orn_list = slerp(fake_orn, target_orn_arr, loop_num+1)[1:]
             intermediate_js = copy.copy(fake_js)
-            
+
             for l in range(loop_num):
                 # get and visualize intermediate pose
                 intermediate_pos = intermediate_pos_list[l]
@@ -421,18 +463,18 @@ class TwinTest2(World):
                 if self.vis:
                     visualize_pose(intermediate_pos, intermediate_orn, d = 10)
                     time.sleep(0.1)
-                
+
                 # reset robot to interval pose
-                self.robot.robot_structs[struct_name].reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
-                self.step()            
-                
+                self.robot.robot_structs[self.struct_name].reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
+                self.step()
+
                 # condition check
-                intermediate_js = self.robot.robot_structs[struct_name].get_joint_pose()
-                is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[struct_name].check_reach(intermediate_pos, intermediate_orn
+                intermediate_js = self.robot.robot_structs[self.struct_name].get_joint_pose()
+                is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[self.struct_name].check_reach(intermediate_pos, intermediate_orn
                                                                                                 , xyz_threshold =0.01, rpy_threshold = 0.01)
                 is_collide, collide_id = self.robot.check_collision()
                 # 检查关节Z高度
-                is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(struct_name, z_min_threshold)
+                is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(z_min_threshold)
 
 
                 trajectory.append(list(intermediate_js))
@@ -477,10 +519,10 @@ class TwinTest2(World):
         curr_js = config["current_js"]
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
-        
-        if struct_name not in ["left_arm", "right_arm"]:
-            rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT SUPPORT CURRENT STRUCT: {struct_name}")
-            return 0, {}, [], [] # 修正返回格式以匹配下文
+
+        if struct_name != self.struct_name:
+            rospy.logwarn(f"TWIN INFERENCER '{self.side}' side got mismatched struct: {struct_name}")
+            return 0, {}, [], []
 
         # --- 准备工作 ---
         target_pos_list = []
@@ -493,13 +535,13 @@ class TwinTest2(World):
                 visualize_pose(target_pos, target_orn)
 
         # 获取结构体对象
-        arm_struct = self.robot.robot_structs[struct_name]
+        arm_struct = self.robot.robot_structs[self.struct_name]
 
         # ------------------------------------------------------------------
         # 阶段 1: 关键点预检查 (Pre-check & Anchor Generation)
         # 目的：确保目标点绝对可达，并计算出"无碰撞且合理的"最终关节角度
         # ------------------------------------------------------------------
-        
+
         # 先重置回当前状态
         arm_struct.reset_by_joint_states(curr_js)
         arm_struct.move_joint(curr_js)
@@ -508,21 +550,21 @@ class TwinTest2(World):
         infos = []
         pre_check_reaches = []
         pre_check_js_solutions = [] # 存储预检查计算出的目标关节角
-        
+
         # 使用虚拟变量进行模拟，不影响物理显示的连贯性（如果不需要实时渲染中间过程）
-        js_fake = copy.deepcopy(curr_js) 
-        
+        js_fake = copy.deepcopy(curr_js)
+
         for target_pos, target_orn in zip(target_pos_list, target_orn_list):
             # 尝试求解 IK
             # 注意：这里我们使用更严格的 solve_robust_ik
-            success, solved_js = self.robot.robot_structs[struct_name].solve_robust_ik(target_pos, target_orn, seed_js=js_fake)
-            
+            success, solved_js = self.robot.robot_structs[self.struct_name].solve_robust_ik(target_pos, target_orn, seed_js=js_fake)
+
             # 将模拟机器人设置到解的位置进行碰撞检测
             if success:
                 arm_struct.reset_by_joint_states(solved_js)
                 self.step() # 更新物理引擎状态
                 js_fake = solved_js # 更新下一个点的种子
-            
+
             # 验证 Reach (双重确认 IK 误差)
             is_reach, delta_xyz, delta_rpy = arm_struct.check_reach(target_pos, target_orn, xyz_threshold=0.015, rpy_threshold=0.05)
             # 验证 Collision
@@ -604,7 +646,7 @@ class TwinTest2(World):
 
                 # --- 核心改进：鲁棒 IK 求解 ---
                 # 使用上一步的解 last_valid_js 作为 seed
-                success, solved_js = self.solve_robust_ik(struct_name, t_pos, t_orn, seed_js=last_valid_js)
+                success, solved_js = arm_struct.solve_robust_ik(t_pos, t_orn, seed_js=last_valid_js)
                 
                 if not success:
                     # 尝试降级策略：如果只是中间点微小误差，可以容忍吗？
@@ -649,7 +691,7 @@ class TwinTest2(World):
                     [0.6130359164338649, -0.18390629817473416, 0.9572628420278162, 0.5423872870142016, 0.7882424147151591, 0.21071606926629194, 0.20022153900705178]        
                                ],
                 "current_js":[-1.204, -8.815, 57.494, -3.33, 113.799, -0.012],
-                "struct":"right_arm"
+                "struct": self.struct_name
             }
         }
         req = json.dumps(data)
@@ -680,28 +722,32 @@ def on_press(key):
 if __name__ == '__main__':
     argv = rospy.myargv()
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=['single', 'dual'], default='dual',
-                        help='Robot mode: single (left arm only) or dual (both arms)')
+    parser.add_argument('--side', choices=['left', 'right'], required=True,
+                        help='Which arm this process serves (left -> port 8020, right -> port 8021)')
+    parser.add_argument('--port', type=int, default=None,
+                        help='Override listen port (default: 8020 left / 8021 right)')
+    parser.add_argument('--novis', action='store_true',
+                        help='Run headless (p.DIRECT) instead of GUI')
     args, _ = parser.parse_known_args(argv[1:])
 
     rospy.init_node('twin_inference', anonymous=True)
-    world = TwinTest2(vis=True, mode=args.mode)
+    world = TwinTest2(vis=not args.novis, side=args.side, port=args.port)
     world.reset()
-    
+
     key_board_listener = keyboard.Listener(on_press=on_press)
     key_board_listener.start()
-    
+
     kill_program = False
     count = 0
     while not kill_program:
         count+= 1
         robot_state = world.step()
-         
-        
+
+
         # print(count)
         # if count == 50:
         #     world.start_test()
-        
+
         # if count == 100:
         #     time.sleep(5)
         #     break

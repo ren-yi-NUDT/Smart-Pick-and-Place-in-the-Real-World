@@ -74,9 +74,18 @@ class PickAndPlaceSkill(Skill):
     def _place_predefined(self, pose_name):
         """Right arm moves to a predefined pose and releases the object."""
         cprint(f"P=================== Right arm fixed placement: {pose_name} ===================", "cyan")
+        from core.arm import ArmClient
+        from core.gripper import GripperClient
+
         right_cfg = self.config.get_arm_config("right")
         right_arm = getattr(self, "_right_arm", None)
+        if right_arm is None:
+            right_arm = ArmClient("127.0.0.1", 8011)
+            right_arm.connect()
         right_gripper = getattr(self, "_right_gripper", None)
+        if right_gripper is None:
+            right_gripper = GripperClient("127.0.0.1", 8001)
+            right_gripper.connect()
 
         pose = right_cfg.get(pose_name)
         if pose is None:
@@ -84,8 +93,7 @@ class PickAndPlaceSkill(Skill):
             return False
 
         right_arm.move_to_named_pose(pose, speed=15)
-        if right_gripper:
-            right_gripper.open()
+        right_gripper.open()
         time.sleep(1)
         right_arm.move_to_named_pose(right_cfg["home"], speed=30)
         cprint(f"P=================== Fixed placement to {pose_name} done ===================", "green")
@@ -497,10 +505,13 @@ class PickAndPlaceSkill(Skill):
             right_arm = ArmClient("127.0.0.1", 8011)
             right_arm.connect()
         right_gripper = getattr(self, "_right_gripper", None)
+        if right_gripper is None:
+            from core.gripper import GripperClient
+            right_gripper = GripperClient("127.0.0.1", 8001)
+            right_gripper.connect()
 
         right_arm.move_to_named_pose(throw_pose, speed=15)
-        if right_gripper:
-            right_gripper.open()
+        right_gripper.open()
         time.sleep(1)
         right_arm.move_to_named_pose(right_cfg["home"], speed=30)
 
@@ -542,6 +553,11 @@ class PickAndPlaceSkill(Skill):
                 cprint(f"Found objects ({class_name}) but NO grasp points inside them.", "yellow")
         else:
             cprint(f"No object detected for class: {class_name}", "yellow")
+
+        self._save_grasp_visualization(
+            image, grasp_points, valid_indices, valid_boxes,
+            [cls for cls in class_name.split(',')] if class_name else [],
+        )
 
         return final_grasps if ans else []
 
@@ -642,7 +658,7 @@ class PickAndPlaceSkill(Skill):
             "current_js": default_traj_js_rad,
             "struct": struct,
         }
-        rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
+        rsp = self.send_cmd_twin(self.twin_for(side), {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         state = rsp["value"]
 
         if state:
@@ -729,7 +745,7 @@ class PickAndPlaceSkill(Skill):
             "current_js": default_js_rad,
             "struct": "left_arm",
         }
-        rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
+        rsp = self.send_cmd_twin(self.twin_for("left"), {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         if rsp["value"]:
             traj = np.array(copy.deepcopy(rsp["info"]["trajectory"])) / np.pi * 180
             self.control_arm(trajectory=traj, speed=20)

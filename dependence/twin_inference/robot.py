@@ -345,7 +345,7 @@ class ErdaijiRobot:
     def get_camera_stream(self):
         return self.camera_stream
     
-    def check_collision(self):
+    def check_collision(self, ignore_bodies=()):
         # <<< self collision
         closest_points_to_self = [
             p.getClosestPoints(
@@ -368,12 +368,14 @@ class ErdaijiRobot:
                 if len(point) > 0:
                     self.prev_collided_with = point
                     return True, self.id
-        
-        # collision with others
+
+        # collision with others (skip bodies in ignore_bodies)
+        ignore_set = set(ignore_bodies)
         others_id = [p.getBodyUniqueId(i)
                      for i in range(p.getNumBodies())
-                     if p.getBodyUniqueId(i) != self.id]
-        
+                     if p.getBodyUniqueId(i) != self.id
+                     and p.getBodyUniqueId(i) not in ignore_set]
+
         closest_points_to_others = [
             sorted(list(p.getClosestPoints(
                 bodyA=self.id, bodyB=other_id,

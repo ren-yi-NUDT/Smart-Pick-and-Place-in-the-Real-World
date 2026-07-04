@@ -24,7 +24,7 @@
   },
   "handover_pose": {
     "name": "handover_pose",
-    "description": "home",
+    "description": " ",
     "arm": "right",
     "timestamp": "2026-05-20T20:18:27.820099",
     "joint_angles_deg": [

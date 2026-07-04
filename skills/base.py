@@ -55,6 +55,7 @@ class Skill(ABC):
         self._hand = None
         self._camera = None
         self._twin = None
+        self._twins = {}  # per-side TwinClient cache: {"left": client, "right": client}
         self._perception = None
         self._vlm = None
         self._transforms = None
@@ -102,18 +103,36 @@ class Skill(ABC):
         return self._hand
 
     # ------------------------------------------------------------------
-    # Lazy property: twin client (socket to :8020)
+    # Lazy property: twin client (socket to :8020 for left arm)
     # ------------------------------------------------------------------
     @property
     def twin(self):
-        """Return a connected TwinClient."""
+        """Return a connected TwinClient for the LEFT arm (port 8020, legacy default)."""
         if self._twin is None:
-            from core.config import HOST, TWIN_PORT
-            from core.twin_client import TwinClient
-            client = TwinClient(HOST, TWIN_PORT)
-            client.connect()
-            self._twin = client
+            self._twin = self.twin_for("left")
         return self._twin
+
+    def twin_for(self, side="left"):
+        """Return a connected TwinClient for the requested arm side.
+
+        Left arm routes to port 8020, right arm to port 8021. Clients are
+        cached per side so repeated calls reuse the same socket.
+        """
+        if side not in self._twins:
+            from core.twin_client import TwinClient
+            if self.config._is_new_format:
+                host = self.config.shared.get("host", "127.0.0.1")
+                port_key = "twin_port_left" if side == "left" else "twin_port_right"
+                default_port = 8020 if side == "left" else 8021
+                port = self.config.shared.get(port_key, default_port)
+            else:
+                from core.config import HOST, TWIN_PORT, TWIN_PORT_RIGHT
+                host = HOST
+                port = TWIN_PORT if side == "left" else TWIN_PORT_RIGHT
+            client = TwinClient(host, port)
+            client.connect()
+            self._twins[side] = client
+        return self._twins[side]
 
     # ------------------------------------------------------------------
     # Lazy property: camera
@@ -302,6 +321,54 @@ class Skill(ABC):
         cam = self.get_camera(side)
         rgb, depth = cam.get_rgbd()
         return rgb, depth
+
+    def _save_grasp_visualization(
+        self, image, grasp_points, valid_indices, valid_boxes, class_names,
+    ):
+        """Overwrite the most recent ``rgb_*.png`` with an annotated version.
+
+        Annotations:
+          - Red rectangle + class label around each YOLO detection box.
+          - Small blue dot for every AnyGrasp candidate.
+          - Green star for grasps that fall inside a detection box.
+        """
+        import glob
+        import cv2
+
+        rgb_files = sorted(
+            glob.glob(os.path.join(self.save_path, "rgb_*.png")),
+            key=os.path.getmtime,
+        )
+        if not rgb_files:
+            return
+        target_path = rgb_files[-1]
+
+        img_bgr = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2BGR)
+        valid_indices = set(valid_indices or [])
+
+        if len(grasp_points) > 0:
+            for i, (u, v) in enumerate(grasp_points):
+                if i in valid_indices:
+                    continue
+                cv2.circle(img_bgr, (int(u), int(v)), 3, (255, 0, 0), -1)
+            for i in valid_indices:
+                u, v = grasp_points[i]
+                cv2.drawMarker(
+                    img_bgr, (int(u), int(v)), (0, 255, 0),
+                    markerType=cv2.MARKER_STAR, markerSize=14, thickness=2,
+                )
+
+        label_text = ",".join(class_names) if class_names else ""
+        for box in valid_boxes:
+            x1, y1, x2, y2 = (int(b) for b in box)
+            cv2.rectangle(img_bgr, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            if label_text:
+                cv2.putText(
+                    img_bgr, label_text, (x1, max(y1 - 6, 12)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA,
+                )
+
+        cv2.imwrite(target_path, img_bgr)
 
     # ------------------------------------------------------------------
     # Abstract run()

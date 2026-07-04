@@ -804,7 +804,7 @@
     </inertial>
   </link>
   <joint name="R_gripper_endeffector_joint" type="fixed">
-    <origin xyz="0 0 0.15" rpy="0 0 0" />
+    <origin xyz="0 0 0.162" rpy="0 0 -1.5708" />
     <parent link="R_gripper_base" />
     <child link="R_gripper_endeffector" />
     <axis xyz="0 0 0" />

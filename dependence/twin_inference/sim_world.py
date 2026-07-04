@@ -23,8 +23,9 @@ class World:
         self.camera_refresh_freq = 10
         self.blocking_mode = blocking_mode
         
-        self.robot_path = "/home/zz/ros_proj/erdaiji_ws/src/robot_bringup/easy_dual_arm/urdf/test0/easy_dual_arm.urdf"
-        self.robot_config_path = "/home/zz/ros_proj/erdaiji_ws/src/robot_bringup/easy_dual_arm/urdf/test0/robot_config.json"
+        urdf_base_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf")
+        self.robot_path = os.path.join(urdf_base_dir, "dual_arm.urdf")
+        self.robot_config_path = os.path.join(urdf_base_dir, "dual_arm_robot_config.json")
         self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0), robot_path = self.robot_path, config_path = self.robot_config_path, blocking_mode=self.blocking_mode, vis=self.vis)
         self.setup()
     

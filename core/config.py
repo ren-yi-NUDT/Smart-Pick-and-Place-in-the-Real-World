@@ -30,7 +30,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOST = "127.0.0.1"
 ARM_PORT = 8010
 HAND_PORT = 8000
-TWIN_PORT = 8020
+TWIN_PORT = 8020          # left arm twin IK service
+TWIN_PORT_RIGHT = 8021    # right arm twin IK service
 
 # ---------------------------------------------------------------------------
 # Default model paths (relative to PROJECT_ROOT unless absolute)
