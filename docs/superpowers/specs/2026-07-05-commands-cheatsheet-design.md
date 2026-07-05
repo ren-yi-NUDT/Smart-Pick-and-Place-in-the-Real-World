@@ -87,13 +87,12 @@ README.md 已包含完整架构说明、Skill 列表、通信协议、硬件信�
 ### 位姿与动作序列
 
 #### `pose_execute` — 位姿/动作序列执行
-覆盖 4 个 `command` 子命令：
+实际只有 `play` 和 `list` 两个 `command` 子命令（录制/删除通过 `tools/pose_record.py`，不在 `run_skill.py` 内）：
 - `play` + `name` —— 回放指定位姿
-- `play` + `sequence` —— 执行动作序列
+- `play` + `sequence` —— 执行 JSON 动作序列
 - `play` + `parallel` —— 双臂并行
-- `record` —— 录制位姿
+- `play` + `hand` —— 播放灵巧手手势
 - `list` —— 列出已录制位姿
-- `delete` —— 删除位姿
 
 ### 原子 Skill（独立 CLI 用）
 
