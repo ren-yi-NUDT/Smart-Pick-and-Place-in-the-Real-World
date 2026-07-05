@@ -118,14 +118,12 @@ class GraspToDrawer(DualArmSkill):
     # Placeholder helpers (illustrative -- not production-ready)
     # ------------------------------------------------------------------
     def _run_anygrasp(self, rgb, depth):
-        """Run AnyGrasp on the RGB-D pair.  Returns raw grasp candidates or []."""
+        """Run AnyGrasp on the RGB-D pair via the long-running server.
+
+        Returns raw grasp candidates or [].
+        """
         try:
-            from anygrasp_sdk.grasp_detection.anygrasp_get_poses import (
-                anygrasp_get_poses,
-            )
-            from core.config import DEFAULT_ANYGRASP_CHECKPOINT
-            result, _ = anygrasp_get_poses(DEFAULT_ANYGRASP_CHECKPOINT, rgb, depth)
-            return result if result else []
+            return self.perception.detect_grasps(rgb, depth) or []
         except Exception as e:
             cprint(f"[grasp_to_drawer] AnyGrasp failed: {e}", "red")
             return []

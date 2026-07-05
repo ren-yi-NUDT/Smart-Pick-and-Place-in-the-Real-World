@@ -55,29 +55,55 @@ class PickAndPlaceSkill(Skill):
             return self._place_trash(side)
 
         if container.lower() in ["desk", "桌子", "table"]:
+            if side == "right" and not self._handover_right_to_left():
+                return False
             return self._place_desk()
 
-        if side == "right":
-            if self._is_right_fixed_placement(container):
+        # Drawer / cabinet — narrow receptacle, only right gripper fits.
+        # Either arm can grasp; left arm must hand over to right before placing.
+        if self._is_right_fixed_placement(container):
+            if side == "right":
                 return self._place_predefined(container)
-            return self._delegate_to_left_arm(container)
+            if not self._delegate_to_left_arm(container):
+                return False
+            return self._place_predefined(container)
+
+        # Visual placement (bowls, plates, etc.) — uses left-arm camera.
+        # Right arm must hand over to left arm first.
+        if side == "right":
+            if not self._handover_right_to_left():
+                return False
+            return self._place_visual(container)
 
         return self._place_visual(container)
 
     # ------------------------------------------------------------------
     # Placement routing helpers
     # ------------------------------------------------------------------
+    _DRAWER_KEYWORDS = ("drawer", "cabinet", "抽屉", "柜")
+
     def _is_right_fixed_placement(self, container):
-        """Check if container is a right-arm fixed placement target (no handover needed)."""
-        return container.lower() in ["drawer", "cabinet"]
+        """Check if container is a right-arm fixed placement target (drawer/cabinet).
+        All drawer-like containers route to the canonical `drawer_1_placement` pose.
+        """
+        c = container.lower()
+        return any(k in c for k in self._DRAWER_KEYWORDS)
 
     def _place_predefined(self, pose_name):
-        """Right arm moves to a predefined pose and releases the object."""
-        cprint(f"P=================== Right arm fixed placement: {pose_name} ===================", "cyan")
+        """Right arm moves to a predefined pose and releases the object.
+        All drawer/cabinet keywords normalize to `drawer_1_placement`.
+        """
         from core.arm import ArmClient
         from core.gripper import GripperClient
 
         right_cfg = self.config.get_arm_config("right")
+        if any(k in pose_name.lower() for k in self._DRAWER_KEYWORDS):
+            target_pose_name = "drawer_1_placement"
+        else:
+            target_pose_name = pose_name
+
+        cprint(f"P=================== Right arm fixed placement: {pose_name} → {target_pose_name} ===================", "cyan")
+
         right_arm = getattr(self, "_right_arm", None)
         if right_arm is None:
             right_arm = ArmClient("127.0.0.1", 8011)
@@ -87,28 +113,60 @@ class PickAndPlaceSkill(Skill):
             right_gripper = GripperClient("127.0.0.1", 8001)
             right_gripper.connect()
 
-        pose = right_cfg.get(pose_name)
+        pose = right_cfg.get(target_pose_name)
         if pose is None:
-            cprint(f"P=================== Pose '{pose_name}' not found in right arm config ===================", "red")
+            cprint(f"P=================== Pose '{target_pose_name}' not found in right arm config ===================", "red")
             return False
 
         right_arm.move_to_named_pose(pose, speed=15)
         right_gripper.open()
         time.sleep(1)
         right_arm.move_to_named_pose(right_cfg["home"], speed=30)
-        cprint(f"P=================== Fixed placement to {pose_name} done ===================", "green")
+        cprint(f"P=================== Fixed placement to {target_pose_name} done ===================", "green")
         return True
 
     def _delegate_to_left_arm(self, container):
-        """Right arm hands over to left arm, then left arm places (visual or fixed)."""
-        cprint(f"D=================== Delegating to left arm for placement: {container} ===================", "cyan")
+        """Two-arm handover using the validated 4-step sequence (left→right by direction).
+
+        Steps (per 2026-07-05 validated run):
+          0. Both arms → preset pose (parallel, speed=15)
+          1. Right arm with open gripper → approach pose (speed=10)
+          2. Handover: right gripper close → wait 1.5s → left dexterous open
+          3. Right arm carrying object → preset pose (speed=15)
+          4. Both arms → home (parallel, speed=30)
+
+        Pose names are inherited from old `right_to_left_handover_*` config keys;
+        actual direction is left→right (object goes from left dexterous hand to
+        right gripper). After completion the object is in the right gripper at home.
+        """
+        import json
+        import os
+        cprint(f"D=================== Two-arm handover (container={container}) ===================", "cyan")
         from core.arm import ArmClient
         from core.gripper import GripperClient
 
-        handover = self.config.get_dual_arm_pose("right_to_left_handover")
-        if handover is None:
-            cprint("D=================== right_to_left_handover pose not found ===================", "red")
+        # Load validated poses
+        try:
+            poses_left = json.load(open(os.path.join("recorded_poses", "left.json")))
+            poses_right = json.load(open(os.path.join("recorded_poses", "right.json")))
+            left_preset_lst = poses_left["right_to_left_handover_left_preset"]["joint_angles_deg"]
+            right_preset_lst = poses_right["right_to_left_handover_right_preset"]["joint_angles_deg"]
+            right_approach_lst = poses_right["right_to_left_handover_right_approach"]["joint_angles_deg"]
+            home_left_lst = poses_left["home"]["joint_angles_deg"]
+            home_right_lst = poses_right["home"]["joint_angles_deg"]
+        except (FileNotFoundError, KeyError) as e:
+            cprint(f"D=================== Missing pose: {e} ===================", "red")
+            cprint("D=================== Record via tools/pose_record.py first ===================", "red")
             return False
+
+        def to_dict(lst):
+            return {f"J{i+1}": lst[i] for i in range(7)}
+
+        left_preset = to_dict(left_preset_lst)
+        right_preset = to_dict(right_preset_lst)
+        right_approach = to_dict(right_approach_lst)
+        home_left = to_dict(home_left_lst)
+        home_right = to_dict(home_right_lst)
 
         right_arm = getattr(self, "_right_arm", None)
         if right_arm is None:
@@ -119,32 +177,112 @@ class PickAndPlaceSkill(Skill):
             right_gripper = GripperClient("127.0.0.1", 8001)
             right_gripper.connect()
 
-        # Both arms to handover
-        cprint("D=================== Moving both arms to right→left handover ===================", "cyan")
-        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(handover["left_pose"],), kwargs={"speed": 15})
-        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(handover["right_pose"],), kwargs={"speed": 15})
+        # Step 0: Both arms → preset
+        cprint("D=================== Step 0: Both arms → preset (speed=15) ===================", "cyan")
+        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(left_preset,), kwargs={"speed": 15})
+        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(right_preset,), kwargs={"speed": 15})
         t1.start(); t2.start(); t1.join(); t2.join()
 
-        # Transfer: right opens, left closes
+        # Step 1: Right arm with open gripper → approach
+        cprint("D=================== Step 1: Right arm (gripper open) → approach (speed=10) ===================", "cyan")
         right_gripper.open()
-        self.control_hand(cmd_type="close")
-        time.sleep(2)
+        time.sleep(0.5)
+        right_arm.move_to_named_pose(right_approach, speed=10)
 
-        # Right home + left placement in parallel
-        cprint("D=================== Right→home, Left→placement ===================", "cyan")
+        # Step 2: Handover — right close → wait → left open
+        cprint("D=================== Step 2: Handover (right close → 1.5s → left open) ===================", "cyan")
+        right_gripper.close()
+        time.sleep(1.5)
+        self.control_hand(cmd_type="open")
+        time.sleep(1.0)
 
-        def _left_placement():
-            if container.lower() in ["desk", "桌子", "table"]:
-                self._place_desk()
-            else:
-                self._place_visual(container)
+        # Step 3: Right arm carrying object → preset
+        cprint("D=================== Step 3: Right arm (carrying object) → preset (speed=15) ===================", "cyan")
+        right_arm.move_to_named_pose(right_preset, speed=15)
 
-        right_cfg = self.config.get_arm_config("right")
-        t1 = threading.Thread(target=_left_placement)
-        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(right_cfg["home"],), kwargs={"speed": 30})
+        # Step 4: Both arms → home
+        cprint("D=================== Step 4: Both arms → home (speed=30) ===================", "cyan")
+        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(home_left,), kwargs={"speed": 30})
+        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(home_right,), kwargs={"speed": 30})
         t1.start(); t2.start(); t1.join(); t2.join()
 
-        cprint("D=================== Delegated placement done ===================", "green")
+        cprint("D=================== Handover sequence done (object now in right gripper at home) ===================", "green")
+        return True
+
+    def _handover_right_to_left(self):
+        """Right→left handover (mirror of `_delegate_to_left_arm`).
+
+        Same 4-step structure and same poses (right arm always approaches,
+        left dexterous hand stays at preset). Only the close/open roles swap:
+        left dexterous closes (receiver), right gripper opens (giver).
+
+        Used when right arm grasped the object and left arm needs to place it
+        (side=right + visual container, or side=right + person).
+        """
+        import json
+        import os
+        cprint("H=================== Right→left handover ===================", "cyan")
+        from core.arm import ArmClient
+        from core.gripper import GripperClient
+
+        try:
+            poses_left = json.load(open(os.path.join("recorded_poses", "left.json")))
+            poses_right = json.load(open(os.path.join("recorded_poses", "right.json")))
+            left_preset_lst = poses_left["right_to_left_handover_left_preset"]["joint_angles_deg"]
+            right_preset_lst = poses_right["right_to_left_handover_right_preset"]["joint_angles_deg"]
+            right_approach_lst = poses_right["right_to_left_handover_right_approach"]["joint_angles_deg"]
+            home_left_lst = poses_left["home"]["joint_angles_deg"]
+            home_right_lst = poses_right["home"]["joint_angles_deg"]
+        except (FileNotFoundError, KeyError) as e:
+            cprint(f"H=================== Missing pose: {e} ===================", "red")
+            return False
+
+        def to_dict(lst):
+            return {f"J{i+1}": lst[i] for i in range(7)}
+
+        left_preset = to_dict(left_preset_lst)
+        right_preset = to_dict(right_preset_lst)
+        right_approach = to_dict(right_approach_lst)
+        home_left = to_dict(home_left_lst)
+        home_right = to_dict(home_right_lst)
+
+        right_arm = getattr(self, "_right_arm", None)
+        if right_arm is None:
+            right_arm = ArmClient("127.0.0.1", 8011)
+            right_arm.connect()
+        right_gripper = getattr(self, "_right_gripper", None)
+        if right_gripper is None:
+            right_gripper = GripperClient("127.0.0.1", 8001)
+            right_gripper.connect()
+
+        # Step 0: Both arms → preset
+        cprint("H=================== Step 0: Both arms → preset (speed=15) ===================", "cyan")
+        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(left_preset,), kwargs={"speed": 15})
+        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(right_preset,), kwargs={"speed": 15})
+        t1.start(); t2.start(); t1.join(); t2.join()
+
+        # Step 1: Right arm (carrying object) → approach
+        cprint("H=================== Step 1: Right arm (carrying object) → approach (speed=10) ===================", "cyan")
+        right_arm.move_to_named_pose(right_approach, speed=10)
+
+        # Step 2: Handover — left dexterous close → wait → right gripper open
+        cprint("H=================== Step 2: Handover (left close → 1.5s → right open) ===================", "cyan")
+        self.control_hand(cmd_type="close")
+        time.sleep(1.5)
+        right_gripper.open()
+        time.sleep(1.0)
+
+        # Step 3: Right arm (empty) → preset
+        cprint("H=================== Step 3: Right arm (empty) → preset (speed=15) ===================", "cyan")
+        right_arm.move_to_named_pose(right_preset, speed=15)
+
+        # Step 4: Both arms → home
+        cprint("H=================== Step 4: Both arms → home (speed=30) ===================", "cyan")
+        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(home_left,), kwargs={"speed": 30})
+        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(home_right,), kwargs={"speed": 30})
+        t1.start(); t2.start(); t1.join(); t2.join()
+
+        cprint("H=================== Right→left handover done (object now in left dexterous hand at home) ===================", "green")
         return True
 
     # ------------------------------------------------------------------
@@ -327,57 +465,29 @@ class PickAndPlaceSkill(Skill):
         else:
             # Right arm → left arm handover → left arm delivers to person
             cprint("H=================== Dual-arm handover: right → left → person ===================", "cyan")
-            from core.arm import ArmClient
-            from core.gripper import GripperClient
 
-            handover = self.config.get_dual_arm_pose("right_to_left_handover")
-            if handover is None:
-                cprint("H=================== right_to_left_handover pose not found ===================", "red")
+            # Phase 1: Validated 4-step right→left handover (ends with both arms at home, object in left dexterous)
+            if not self._handover_right_to_left():
+                cprint("H=================== Handover failed ===================", "red")
                 return False
 
-            right_arm = getattr(self, "_right_arm", None)
-            if right_arm is None:
-                right_arm = ArmClient("127.0.0.1", 8011)
-                right_arm.connect()
-            right_gripper = getattr(self, "_right_gripper", None)
-            if right_gripper is None:
-                right_gripper = GripperClient("127.0.0.1", 8001)
-                right_gripper.connect()
-
-            # Both arms to handover positions in parallel
-            cprint("H=================== Moving both arms to right→left handover ===================", "cyan")
-            t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(handover["left_pose"],), kwargs={"speed": 15})
-            t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(handover["right_pose"],), kwargs={"speed": 15})
-            t1.start(); t2.start(); t1.join(); t2.join()
-
-            # Transfer: right opens, left closes
-            right_gripper.open()
-            self.control_hand(cmd_type="close")
+            # Phase 2: Left arm delivers object to person via preset waypoints
+            cprint("H=================== Left arm → handover to person ===================", "cyan")
+            pose_1st = self.config.get_pose("get_ready_to_handover_1st")
+            pose_2nd = self.config.get_pose("get_ready_to_handover_2nd")
+            if pose_1st is not None:
+                self.control_arm(pose_type="get_ready_to_handover_1st", speed=15)
+            if pose_2nd is not None:
+                self.control_arm(pose_type="get_ready_to_handover_2nd", speed=15)
+            self.control_arm(pose_type="handover_pose", speed=15)
+            time.sleep(0.5)
+            self.control_hand(cmd_type="open")
             time.sleep(2)
-
-            # Parallel: right→home + left→handover to person
-            cprint("H=================== Right→home, Left→handover to person ===================", "cyan")
-
-            def _left_handover_to_person():
-                pose_1st = self.config.get_pose("get_ready_to_handover_1st")
-                pose_2nd = self.config.get_pose("get_ready_to_handover_2nd")
-                if pose_1st is not None:
-                    self.arm.move_to_named_pose(pose_1st, speed=15)
-                if pose_2nd is not None:
-                    self.arm.move_to_named_pose(pose_2nd, speed=15)
-                self.arm.move_to_named_pose(self.config.get_pose("handover_pose"), speed=15)
-                self.control_hand(cmd_type="open")
-                time.sleep(2)
-                if pose_2nd is not None:
-                    self.arm.move_to_named_pose(pose_2nd, speed=15)
-                if pose_1st is not None:
-                    self.arm.move_to_named_pose(pose_1st, speed=15)
-                self.arm.move_to_named_pose(self.config.get_arm_config("left")["home"], speed=30)
-
-            right_cfg = self.config.get_arm_config("right")
-            t1 = threading.Thread(target=_left_handover_to_person)
-            t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(right_cfg["home"],), kwargs={"speed": 30})
-            t1.start(); t2.start(); t1.join(); t2.join()
+            if pose_2nd is not None:
+                self.control_arm(pose_type="get_ready_to_handover_2nd", speed=15)
+            if pose_1st is not None:
+                self.control_arm(pose_type="get_ready_to_handover_1st", speed=15)
+            self.control_arm(pose_type="home", speed=30)
 
             cprint("H=================== 5. Successfully completed the handover task ===================", "green")
             return True
@@ -434,58 +544,43 @@ class PickAndPlaceSkill(Skill):
     # Dual-arm trash: left arm transfers to right arm, right arm throws
     # ------------------------------------------------------------------
     def _dual_arm_trash(self):
+        """Left→right handover then right arm throws to trash.
+
+        Reuses the validated 4-step handover sequence in `_delegate_to_left_arm`,
+        then right arm carries object from home to throw_to_trash_pose and releases.
+        """
         cprint("T=================== Dual-arm trash: left → right handover, right throws ===================", "cyan")
         from core.arm import ArmClient
         from core.gripper import GripperClient
-        from core.transition import plan_transition_sequence
 
-        handover = self.config.get_dual_arm_pose("left_to_right_handover")
-        if handover is None:
-            cprint("T=================== left_to_right_handover pose not found ===================", "red")
+        # Phase 1: Validated 4-step handover (ends with both arms at home, object in right gripper)
+        if not self._delegate_to_left_arm(container="trash"):
+            cprint("T=================== Handover failed ===================", "red")
             return False
+
+        # Phase 2: Right arm throws to trash
         right_cfg = self.config.get_arm_config("right")
-        right_adj = right_cfg.get("transition_adjacency", {})
+        throw_pose = right_cfg.get("throw_to_trash_pose")
+        if throw_pose is None:
+            cprint("T=================== throw_to_trash_pose not found for right arm ===================", "red")
+            return False
 
-        right_arm = ArmClient("127.0.0.1", 8011)
-        right_arm.connect()
-        right_gripper = GripperClient("127.0.0.1", 8001)
-        right_gripper.connect()
+        right_arm = getattr(self, "_right_arm", None)
+        if right_arm is None:
+            right_arm = ArmClient("127.0.0.1", 8011)
+            right_arm.connect()
+        right_gripper = getattr(self, "_right_gripper", None)
+        if right_gripper is None:
+            right_gripper = GripperClient("127.0.0.1", 8001)
+            right_gripper.connect()
 
-        # Both arms to handover poses
-        cprint("T=================== Moving both arms to handover ===================", "cyan")
-        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(handover["left_pose"],), kwargs={"speed": 15})
-        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(handover["right_pose"],), kwargs={"speed": 15})
-        t1.start(); t2.start(); t1.join(); t2.join()
+        cprint("T=================== Right arm: home → throw_to_trash_pose (release) → home ===================", "cyan")
+        right_arm.move_to_named_pose(throw_pose, speed=15)
+        right_gripper.open()
+        time.sleep(1)
+        right_arm.move_to_named_pose(right_cfg["home"], speed=30)
 
-        # Transfer: left opens, right closes
-        self.control_hand(cmd_type="open")
-        right_gripper.close()
-        time.sleep(2)
-
-        # Plan right arm sequence with transition adjacency
-        right_seq = plan_transition_sequence(
-            ["left_to_right_handover", "throw_to_trash_pose", "home"],
-            right_adj
-        )
-        cprint(f"T=================== Right arm planned: {right_seq} ===================", "cyan")
-
-        # Parallel: left home + right executes trash sequence
-        def right_execute():
-            for pose_name in right_seq:
-                if pose_name == "left_to_right_handover":
-                    pose = handover["right_pose"]
-                else:
-                    pose = right_cfg.get(pose_name)
-                if pose:
-                    right_arm.move_to_named_pose(pose, speed=15)
-                    if pose_name == "throw_to_trash_pose":
-                        right_gripper.open()
-
-        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(self.config.get_arm_config("left")["home"],), kwargs={"speed": 30})
-        t2 = threading.Thread(target=right_execute)
-        t1.start(); t2.start(); t1.join(); t2.join()
-
-        cprint("T=================== 5. Successfully completed the dual-arm trash task ===================", "green")
+        cprint("T=================== Dual-arm trash done ===================", "green")
         return True
 
     def _single_arm_trash(self):
@@ -606,13 +701,11 @@ class PickAndPlaceSkill(Skill):
         return transformed_pose_world
 
     def _transform_right_grasp(self, transformed_pose_world):
-        r, p, y = R.from_matrix(transformed_pose_world[:3, :3]).as_euler('xyz', degrees=False)
-        y_axis_rotated = rpy_to_vector(r, p, y, axis=[0, 1, 0])
-        z_axis_world = np.array([0, 0, 1])
-        cos_theta = np.dot(y_axis_rotated, z_axis_world) / (
-            np.linalg.norm(y_axis_rotated) * np.linalg.norm(z_axis_world)
-        )
-        if cos_theta > 0:
+        # Disambiguate AnyGrasp's 180°-about-Z symmetry for the right arm.
+        # Pick the orientation whose local X-axis (projected onto R_base_link's
+        # XY plane) points into the +X half-space, so IK tends to give a small
+        # J7 (wrist roll) rather than one rotated ~180° from home.
+        if transformed_pose_world[0, 0] < 0:
             transformed_pose_world = transformed_pose_world @ np.array([[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
         return transformed_pose_world
 
@@ -678,6 +771,7 @@ class PickAndPlaceSkill(Skill):
                 self.control_hand(cmd_type="close")
                 cprint("=============== Close hand =============")
                 time.sleep(0.5)
+                self._left_arm_j2_pretension(speed=15)
                 self.control_arm(pose_type=idx, speed=30)
                 cprint("=============== Reach post grasping pose =============")
             return True

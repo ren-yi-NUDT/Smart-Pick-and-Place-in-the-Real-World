@@ -11,30 +11,39 @@ from gsnet import AnyGrasp
 from graspnetAPI import GraspGroup
 from datetime import datetime
 
+_ANYGRASP_CACHE = {}
+
+def _get_anygrasp(checkpoint_path):
+    """Cache the heavy AnyGrasp network across calls.
+
+    Loading the checkpoint takes 1.5-4 s; rebuilding it on every detect_grasps
+    call was the dominant non-grasp time sink. Keyed by checkpoint path so
+    different licenses/checkpoints do not collide.
+    """
+    if checkpoint_path not in _ANYGRASP_CACHE:
+        class Cnfg():
+            def __init__(self):
+                self.checkpoint_path = checkpoint_path
+                self.max_gripper_width = 0.1
+                self.gripper_height = 0.03
+                self.top_down_grasp = True
+                self.debug = True
+        cnfg = Cnfg()
+        anygrasp = AnyGrasp(cnfg)
+        anygrasp.load_net()
+        _ANYGRASP_CACHE[checkpoint_path] = anygrasp
+    return _ANYGRASP_CACHE[checkpoint_path]
+
 def anygrasp_get_poses(checkpoint_path, color, depth, text_prompt=None, model = "rs_right"):
-    class Cnfg():
-        def __init__(self):
-            self.checkpoint_path = checkpoint_path
-            self.max_gripper_width = 0.1
-            self.color = color
-            self.depth = depth
-            self.gripper_height = 0.03
-            self.top_down_grasp = True
-            self.debug = True
-    
-    cnfg = Cnfg()
-    debug = cnfg.debug
-    
-    anygrasp = AnyGrasp(cnfg)
-    anygrasp.load_net()
+    anygrasp = _get_anygrasp(checkpoint_path)
 
     # get data
     if text_prompt is None:
-        colors = np.array(cnfg.color, dtype=np.float32) / 255.0
-        depths = np.array(cnfg.depth)
+        colors = np.array(color, dtype=np.float32) / 255.0
+        depths = np.array(depth)
     else:
-        colors = np.array(cnfg.color) / 255.0
-        depths = np.array(cnfg.depth)
+        colors = np.array(color) / 255.0
+        depths = np.array(depth)
     # get camera intrinsics
     
     if model == "rs_right":

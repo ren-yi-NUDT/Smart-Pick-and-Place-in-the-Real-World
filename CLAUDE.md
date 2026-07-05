@@ -204,6 +204,7 @@ Smart-Pick-and-Place-in-the-Real-World/
 | 8000 | 灵巧手控制 | TCP | JSON：`{"src": "/left_hand/movement_control", "type": "set"/"get", "cmd": [...]}` |
 | 8010 | 机械臂控制 | TCP | 4 字节大端长度前缀 + JSON：`{"srv": "/right_arm/movement_control", "cmd": [{"type": "start"}, {"type": "js", "act": {...}, "speed": N, "block": bool}, {"type": "end"}]}` |
 | 8020 | 孪生推理 | TCP | 请求：纯 JSON；响应：4 字节大端长度前缀 + JSON |
+| 8030 | AnyGrasp 抓取检测 | TCP | 二进制：请求 4 字节 BE 长度前缀 + (JSON header + `\n` + depth raw + rgb raw)；响应 4 字节 BE 长度前缀 + JSON `{"poses": [...], "error": null}`。Server 长驻，模型仅 load_net 一次。 |
 
 **重要**：`robot_config.json` 和机械臂命令中的关节角度使用**角度制（度）**。孪生推理返回的轨迹使用**弧度制**，skill 内部会进行转换（除以 π × 180）。
 

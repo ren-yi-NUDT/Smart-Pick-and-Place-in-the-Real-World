@@ -32,6 +32,8 @@ ARM_PORT = 8010
 HAND_PORT = 8000
 TWIN_PORT = 8020          # left arm twin IK service
 TWIN_PORT_RIGHT = 8021    # right arm twin IK service
+DEFAULT_ANYGRASP_HOST = "127.0.0.1"
+DEFAULT_ANYGRASP_PORT = 8030
 
 # ---------------------------------------------------------------------------
 # Default model paths (relative to PROJECT_ROOT unless absolute)

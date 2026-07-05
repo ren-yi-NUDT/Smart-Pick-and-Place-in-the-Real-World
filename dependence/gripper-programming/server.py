@@ -112,10 +112,44 @@ class GripperServer:
                 if len(cmd) != 2:
                     return self._err(f"expected cmd len 2, got {len(cmd)}")
                 pos = client_to_pos(cmd)
+                kwargs = {}
+                if "speed" in req:
+                    s = req["speed"]
+                    if not isinstance(s, int) or not (0 <= s <= 255):
+                        return self._err(f"speed must be int 0..255, got {s!r}")
+                    kwargs["speed"] = s
+                if "force" in req:
+                    f = req["force"]
+                    if not isinstance(f, int) or not (0 <= f <= 255):
+                        return self._err(f"force must be int 0..255, got {f!r}")
+                    kwargs["force"] = f
+
+                # Soft mode: close until object detected (gOBJ==2), then hold at current pos with force=0.
+                # Avoids sustained force on the grasped object.
+                if req.get("soft"):
+                    soft_force = kwargs.get("force", 20)
+                    with self._lock:
+                        self.gripper.move_to(pos, force=soft_force)
+                        s = self.gripper.wait_until_idle(timeout=5.0)
+                        if s.get("gOBJ") == 2:
+                            pos_now = s["position"]
+                            self.gripper.move_to(pos_now, force=0)
+                            return self._ok(
+                                True,
+                                f"soft_close: object at pos={pos_now}/255 (closed with force={soft_force}, now holding at force=0)",
+                            )
+                        return self._ok(
+                            True,
+                            f"soft_close: no object detected (gOBJ={s.get('gOBJ')}), pos={s.get('position')}/255",
+                        )
+
                 with self._lock:
-                    self.gripper.move_to(pos)
+                    self.gripper.move_to(pos, **kwargs)
                     self.gripper.wait_until_idle(timeout=5.0)
-                return self._ok(True, f"moved to pos={pos}/255")
+                info = f"moved to pos={pos}/255"
+                if kwargs:
+                    info += f" ({', '.join(f'{k}={v}' for k, v in kwargs.items())})"
+                return self._ok(True, info)
             if cmd_type == "get":
                 with self._lock:
                     s = self.gripper.read_status()

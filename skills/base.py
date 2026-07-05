@@ -173,9 +173,13 @@ class Skill(ABC):
         if self._perception is None:
             from core.perception import Perception
             from core.config import DEFAULT_YOLO_MODEL, DEFAULT_ANYGRASP_CHECKPOINT
+            host = self.config.shared.get("anygrasp_host", "127.0.0.1")
+            port = self.config.shared.get("anygrasp_port", 8030)
             self._perception = Perception(
                 yolo_model_path=DEFAULT_YOLO_MODEL,
                 anygrasp_checkpoint=DEFAULT_ANYGRASP_CHECKPOINT,
+                anygrasp_host=host,
+                anygrasp_port=port,
             )
         return self._perception
 
@@ -272,6 +276,33 @@ class Skill(ABC):
     def check_grasping_object(self):
         """Detect whether the hand is holding an object."""
         return self.hand.is_grasping()
+
+    def _left_arm_j2_pretension(self, speed=15):
+        """Nudge left arm J2 by 10° toward 0 before a long return-home motion.
+
+        When the arm has just finished a high-Z grasp, sending the home command
+        directly lets the trajectory planner produce a path that dips downward
+        mid-way and knocks over the workspace. A small J2 motion toward 0 first
+        lifts the shoulder configuration and breaks up the bad interpolation.
+
+        Reads current joints from ROS ``/joint_states`` (left arm publishes
+        there in radians). Silently skips if ROS isn't reachable.
+        """
+        from termcolor import cprint
+        try:
+            import rospy
+            from sensor_msgs.msg import JointState
+            msg = rospy.wait_for_message("/joint_states", JointState, timeout=2.0)
+            current_deg = [r * 180.0 / 3.141592653589793 for r in msg.position[:7]]
+            current_J2 = current_deg[1]
+            if abs(current_J2) < 0.5:
+                return
+            new_J2 = current_J2 + (10.0 if current_J2 < 0 else -10.0)
+            cprint(f"[J2_pretension] J2: {current_J2:.2f}° → {new_J2:.2f}°", "cyan")
+            intermediate = [current_deg[0], new_J2] + current_deg[2:7]
+            self.arm.execute_trajectory([intermediate], speed=speed)
+        except Exception as e:
+            cprint(f"[J2_pretension] skipped ({e})", "yellow")
 
     def control_arm(self, pose_type=None, trajectory=None, speed=20):
         """Move the arm to a named pose or along a joint-space trajectory."""

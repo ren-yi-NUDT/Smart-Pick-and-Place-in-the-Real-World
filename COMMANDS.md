@@ -35,7 +35,7 @@ echo '{"object":"apple,orange,fruit","container":"red plate"}' | python run_skil
 echo '{"object":"bottle","container":"person","side":"right"}' | python run_skill.py pick_and_place
 
 # 右臂扔垃圾
-echo '{"object":"wrapper","container":"trash","side":"right"}' | python run_skill.py pick_and_place
+echo '{"object":"bottle","container":"trash","side":"right"}' | python run_skill.py pick_and_place
 ```
 
 ### fetch_from_user — 从用户手中接收物品

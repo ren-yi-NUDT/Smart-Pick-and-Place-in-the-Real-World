@@ -39,9 +39,13 @@ class Perception:
         yolo_model_path: str = "",
         anygrasp_checkpoint: str = "",
         save_path: str = "",
+        anygrasp_host: str = "127.0.0.1",
+        anygrasp_port: int = 8030,
     ):
         self.save_path = save_path
         self.checkpoint_path = anygrasp_checkpoint
+        self.anygrasp_host = anygrasp_host
+        self.anygrasp_port = anygrasp_port
 
         # Load YOLO-World
         if yolo_model_path:
@@ -49,8 +53,8 @@ class Perception:
         else:
             self.yolo_model = None
 
-        # AnyGrasp is loaded lazily (heavy)
-        self._anygrasp_fn = None
+        # AnyGrasp runs in a long-running server process; client is lazy.
+        self._anygrasp_client = None
 
     # ------------------------------------------------------------------
     # YOLO-World
@@ -89,23 +93,21 @@ class Perception:
     # AnyGrasp
     # ------------------------------------------------------------------
     def detect_grasps(self, rgb, depth, model: str = "rs_right"):
-        """Run AnyGrasp on an RGB-D pair.
+        """Run AnyGrasp on an RGB-D pair by calling the long-running server.
 
         Returns
         -------
         list[dict]
             Each dict has keys ``"trans"``, ``"score"``, ``"rotation_matrix"``.
         """
-        if self._anygrasp_fn is None:
-            self._anygrasp_fn = _import_anygrasp()
+        if self._anygrasp_client is None:
+            from core.anygrasp_client import AnyGraspClient
+            self._anygrasp_client = AnyGraspClient(self.anygrasp_host, self.anygrasp_port)
+            self._anygrasp_client.connect()
         try:
-            anygrasp_pose, point_cloud = self._anygrasp_fn(
-                self.checkpoint_path, rgb, depth, model=model,
-            )
-            self.point_cloud = point_cloud
-            return anygrasp_pose
+            return self._anygrasp_client.detect_grasps(rgb, depth, model=model)
         except Exception as e:
-            cprint(f"[Perception] AnyGrasp failed: {e}", "red")
+            cprint(f"[Perception] AnyGrasp server call failed: {e}", "red")
             return []
 
     # ------------------------------------------------------------------

@@ -70,12 +70,22 @@ class GripperClient:
     # ------------------------------------------------------------------
     # Public interface (aligned with HandClient)
     # ------------------------------------------------------------------
-    def open(self) -> dict:
+    def open(self, force: int = None, speed: int = None) -> dict:
         cmd = {"src": SERVICE_SRC, "type": "set", "cmd": list(self._cmds["open"])}
+        if force is not None:
+            cmd["force"] = force
+        if speed is not None:
+            cmd["speed"] = speed
         return self._send_cmd(cmd)
 
-    def close(self) -> dict:
+    def close(self, force: int = None, speed: int = None, soft: bool = False) -> dict:
         cmd = {"src": SERVICE_SRC, "type": "set", "cmd": list(self._cmds["close"])}
+        if force is not None:
+            cmd["force"] = force
+        if speed is not None:
+            cmd["speed"] = speed
+        if soft:
+            cmd["soft"] = True
         return self._send_cmd(cmd)
 
     def get_state(self) -> dict:

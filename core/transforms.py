@@ -49,6 +49,10 @@ class TransformationUtil:
         if rospy is None:
             raise ImportError("rospy is required for TransformationUtil")
         rospy.init_node("transformation_util")
+        # Keep one long-lived TransformListener. A fresh listener has an empty
+        # buffer and must wait for /tf to republish; recreating it on every
+        # lookup was the dominant ROS-TF overhead.
+        self._listener = tf.TransformListener()
 
     def get_transform_from_frame_to_frame(self, from_frame: str, to_frame: str):
         """Look up the homogeneous transform from *from_frame* to *to_frame*.
@@ -59,7 +63,7 @@ class TransformationUtil:
         transformation_euler : list  [tx, ty, tz, rx, ry, rz]  (radians)
         transformation_quat : list  [tx, ty, tz, qx, qy, qz, qw]
         """
-        listener = tf.TransformListener()
+        listener = self._listener
         listener.waitForTransform(from_frame, to_frame, rospy.Time(), rospy.Duration(4.0))
 
         retries = 5
