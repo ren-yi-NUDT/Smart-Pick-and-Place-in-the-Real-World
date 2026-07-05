@@ -22,14 +22,20 @@ echo '{"object":"orange","container":"green bowl"}' | python run_skill.py pick_a
 # 递瓶子给用户（人机递物）
 echo '{"object":"bottle","container":"person"}' | python run_skill.py pick_and_place
 
-# 扔糖纸进垃圾桶
-echo '{"object":"wrapper","container":"trash"}' | python run_skill.py pick_and_place
+# 扔瓶子进垃圾桶
+echo '{"object":"bottle","container":"trash"}' | python run_skill.py pick_and_place
 
 # 放杯子到桌面（随机预设位姿）
 echo '{"object":"cup","container":"desk"}' | python run_skill.py pick_and_place
 
 # 多类别 OR 检测（苹果/橘子/水果 任一命中即可）
 echo '{"object":"apple,orange,fruit","container":"red plate"}' | python run_skill.py pick_and_place
+
+# 用右臂执行（默认 left，可显式指定 right）
+echo '{"object":"bottle","container":"person","side":"right"}' | python run_skill.py pick_and_place
+
+# 右臂扔垃圾
+echo '{"object":"wrapper","container":"trash","side":"right"}' | python run_skill.py pick_and_place
 ```
 
 ### fetch_from_user — 从用户手中接收物品
