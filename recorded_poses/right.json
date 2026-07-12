@@ -316,8 +316,8 @@
     "gripper": {
       "state": "partial(212)",
       "values": [
-        212,
-        212
+        242,
+        242
       ],
       "info": "gACT=1 gSTA=activated gGTO=1 gOBJ=contact while closing flt=0x09(unknown 0x9) pos=201/255 cur=50mA"
     }
@@ -347,8 +347,8 @@
     "gripper": {
       "state": "partial(208)",
       "values": [
-        208,
-        208
+        242,
+        242
       ],
       "info": "gACT=1 gSTA=activated gGTO=1 gOBJ=contact while closing flt=0x09(unknown 0x9) pos=202/255 cur=50mA"
     }

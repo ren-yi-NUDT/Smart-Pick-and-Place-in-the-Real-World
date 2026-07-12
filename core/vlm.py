@@ -82,7 +82,7 @@ class VLMClient:
             image_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
             cprint(
-                f"[VLM] Calling GLM-4.5V (image {pil_image.size})...",
+                f"[VLM] Calling {self.model} (image {pil_image.size})...",
                 "cyan",
             )
 

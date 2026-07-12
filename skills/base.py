@@ -285,14 +285,30 @@ class Skill(ABC):
         mid-way and knocks over the workspace. A small J2 motion toward 0 first
         lifts the shoulder configuration and breaks up the bad interpolation.
 
-        Reads current joints from ROS ``/joint_states`` (left arm publishes
-        there in radians). Silently skips if ROS isn't reachable.
+        Reads current joints from ROS ``/joint_states``. **Filters by
+        ``msg.name``** because the topic has multiple publishers (left arm
+        publishes ``["joint1".."joint7"]`` at 20 Hz; the Inspire hand publishes
+        its own hand joints at 15 Hz). Without filtering, ``wait_for_message``
+        races and ~40% of calls receive the hand message — ``msg.position[:7]``
+        then parses hand-joint radians as left-arm degrees, producing a garbage
+        ``intermediate`` pose that drives the arm to a random configuration.
+        Silently skips if a left-arm message doesn't arrive within 5 attempts.
         """
         from termcolor import cprint
         try:
             import rospy
             from sensor_msgs.msg import JointState
-            msg = rospy.wait_for_message("/joint_states", JointState, timeout=2.0)
+            LEFT_ARM_NAMES = {"joint1", "joint2", "joint3", "joint4",
+                              "joint5", "joint6", "joint7"}
+            msg = None
+            for _ in range(5):
+                cand = rospy.wait_for_message("/joint_states", JointState, timeout=2.0)
+                if cand is not None and set(cand.name[:7]) == LEFT_ARM_NAMES:
+                    msg = cand
+                    break
+            if msg is None:
+                cprint("[J2_pretension] no left-arm /joint_states msg, skipped", "yellow")
+                return
             current_deg = [r * 180.0 / 3.141592653589793 for r in msg.position[:7]]
             current_J2 = current_deg[1]
             if abs(current_J2) < 0.5:

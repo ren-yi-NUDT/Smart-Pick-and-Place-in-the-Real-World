@@ -125,7 +125,7 @@ class PickAndPlaceSkill(Skill):
         cprint(f"P=================== Fixed placement to {target_pose_name} done ===================", "green")
         return True
 
-    def _delegate_to_left_arm(self, container):
+    def _delegate_to_left_arm(self, container, return_home=True):
         """Two-arm handover using the validated 4-step sequence (left→right by direction).
 
         Steps (per 2026-07-05 validated run):
@@ -133,11 +133,12 @@ class PickAndPlaceSkill(Skill):
           1. Right arm with open gripper → approach pose (speed=10)
           2. Handover: right gripper close → wait 1.5s → left dexterous open
           3. Right arm carrying object → preset pose (speed=15)
-          4. Both arms → home (parallel, speed=30)
+          4. Both arms → home (parallel, speed=30)  [skipped when return_home=False]
 
         Pose names are inherited from old `right_to_left_handover_*` config keys;
         actual direction is left→right (object goes from left dexterous hand to
-        right gripper). After completion the object is in the right gripper at home.
+        right gripper). After completion the object is in the right gripper
+        (at home when return_home=True, at preset when return_home=False).
         """
         import json
         import os
@@ -179,8 +180,8 @@ class PickAndPlaceSkill(Skill):
 
         # Step 0: Both arms → preset
         cprint("D=================== Step 0: Both arms → preset (speed=15) ===================", "cyan")
-        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(left_preset,), kwargs={"speed": 15})
-        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(right_preset,), kwargs={"speed": 15})
+        t1 = threading.Thread(target=lambda: self.arm.move_to_named_pose(left_preset, speed=15))
+        t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(right_preset, speed=15))
         t1.start(); t2.start(); t1.join(); t2.join()
 
         # Step 1: Right arm with open gripper → approach
@@ -200,11 +201,12 @@ class PickAndPlaceSkill(Skill):
         cprint("D=================== Step 3: Right arm (carrying object) → preset (speed=15) ===================", "cyan")
         right_arm.move_to_named_pose(right_preset, speed=15)
 
-        # Step 4: Both arms → home
-        cprint("D=================== Step 4: Both arms → home (speed=30) ===================", "cyan")
-        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(home_left,), kwargs={"speed": 30})
-        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(home_right,), kwargs={"speed": 30})
-        t1.start(); t2.start(); t1.join(); t2.join()
+        # Step 4: Both arms → home (skippable for flows that don't need return)
+        if return_home:
+            cprint("D=================== Step 4: Both arms → home (speed=30) ===================", "cyan")
+            t1 = threading.Thread(target=lambda: self.arm.move_to_named_pose(home_left, speed=30))
+            t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(home_right, speed=30))
+            t1.start(); t2.start(); t1.join(); t2.join()
 
         cprint("D=================== Handover sequence done (object now in right gripper at home) ===================", "green")
         return True
@@ -257,8 +259,8 @@ class PickAndPlaceSkill(Skill):
 
         # Step 0: Both arms → preset
         cprint("H=================== Step 0: Both arms → preset (speed=15) ===================", "cyan")
-        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(left_preset,), kwargs={"speed": 15})
-        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(right_preset,), kwargs={"speed": 15})
+        t1 = threading.Thread(target=lambda: self.arm.move_to_named_pose(left_preset, speed=15))
+        t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(right_preset, speed=15))
         t1.start(); t2.start(); t1.join(); t2.join()
 
         # Step 1: Right arm (carrying object) → approach
@@ -278,8 +280,8 @@ class PickAndPlaceSkill(Skill):
 
         # Step 4: Both arms → home
         cprint("H=================== Step 4: Both arms → home (speed=30) ===================", "cyan")
-        t1 = threading.Thread(target=self.arm.move_to_named_pose, args=(home_left,), kwargs={"speed": 30})
-        t2 = threading.Thread(target=right_arm.move_to_named_pose, args=(home_right,), kwargs={"speed": 30})
+        t1 = threading.Thread(target=lambda: self.arm.move_to_named_pose(home_left, speed=30))
+        t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(home_right, speed=30))
         t1.start(); t2.start(); t1.join(); t2.join()
 
         cprint("H=================== Right→left handover done (object now in left dexterous hand at home) ===================", "green")

@@ -76,6 +76,13 @@ HAND_GESTURES = {
     "grab": [50, 50, 50, 100, 100, 0],                 # 抓取姿态
 }
 
+# 强制指定臂的"非录制位姿"动作（轨迹回放直驱 SDK，IP 硬编码）
+# 名称 → 唯一允许的臂
+ACTION_ARM_RESTRICTIONS = {
+    "open_drawer": "right",   # _play_trajectory 硬编码 192.168.1.18
+    "close_drawer": "right",
+}
+
 
 # ---------------------------------------------------------------------------
 # 辅助函数
@@ -98,6 +105,51 @@ def _load_trajectory(name):
         return None
     with open(traj_file, "r") as f:
         return json.load(f)
+
+
+def _resolve_action_arm(name, requested_arm):
+    """解析动作 `name` 是否能在 `requested_arm` 上执行。
+
+    路由规则：
+      1. 在 ACTION_ARM_RESTRICTIONS 中的动作（如 open_drawer）→ 强制指定臂
+      2. 否则查 recorded_poses/{arm}.json：
+         - 命中 requested_arm → 通过
+         - 命中另一臂 → 报错并提示正确臂
+         - 都未命中 → 报错"未找到位姿"
+
+    Returns:
+        (ok, msg, authoritative_arm)
+        - ok=True,  msg=None,    authoritative_arm=<可执行的臂>
+        - ok=False, msg=<原因>,  authoritative_arm=<正确臂 or None>
+    """
+    requested_arm = (requested_arm or "left").lower()
+    if requested_arm not in ("left", "right"):
+        return False, (
+            f"无效的臂参数 '{requested_arm}'（应为 left 或 right）"
+        ), None
+
+    if name in ACTION_ARM_RESTRICTIONS:
+        required = ACTION_ARM_RESTRICTIONS[name]
+        if requested_arm == required:
+            return True, None, required
+        return False, (
+            f"动作 '{name}' 只能由 {required}臂执行"
+            f"（请求的是 {requested_arm}臂）"
+        ), required
+
+    if _load_poses(requested_arm).get(name):
+        return True, None, requested_arm
+
+    other_arm = "right" if requested_arm == "left" else "left"
+    if _load_poses(other_arm).get(name):
+        return False, (
+            f"位姿 '{name}' 只能由 {other_arm}臂执行"
+            f"（请求的是 {requested_arm}臂）"
+        ), other_arm
+
+    return False, (
+        f"未找到位姿 '{name}'（左/右臂录制库均无此条目）"
+    ), None
 
 
 def _send_gripper_cmd(values):
@@ -148,7 +200,7 @@ def _parse_hand_gesture(hand_input):
         return None
 
 
-def _send_arm_command(sock, joint_angles, speed=30, block=True):
+def _send_arm_command(sock, joint_angles, speed=50, block=True):
     """
     通过 socket 发送机械臂关节运动指令
 
@@ -281,7 +333,7 @@ class PoseExecuteSkill(Skill):
                 command (str): "play" 或 "list"
                 name (str): 位姿名称
                 arm (str): "left" 或 "right" (默认 "left")
-                speed (int): 移动速度 0-100 (默认 30)
+                speed (int): 移动速度 0-100 (默认 50)
                 block (bool): 是否阻塞等待 (默认 True)
                 sequence (str): 序列文件路径或 JSON 字符串
                 sequence_is_string (bool): sequence 是 JSON 字符串而非文件路径
@@ -316,13 +368,28 @@ class PoseExecuteSkill(Skill):
                 is_string = kwargs.get("sequence_is_string", False)
                 results["sequence"] = self.play_sequence(sequence, is_file=not is_string)
 
-            # 播放单个位姿
+            # 播放单个位姿（或轨迹回放）
             name = kwargs.get("name")
             if name is not None:
                 arm = kwargs.get("arm", "left")
-                speed = kwargs.get("speed", 30)
-                block = kwargs.get("block", True)
-                results["pose"] = self.play_pose(name, arm, speed, block)
+                # 抽屉轨迹：硬编码右臂，先做路由检查
+                if name in ACTION_ARM_RESTRICTIONS and arm != ACTION_ARM_RESTRICTIONS[name]:
+                    required = ACTION_ARM_RESTRICTIONS[name]
+                    msg = (
+                        f"动作 '{name}' 只能由 {required}臂执行"
+                        f"（请求的是 {arm}臂）"
+                    )
+                    cprint(f"[pose_execute] 路由失败: {msg}", "red")
+                    results["pose"] = False
+                    results["pose_error"] = msg
+                elif name == "open_drawer":
+                    results["pose"] = self.play_open_drawer(speed=1.5)
+                elif name == "close_drawer":
+                    results["pose"] = self.play_close_drawer(speed=1.5)
+                else:
+                    speed = kwargs.get("speed", 50)
+                    block = kwargs.get("block", True)
+                    results["pose"] = self.play_pose(name, arm, speed, block)
 
             if not results:
                 return {"success": False, "info": "未指定 name/sequence/hand/parallel 参数"}
@@ -333,11 +400,21 @@ class PoseExecuteSkill(Skill):
             }
 
         elif command == "open_drawer":
+            arm = kwargs.get("arm", "right")
+            if arm != "right":
+                msg = f"动作 'open_drawer' 只能由右臂执行（请求的是 {arm}臂）"
+                cprint(f"[pose_execute] 路由失败: {msg}", "red")
+                return {"success": False, "info": msg}
             speed = kwargs.get("speed", 1.5)
             ok = self.play_open_drawer(speed=speed)
             return {"success": ok, "info": "开抽屉" if ok else "开抽屉失败"}
 
         elif command == "close_drawer":
+            arm = kwargs.get("arm", "right")
+            if arm != "right":
+                msg = f"动作 'close_drawer' 只能由右臂执行（请求的是 {arm}臂）"
+                cprint(f"[pose_execute] 路由失败: {msg}", "red")
+                return {"success": False, "info": msg}
             speed = kwargs.get("speed", 1.5)
             ok = self.play_close_drawer(speed=speed)
             return {"success": ok, "info": "关抽屉" if ok else "关抽屉失败"}
@@ -347,25 +424,35 @@ class PoseExecuteSkill(Skill):
 
     # -- 位姿播放 --
 
-    def play_pose(self, name, arm="left", speed=30, block=True):
+    def play_pose(self, name, arm="left", speed=50, block=True):
         """
-        执行预设位姿
+        执行预设位姿（自动路由到正确的臂）
 
         Args:
-            name: 位姿名称
-            arm: "left" 或 "right"
+            name: 位姿名称或受控动作名（open_drawer/close_drawer）
+            arm: "left" 或 "right"（仅当位姿存在于此臂时通过；
+                 若位姿只存在于另一臂或受 ACTION_ARM_RESTRICTIONS 限制，
+                 会拒绝执行并打印路由错误）
             speed: 移动速度 (0-100)
             block: 是否阻塞等待完成
 
         Returns:
             bool: 是否执行成功
         """
-        poses = _load_poses(arm)
-
-        if name not in poses:
-            cprint(f"[pose_execute] [{arm}] 未找到位姿: {name}", "red")
+        ok, msg, authoritative_arm = _resolve_action_arm(name, arm)
+        if not ok:
+            cprint(f"[pose_execute] 路由失败: {msg}", "red")
             return False
+        arm = authoritative_arm
 
+        # 受控动作（轨迹回放，硬编码到右臂 SDK）
+        if name in ACTION_ARM_RESTRICTIONS:
+            if name == "open_drawer":
+                return self.play_open_drawer(speed=speed / 20 if speed else 1.5)
+            if name == "close_drawer":
+                return self.play_close_drawer(speed=speed / 20 if speed else 1.5)
+
+        poses = _load_poses(arm)
         pose_data = poses[name]
         joint_angles = pose_data["joint_angles_deg"]
 
@@ -410,7 +497,7 @@ class PoseExecuteSkill(Skill):
             hand = action.get("hand")
             if name is not None:
                 arm = action.get("arm", "left")
-                speed = action.get("speed", 30)
+                speed = action.get("speed", 50)
                 results[idx] = self.play_pose(name, arm, speed, block=True)
             elif hand is not None:
                 results[idx] = self.play_hand_gesture(hand)
@@ -524,11 +611,11 @@ class PoseExecuteSkill(Skill):
             arm_pose = step.get("arm_pose") or step.get("name")
             if arm_pose is not None:
                 arm = step.get("arm", "left")
-                speed = step.get("speed", 30)
+                speed = step.get("speed", 50)
                 if not self.play_pose(arm_pose, arm, speed):
                     all_ok = False
 
-            delay = step.get("delay", 0.5)
+            delay = step.get("delay", 0.2)
             time.sleep(delay)
 
         cprint("\n[pose_execute] 动作序列执行完成", "green")

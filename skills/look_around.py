@@ -9,21 +9,35 @@ from skills.base import Skill, register_skill
 class LookAroundSkill(Skill):
     """Scan workspace from observation positions using GLM-4.5V."""
 
-    def run(self, reset_pose="grasp1", **kwargs):
+    def run(self, reset_pose=None, **kwargs):
         """Scan workspace and analyze scene with VLM.
+
+        side="left" (default): cycle left arm through grasp1-4 observation poses,
+            analyze the first frame with VLM (scene + spatial relations).
+        side="right": move right arm to ``drawer_1_placement``, capture the
+            drawer interior, ask VLM to list visible items (ignoring foam pads).
 
         Args:
             reset_pose: Pose name to return to after scanning.
-                        Set to None to skip reset (for chained calls).
+                        None → left arm uses ``grasp1``, right arm uses ``home``.
+                        Set to a string to override; pass "" to skip reset.
         """
-        cprint("=================== Look Around: Scanning workspace ===================", "cyan")
+        data = kwargs if kwargs.get("side") else (self.json_parser.get_command() or {})
+        side = data.get("side", "left")
+
+        if side == "right":
+            return self._run_right(reset_pose)
+
+        if reset_pose is None:
+            reset_pose = "grasp1"
+        cprint("=================== Look Around: Scanning workspace (left arm) ===================", "cyan")
 
         images = {}
         for key in self.config.default_traj_js:
             if "grasp" not in key:
                 continue
             self.control_arm(pose_type=key, speed=30)
-            rgb, depth = self.get_camera_obs()
+            rgb, depth = self.get_camera_obs(side="left")
 
             # Save images to disk
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -60,4 +74,48 @@ class LookAroundSkill(Skill):
 
         if reset_pose:
             self.control_arm(pose_type=reset_pose, speed=30)
+        return analysis
+
+    def _run_right(self, reset_pose=None):
+        """Right-arm drawer inspection: capture drawer interior, list contents via VLM."""
+        from core.arm import ArmClient
+
+        cprint("=================== Look Around: Drawer inspection (right arm) ===================", "cyan")
+
+        right_cfg = self.config.get_arm_config("right")
+        obs_pose = right_cfg.get("drawer_1_placement")
+        if obs_pose is None:
+            cprint("错误: robot_config.json 中右臂没有定义 drawer_1_placement", "red")
+            return None
+
+        right_arm = ArmClient("127.0.0.1", 8011)
+        right_arm.connect()
+        right_arm.move_to_named_pose(obs_pose, speed=15)
+        time.sleep(1)
+
+        rgb, depth = self.get_camera_obs(side="right")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        from PIL import Image
+        rgb_path = os.path.join(self.save_path, f"look_around_drawer_rgb_{timestamp}.png")
+        depth_path = os.path.join(self.save_path, f"look_around_drawer_depth_{timestamp}.png")
+        Image.fromarray(rgb).save(rgb_path)
+        Image.fromarray(depth).save(depth_path)
+        cprint(f"Saved: {rgb_path}", "cyan")
+
+        prompt = (
+            "这是一张抽屉内部的照片，请你描述在抽屉里都看到了什么，"
+            "只输出词语即可，比如\"桃子、可乐瓶\"，忽视抽屉里的泡沫板"
+        )
+
+        analysis = self.vlm.analyze(rgb, prompt=prompt)
+        if analysis:
+            cprint(f"\n========== Drawer Contents ==========\n{analysis}\n", "green")
+        else:
+            cprint("VLM analysis failed", "red")
+
+        target = reset_pose if reset_pose else "home"
+        target_pose = right_cfg.get(target)
+        if target_pose is not None:
+            right_arm.move_to_named_pose(target_pose, speed=30)
         return analysis

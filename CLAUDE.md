@@ -98,7 +98,7 @@ python run_skill.py look_around
 
 ### JSON 输入格式
 
-- `object`（必需）：要抓取的物体名称，支持逗号分隔的多个类别（OR 逻辑）
+- `object`（必需）：要抓取的物体名称（**英文**，YOLO-World 不识别中文），支持逗号分隔的多个类别（OR 逻辑）
 - `container`（必需）：放置目标容器，或特殊模式关键字
 - `direction`（可选）：空间提示（尚未实现）
 
@@ -229,7 +229,7 @@ Smart-Pick-and-Place-in-the-Real-World/
 
 ## 检测与抓取
 
-- **物体检测**：YOLO-World（yolov8x-worldv2.pt）— 开放词汇，支持任意类别名称
+- **物体检测**：YOLO-World（yolov8x-worldv2.pt）— 开放词汇，**仅支持英文类名**（中文如 `"桃子"` 会得到 `no detections`；口语物体名要先翻成英文，如 桃子→`peach`、瓶子→`bottle`、杯子→`cup`）
 - **抓取检测**：AnyGrasp SDK — 生成 top-50 抓取候选，使用 YOLO 检测边界框（20px 边距）过滤
 - **多类别**：逗号分隔值使用 OR 逻辑（如 `"apple,orange,fruit"`）
 

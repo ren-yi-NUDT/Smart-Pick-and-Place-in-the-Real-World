@@ -1,5 +1,7 @@
 # Skill 调用速查表
 
+仅做参考！！！！！请完整查看代码逻辑！！！
+
 > 前置：`conda activate anygrasp` + `bash start.bash`（启动 ROS + Twin IK 服务）
 > 所有命令在仓库根目录执行；JSON 通过 stdin 传入
 > 架构 / 协议 / 硬件说明见 [README.md](README.md)
@@ -100,6 +102,20 @@ echo '{"command":"play","parallel":[{"arm":"left","name":"wave"},{"arm":"right",
 # 播放灵巧手手势（预设：open/close/peace/grab/thumbs_up 等）
 echo '{"command":"play","hand":"peace"}' | python run_skill.py pose_execute
 ```
+
+#### 抽屉操作（右臂轨迹回放）
+
+`open_drawer` / `close_drawer` 是预录制的完整轨迹回放（SDK 直驱右臂 192.168.1.18:8080，默认 1.5x 速度），**不是简单的位姿移动**。强制右臂执行，`arm` 参数可省略。
+
+```bash
+# 开抽屉：home → 抓把手 → 拉开 → 松手 → 回 home
+echo '{"command":"play","name":"open_drawer"}' | python run_skill.py pose_execute
+
+# 关抽屉：home → 推关 → 回 home（不抓把手）
+echo '{"command":"play","name":"close_drawer"}' | python run_skill.py pose_execute
+```
+
+轨迹文件：`recorded_trajectories/right/{open,close}_drawer.json`
 
 ## 原子 Skill（独立 CLI）
 
