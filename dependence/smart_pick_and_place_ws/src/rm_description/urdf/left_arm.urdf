@@ -516,803 +516,303 @@
       xyz="0 0 0" />
   </joint>
 
-  <link
-    name="L_hand_base_link">
-    <inertial>
-      <origin
-        xyz="-6.24288400908994E-05 0.00368445021108559 -0.0826064863965231"
-        rpy="0 0 0" />
-      <mass
-        value="0.259445165128865" />
-      <inertia
-        ixx="0.00022365344025756"
-        ixy="-1.13436481934473E-06"
-        ixz="5.34161934445467E-07"
-        iyy="0.00026679338415638"
-        iyz="1.40944118648866E-05"
-        izz="0.000132846630274859" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/l_base_link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/l_base_link.STL" />
-      </geometry>
-    </collision>
-  </link>
-
-  <link
-    name="left_thumb_swing">
-    <inertial>
-      <origin
-        xyz="-0.00184772613419589 -0.000437179099690016 0.00313589310434411"
-        rpy="0 0 0" />
-      <mass
-        value="0.00115518743162309" />
-      <inertia
-        ixx="6.14919569328236E-08"
-        ixy="5.60732910597656E-09"
-        ixz="-3.41066835700806E-09"
-        iyy="3.91193865762758E-08"
-        iyz="-8.06984149203055E-10"
-        izz="6.18161684388652E-08" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_thumb_swing.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_thumb_swing.STL" />
-      </geometry>
-    </collision>
-  </link>
+  <!-- Robotiq ARG-85 Gripper -->
   <joint
-    name="left_thumb_swing_joint"
-    type="revolute">
-    <origin
-      xyz="0.0269 -0.02101 -0.07075"
-      rpy="-3.1416 0 -3.1416" />
-    <parent
-      link="L_hand_base_link" />
-    <child
-      link="left_thumb_swing" />
-    <axis
-      xyz="0 0 1" />
-    <limit
-      lower="0"
-      upper="1.7"
-      effort="1"
-      velocity="100" />
-  </joint>
-  <link
-    name="left_thumb_1">
-    <inertial>
-      <origin
-        xyz="-0.0167591242737366 0.00921112383501533 -0.00940298171557882"
-        rpy="0 0 0" />
-      <mass
-        value="0.03" />
-      <inertia
-        ixx="1.04464326592721E-06"
-        ixy="8.43518653247496E-08"
-        ixz="4.30246542461423E-10"
-        iyy="1.13248311287668E-06"
-        iyz="-3.2733269008621E-10"
-        izz="1.4363514294434E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_thumb_1.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_thumb_1.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_thumb_1_joint"
-    type="revolute">
-    <origin
-      xyz="-0.007567 -0.01145 0.00125"
-      rpy="1.5708 0 0.23233" />
-    <parent
-      link="left_thumb_swing" />
-    <child
-      link="left_thumb_1" />
-    <axis
-      xyz="0.19357 0 -0.98109" />
-    <limit
-      lower="0.04"
-      upper="0.92"
-      effort="1"
-      velocity="100" />
-  </joint>
-  <link
-    name="left_thumb_2">
-    <inertial>
-      <origin
-        xyz="-0.0101809417296302 0.00225977029721441 -0.00854142548261862"
-        rpy="0 0 0" />
-      <mass
-        value="0.02" />
-      <inertia
-        ixx="4.56062152110622E-07"
-        ixy="6.18635738534935E-08"
-        ixz="5.54386686828183E-11"
-        iyy="4.26592488515216E-07"
-        iyz="-2.17032482396712E-10"
-        izz="4.38692962619055E-07" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_thumb_2.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_thumb_2.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_thumb_2_joint"
-    type="revolute">
-    <origin
-      xyz="-0.039173 0.011958 -0.00085"
-      rpy="0 0 0" />
-    <parent
-      link="left_thumb_1" />
-    <child
-      link="left_thumb_2" />
-    <axis
-      xyz="0.19357 0 -0.98109" />
-    <limit
-      lower="0"
-      upper="3.14"
-      effort="1"
-      velocity="100" />
-    <mimic
-        joint="left_thumb_1_joint"
-        multiplier="0.40"
-        offset="0" />
-  </joint>
-  <link
-    name="left_thumb_3">
-    <inertial>
-      <origin
-        xyz="-0.0168088610672642 0.00363291504796805 -0.00874331200533507"
-        rpy="0 0 0" />
-      <mass
-        value="0.014" />
-      <inertia
-        ixx="5.64414545344182E-07"
-        ixy="2.2463040972391E-07"
-        ixz="-9.68542531793602E-10"
-        iyy="8.42890432911496E-07"
-        iyz="5.71733921923626E-10"
-        izz="9.25701490946238E-07" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_thumb_3.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_thumb_3.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_thumb_3_joint"
-    type="revolute">
-    <origin
-      xyz="-0.020827 0.0074327 0.0002"
-      rpy="0 0 0" />
-    <parent
-      link="left_thumb_2" />
-    <child
-      link="left_thumb_3" />
-    <axis
-      xyz="0.19357 0 -0.98109" />
-    <limit
-      lower="0"
-      upper="3.14"
-      effort="1"
-      velocity="100" />
-    <mimic
-        joint="left_thumb_1_joint"
-        multiplier="0.60"
-        offset="0" />
-  </joint>
-  <link
-    name="left_index_1">
-    <inertial>
-      <origin
-        xyz="0.00284971838882705 0.0121606900201158 -0.00779932656701256"
-        rpy="0 0 0" />
-      <mass
-        value="0.00719948017029058" />
-      <inertia
-        ixx="1.27186018148011E-06"
-        ixy="-9.9574434089598E-08"
-        ixz="5.32989867607526E-12"
-        iyy="5.91193769989315E-07"
-        iyz="8.56656303683012E-11"
-        izz="1.32912624828403E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_index_1.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_index_1.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_index_1_joint"
-    type="revolute">
-    <origin
-      xyz="0.039829 -0.00056467 -0.15636"
-      rpy="-1.5359 0 -1.5708" />
-    <parent
-      link="L_hand_base_link" />
-    <child
-      link="left_index_1" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="1.6"
-      effort="1"
-      velocity="100" />
-  </joint>
-  <link
-    name="left_index_2">
-    <inertial>
-      <origin
-        xyz="-0.00158837869328786 0.0256544689953271 -0.00749252483164686"
-        rpy="0 0 0" />
-      <mass
-        value="0.00968686999051252" />
-      <inertia
-        ixx="2.28950934688236E-06"
-        ixy="-3.23784715854037E-07"
-        ixz="2.59557220847794E-10"
-        iyy="3.57396661758505E-07"
-        iyz="2.7798873971777E-09"
-        izz="2.3024700664577E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_index_2.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_index_2.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_index_2_joint"
-    type="revolute">
-    <origin
-      xyz="0.0043282 0.032488 -0.0003"
-      rpy="0 0 0" />
-    <parent
-      link="left_index_1" />
-    <child
-      link="left_index_2" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="3.14"
-      effort="1"
-      velocity="100" />
-    <mimic
-        joint="left_index_1_joint"
-        multiplier="1.05"
-        offset="0" />
-  </joint>
-  <link
-    name="left_middle_1">
-    <inertial>
-      <origin
-        xyz="0.00229271394242235 0.0122778605414752 -0.00779931823074317"
-        rpy="0 0 0" />
-      <mass
-        value="0.00719950322487974" />
-      <inertia
-        ixx="1.27951858905779E-06"
-        ixy="-6.81813021711598E-08"
-        ixz="1.58551121588184E-12"
-        iyy="5.83543537428453E-07"
-        iyz="8.56179612611608E-11"
-        izz="1.32913234511164E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_middle_1.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_middle_1.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_middle_1_joint"
-    type="revolute">
-    <origin
-      xyz="0.01825 -0.00056467 -0.157"
-      rpy="-1.5708 0 -1.5708" />
-    <parent
-      link="L_hand_base_link" />
-    <child
-      link="left_middle_1" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="1.6"
-      effort="1"
-      velocity="100" />
-  </joint>
-  <link
-    name="left_middle_2">
-    <inertial>
-      <origin
-        xyz="-7.51983994427274E-05 0.027448753770842 -0.00750059894166984"
-        rpy="0 0 0" />
-      <mass
-        value="0.0104611931926301" />
-      <inertia
-        ixx="2.75831931773332E-06"
-        ixy="-4.66412841401028E-07"
-        ixz="7.3576656177528E-12"
-        iyy="4.22466538741155E-07"
-        iyz="1.79608426686179E-11"
-        izz="2.80722617348706E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_middle_2.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_middle_2.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_middle_2_joint"
-    type="revolute">
-    <origin
-      xyz="0.0028436 0.032651 -0.0003"
-      rpy="0 0 0" />
-    <parent
-      link="left_middle_1" />
-    <child
-      link="left_middle_2" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="3.14"
-      effort="1"
-      velocity="100" />
-    <mimic
-        joint="left_middle_1_joint"
-        multiplier="1.05"
-        offset="0" />
-  </joint>
-  <link
-    name="left_ring_1">
-    <inertial>
-      <origin
-        xyz="0.00240530428455067 0.0122563079467745 -0.00779931923444504"
-        rpy="0 0 0" />
-      <mass
-        value="0.00719949770218712" />
-      <inertia
-        ixx="1.27820682409824E-06"
-        ixy="-7.45572429780095E-08"
-        ixz="2.25718181815559E-12"
-        iyy="5.84853511073517E-07"
-        iyz="8.56222330413956E-11"
-        izz="1.32913088941838E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_ring_1.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_ring_1.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_ring_1_joint"
-    type="revolute">
-    <origin
-      xyz="-0.0033817 -0.00056467 -0.15689"
-      rpy="-1.6232 0 -1.5708" />
-    <parent
-      link="L_hand_base_link" />
-    <child
-      link="left_ring_1" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="1.6"
-      effort="1"
-      velocity="100" />
-  </joint>
-  <link
-    name="left_ring_2">
-    <inertial>
-      <origin
-        xyz="-0.000667145407605998 0.0256949163202511 -0.00749252997688842"
-        rpy="0 0 0" />
-      <mass
-        value="0.00968685177133057" />
-      <inertia
-        ixx="2.26381138740299E-06"
-        ixy="-3.92210300202205E-07"
-        ixz="3.58404653503589E-10"
-        iyy="3.83095000534084E-07"
-        iyz="2.77027363965472E-09"
-        izz="2.30247104599333E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_ring_2.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_ring_2.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_ring_2_joint"
-    type="revolute">
-    <origin
-      xyz="0.0031431 0.032624 -0.0003"
-      rpy="0 0 0" />
-    <parent
-      link="left_ring_1" />
-    <child
-      link="left_ring_2" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="3.14"
-      effort="1"
-      velocity="100" />
-    <mimic
-        joint="left_ring_1_joint"
-        multiplier="1.05"
-        offset="0" />
-  </joint>
-  <link
-    name="left_little_1">
-    <inertial>
-      <origin
-        xyz="0.00233010474276744 0.0122708215539047 -0.00779931620909799"
-        rpy="0 0 0" />
-      <mass
-        value="0.00719949925435212" />
-      <inertia
-        ixx="1.27909590457063E-06"
-        ixy="-7.02999032363559E-08"
-        ixz="1.57057552160854E-12"
-        iyy="5.83965373542566E-07"
-        iyz="8.55933667502959E-11"
-        izz="1.32913130646923E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_little_1.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_little_1.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_little_1_joint"
-    type="revolute">
-    <origin
-      xyz="-0.024772 -0.00056467 -0.15377"
-      rpy="-1.6755 0 -1.5708" />
-    <parent
-      link="L_hand_base_link" />
-    <child
-      link="left_little_1" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="1.6"
-      effort="1"
-      velocity="100" />
-  </joint>
-  <link
-    name="left_little_2">
-    <inertial>
-      <origin
-        xyz="-0.00241293669173222 0.0208349583856417 -0.00750030972388035"
-        rpy="0 0 0" />
-      <mass
-        value="0.00759258702894185" />
-      <inertia
-        ixx="1.24797764618213E-06"
-        ixy="-1.85441230726232E-07"
-        ixz="2.6668802312491E-12"
-        iyy="2.60164254907827E-07"
-        iyz="1.28065987445323E-11"
-        izz="1.23906779005459E-06" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_little_2.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://rm_description/meshes/inspire_hand/left_little_2.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="left_little_2_joint"
-    type="revolute">
-    <origin
-      xyz="0.002943 0.032643 -0.0003"
-      rpy="0 0 0" />
-    <parent
-      link="left_little_1" />
-    <child
-      link="left_little_2" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="3.14"
-      effort="1"
-      velocity="100" />
-    <mimic
-        joint="left_little_1_joint"
-        multiplier="1.05"
-        offset="0" />
-  </joint>
-
-  <joint
-    name="arm_to_hand_virtual"
+    name="L_arm_to_gripper"
     type="fixed">
     <origin
       xyz="0 0 0.01"
-      rpy="0 3.1416 -1.5708" />
+      rpy="0 0 1.5708" />
     <parent
       link="Link7" />
     <child
-      link="L_hand_base_link" />
+      link="L_gripper_base" />
     <axis
       xyz="0 0 0" />
   </joint>
-  
-  <link name="L_hand_endeffector">
+
+  <link name="L_gripper_base">
+    <inertial>
+      <origin xyz="0.00021987 -2.3546E-10 0.030163" rpy="0 0 0" />
+      <mass value="0.30915" />
+      <inertia ixx="0.00028972" ixy="-5.7879E-10" ixz="-1.8543E-06" iyy="0.00030737" iyz="1.682E-12" izz="0.00019914" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/robotiq_85_base_link_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/robotiq_85_base_link_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Left finger (active) -->
+  <link name="L_left_outer_knuckle">
+    <inertial>
+      <origin xyz="0.0178331863169983 3.68915177224286E-11 0.0021442477325704" rpy="0 0 0" />
+      <mass value="0.00684838849434396" />
+      <inertia ixx="2.66832029033166E-07" ixy="1.66142314639824E-15" ixz="1.45945633322873E-07" iyy="1.3889233257419E-06" iyz="2.82951161241588E-15" izz="1.26603336914415E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/outer_knuckle_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/outer_knuckle_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_finger_joint" type="revolute">
+    <origin xyz="0.0306011444260539 0 0.0627920162695395" rpy="0 0 0" />
+    <parent link="L_gripper_base" />
+    <child link="L_left_outer_knuckle" />
+    <axis xyz="0 -1 0" />
+    <limit lower="0" upper="0.725" velocity="2.0" effort="1000" />
+  </joint>
+
+  <link name="L_left_outer_finger">
+    <inertial>
+      <origin xyz="0.00131451599174296 2.88942057994543E-15 0.0215404163180413" rpy="0 0 0" />
+      <mass value="0.0273093985570947" />
+      <inertia ixx="8.51629628283022E-06" ixy="2.58174336207405E-19" ixz="3.83829504344079E-07" iyy="6.9133328065108E-06" iyz="-7.58589926143789E-19" izz="2.25006832221981E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/outer_finger_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/outer_finger_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_left_outer_finger_joint" type="fixed">
+    <origin xyz="0.0316910442266543 0 -0.00193396375724605" rpy="0 0 0" />
+    <parent link="L_left_outer_knuckle" />
+    <child link="L_left_outer_finger" />
+    <axis xyz="0 -1 0" />
+  </joint>
+
+  <link name="L_left_inner_knuckle">
+    <inertial>
+      <origin xyz="0.017097546626628 -3.93808524389535E-10 0.0224918438201868" rpy="0 0 0" />
+      <mass value="0.0110930853895903" />
+      <inertia ixx="4.23392770691541E-06" ixy="5.748978936968E-15" ixz="1.78855677119788E-06" iyy="3.96548790524392E-06" iyz="1.05464666369669E-14" izz="3.24068002883007E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/inner_knuckle_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/inner_knuckle_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_left_inner_knuckle_joint" type="revolute">
+    <origin xyz="0.0127000000001501 0 0.0693074999999639" rpy="0 0 0" />
+    <parent link="L_gripper_base" />
+    <child link="L_left_inner_knuckle" />
+    <axis xyz="0 -1 0" />
+    <limit lower="0" upper="0.8757" velocity="2.0" effort="1000" />
+    <mimic joint="L_finger_joint" multiplier="1" offset="0" />
+  </joint>
+
+  <link name="L_left_inner_finger">
+    <inertial>
+      <origin xyz="0.0060275613594574 -6.29183141465421E-15 0.00669925693133241" rpy="0 0 0" />
+      <mass value="0.00724255346165745" />
+      <inertia ixx="1.47824274053603E-06" ixy="-3.94884463570303E-19" ixz="-3.45268847648622E-07" iyy="1.70064480838395E-06" iyz="3.5059838910097E-19" izz="4.77151336838364E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/inner_finger_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/inner_finger_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_left_inner_finger_joint" type="revolute">
+    <origin xyz="0.034585310861294 0 0.0454970193817975" rpy="0 0 0" />
+    <parent link="L_left_inner_knuckle" />
+    <child link="L_left_inner_finger" />
+    <axis xyz="0 -1 0" />
+    <limit lower="0" upper="0.8757" velocity="2.0" effort="1000" />
+    <mimic joint="L_finger_joint" multiplier="-1" offset="0" />
+  </joint>
+
+  <!-- Right finger (mirrored) -->
+  <link name="L_right_inner_knuckle">
+    <inertial>
+      <origin xyz="0.0168606186773776 3.93808471820465E-10 0.0226699950793434" rpy="0 0 0" />
+      <mass value="0.0110930853895903" />
+      <inertia ixx="4.27134775939882E-06" ixy="-8.53568456728898E-15" ixz="1.77774229944246E-06" iyy="3.96548790524392E-06" iyz="-8.45108024914164E-15" izz="3.20325997634666E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/inner_knuckle_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/inner_knuckle_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_right_inner_knuckle_joint" type="revolute">
+    <origin xyz="-0.0126999999998499 0 0.0693075000000361" rpy="0 0 3.14159265358979" />
+    <parent link="L_gripper_base" />
+    <child link="L_right_inner_knuckle" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="0.8757" velocity="2.0" effort="1000" />
+    <mimic joint="L_finger_joint" multiplier="-1" offset="0" />
+  </joint>
+
+  <link name="L_right_inner_finger">
+    <inertial>
+      <origin xyz="0.00602756228812038 -6.47284509480176E-15 0.00669925609578108" rpy="0 0 0" />
+      <mass value="0.00724255346165744" />
+      <inertia ixx="1.47824283625957E-06" ixy="-3.95952064019123E-19" ixz="-3.45268708875543E-07" iyy="1.70064480838394E-06" iyz="3.55286507960029E-19" izz="4.77151241114822E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/inner_finger_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/inner_finger_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_right_inner_finger_joint" type="revolute">
+    <origin xyz="0.0341060475457406 0 0.0458573878541688" rpy="0 0 0" />
+    <parent link="L_right_inner_knuckle" />
+    <child link="L_right_inner_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="0.8757" velocity="2.0" effort="1000" />
+    <mimic joint="L_finger_joint" multiplier="1" offset="0" />
+  </joint>
+
+  <link name="L_right_outer_knuckle">
+    <inertial>
+      <origin xyz="0.0178097074051638 3.60493211424024E-11 0.00233123458346721" rpy="0 0 0" />
+      <mass value="0.00684838849401352" />
+      <inertia ixx="2.70004361573169E-07" ixy="1.59579467624491E-15" ixz="1.56396493788199E-07" iyy="1.38892332558312E-06" iyz="2.82357800318817E-15" izz="1.26286103637978E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/outer_knuckle_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/outer_knuckle_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_right_outer_knuckle_joint" type="revolute">
+    <origin xyz="-0.0306011444258893 0 0.0627920162695395" rpy="0 0 3.14159265358979" />
+    <parent link="L_gripper_base" />
+    <child link="L_right_outer_knuckle" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="0.8757" velocity="2.0" effort="1000" />
+    <mimic joint="L_finger_joint" multiplier="-1" offset="0" />
+  </joint>
+
+  <link name="L_right_outer_finger">
+    <inertial>
+      <origin xyz="0.00108844269639009 -2.611488350845E-15 0.0215530225245502" rpy="0 0 0" />
+      <mass value="0.0273093985570947" />
+      <inertia ixx="8.52366028592721E-06" ixy="3.41683380899422E-19" ixz="3.18003675694284E-07" iyy="6.91333280651081E-06" iyz="7.37726682706417E-19" izz="2.24270431912283E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/outer_finger_fine.STL" />
+      </geometry>
+      <material name="gripper_dark">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rm_description/meshes/robotiq_85/outer_finger_coarse.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_right_outer_finger_joint" type="fixed">
+    <origin xyz="0.0317095909367246 0 -0.0016013564954687" rpy="0 0 0" />
+    <parent link="L_right_outer_knuckle" />
+    <child link="L_right_outer_finger" />
+    <axis xyz="0 1 0" />
+  </joint>
+
+  <!-- End effector at finger tips -->
+  <link name="L_gripper_endeffector">
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="0.0" />
       <inertia ixx="0.0" ixy="0.0" ixz="0.0" iyy="0.0" iyz="0.0" izz="0.0" />
     </inertial>
   </link>
-
-  <joint
-    name="L_hand_joint_endeffector"
-    type="fixed">
-    <origin
-      xyz="0.030 -0.053 -0.15"
-      rpy="2.222 0 0.05" />
-    <parent
-      link="L_hand_base_link" />
-    <child
-      link="L_hand_endeffector" />
-    <axis
-      xyz="0 0 0" />
+  <joint name="L_gripper_endeffector_joint" type="fixed">
+    <origin xyz="0 0 0.162" rpy="0 0 -1.5708" />
+    <parent link="L_gripper_base" />
+    <child link="L_gripper_endeffector" />
+    <axis xyz="0 0 0" />
   </joint>
-      <!-- xyz="0.018 0.051 0.156"
-      rpy="2.74 0 0.05" -->
+
+
 </robot>

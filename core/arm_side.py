@@ -52,7 +52,8 @@ class ArmSide:
             hand_type = self._arm_config.get("hand_type", "dexterous")
             port = self._arm_config["hand_port"]
             if hand_type == "gripper":
-                self._hand = GripperClient(host=self._host, port=port)
+                src = f"/{self.side}_gripper/movement_control"
+                self._hand = GripperClient(host=self._host, port=port, src=src)
             else:
                 self._hand = HandClient(host=self._host, port=port)
             self._hand.connect()

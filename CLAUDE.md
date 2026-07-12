@@ -21,7 +21,7 @@
 ./start.bash  # 在 2 个 gnome-terminal 中启动 ROS bringup 和 Twin IK 服务
 ```
 
-- **终端1**：ROS bringup — 构建工作空间并启动 ROS 节点（机器人驱动、相机、灵巧手）
+- **终端1**：ROS bringup — 构建工作空间并启动 ROS 节点（双臂驱动、双相机）
 - **终端2**：孪生推理服务 — PyBullet 仿真用于逆运动学/轨迹生成（端口 8020）
 
 **Conda 环境**：`anygrasp`（Python 3.9）
@@ -32,9 +32,10 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 ```
 
 **硬件 IP 地址**：
-- 左臂（灵巧手）：192.168.1.19，Socket 端口 8010
-- 右臂（夹爪）：192.168.1.18，Socket 端口 8011
-- 灵巧手：192.168.11.209
+- 左臂（夹爪 Robotiq 85）：192.168.1.19，Socket 端口 8010（机械臂）、8002（夹爪）
+- 右臂（夹爪 Robotiq 85）：192.168.1.18，Socket 端口 8011（机械臂）、8001（夹爪）
+
+> 历史：左臂末端执行器曾为 Inspire 灵巧手（端口 8000，ROS bringup），现已替换为右臂同款 Robotiq 85 夹爪。`core/hand.py` 和 `dependence/smart_pick_and_place_ws/src/rm_65_pkg/src/inspire_hand_bringup.py` 保留作为可能的回归路径，但默认启动流程不再使用。
 
 ## 系统架构
 
@@ -64,7 +65,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 └──────────┬──────────────────────┬────────────────────────────────┘
            │                      │
      Socket Clients         Socket Servers
-     (8010/8000/8020)       (ROS Nodes + Twin Server)
+     (8010/8011/8001/8002/8020/8021) (ROS Nodes + Twin + Gripper Servers)
 ```
 
 ## 调用方式
@@ -134,7 +135,8 @@ Smart-Pick-and-Place-in-the-Real-World/
 ├── core/                     # 共享基础设施
 │   ├── config.py             # 集中配置管理（含 get_pose 统一查询）
 │   ├── arm.py                # 机械臂 Socket 客户端 (:8010)
-│   ├── hand.py               # 灵巧手 Socket 客户端 (:8000)
+│   ├── hand.py               # 灵巧手 Socket 客户端（端口 8000，历史保留）
+│   ├── gripper.py            # Robotiq 85 夹爪 Socket 客户端（端口 8001/8002）
 │   ├── camera.py             # RealSense RGB-D 采集
 │   ├── twin_client.py        # 数字孪生客户端 (:8020)
 │   ├── transforms.py         # ROS TF 坐标变换 + 工具函数
@@ -172,7 +174,8 @@ Smart-Pick-and-Place-in-the-Real-World/
 |---|---|
 | `config.py` | 配置加载，`get_pose()` 统一位姿查询（先查顶层再查 `default_traj_js`） |
 | `arm.py` | 机械臂 TCP 客户端（端口 8010），4 字节大端长度前缀协议 |
-| `hand.py` | 灵巧手 TCP 客户端（端口 8000） |
+| `hand.py` | 灵巧手 TCP 客户端（端口 8000，历史保留，回归路径） |
+| `gripper.py` | Robotiq 85 夹爪 TCP 客户端（端口 8001 右臂 / 8002 左臂） |
 | `camera.py` | RealSense RGB-D 采集（640x480, 30fps） |
 | `twin_client.py` | 孪生推理 TCP 客户端（端口 8020） |
 | `transforms.py` | ROS TF 坐标变换、相机投影、3D 可视化工具函数 |
@@ -193,17 +196,20 @@ Smart-Pick-and-Place-in-the-Real-World/
 |---|---|
 | `src/rm_65_pkg/src/arm_75_bringup.py` | 机械臂 ROS bringup 节点 |
 | `src/rm_65_pkg/src/mount_camera.py` | 相机安装/标定节点 |
-| `src/rm_65_pkg/src/inspire_hand_bringup.py` | Inspire 灵巧手 ROS 节点 |
-| `src/rm_65_pkg/src/hand_controller_modbus.py` | 通过 Modbus 协议控制灵巧手 |
+| `src/rm_65_pkg/src/inspire_hand_bringup.py` | Inspire 灵巧手 ROS 节点（**已停用**，左臂换夹爪后从 bringup.launch 移除；保留文件作为回归路径） |
+| `src/rm_65_pkg/src/hand_controller_modbus.py` | 通过 Modbus 协议控制灵巧手（同样停用） |
 | `src/rm_description/urdf/LeftArm/` | 仿真用 URDF 模型和机器人配置 |
 
 ## Socket 通信协议
 
 | 端口 | 服务 | 协议 | 消息格式 |
 |---|---|---|---|
-| 8000 | 灵巧手控制 | TCP | JSON：`{"src": "/left_hand/movement_control", "type": "set"/"get", "cmd": [...]}` |
-| 8010 | 机械臂控制 | TCP | 4 字节大端长度前缀 + JSON：`{"srv": "/right_arm/movement_control", "cmd": [{"type": "start"}, {"type": "js", "act": {...}, "speed": N, "block": bool}, {"type": "end"}]}` |
-| 8020 | 孪生推理 | TCP | 请求：纯 JSON；响应：4 字节大端长度前缀 + JSON |
+| 8001 | 右臂夹爪（Robotiq 85） | TCP | JSON：`{"src": "/right_gripper/movement_control", "type": "set"/"get", "cmd": [v, v]}`（v∈0..1000，1000=张开，0=闭合） |
+| 8002 | 左臂夹爪（Robotiq 85） | TCP | 同上，`src` 为 `/left_gripper/movement_control` |
+| 8010 | 左臂机械臂控制 | TCP | 4 字节大端长度前缀 + JSON：`{"srv": "/right_arm/movement_control", "cmd": [{"type": "start"}, {"type": "js", "act": {...}, "speed": N, "block": bool}, {"type": "end"}]}` |
+| 8011 | 右臂机械臂控制 | TCP | 同上 |
+| 8020 | 左臂孪生推理 | TCP | 请求：纯 JSON；响应：4 字节大端长度前缀 + JSON |
+| 8021 | 右臂孪生推理 | TCP | 同上 |
 | 8030 | AnyGrasp 抓取检测 | TCP | 二进制：请求 4 字节 BE 长度前缀 + (JSON header + `\n` + depth raw + rgb raw)；响应 4 字节 BE 长度前缀 + JSON `{"poses": [...], "error": null}`。Server 长驻，模型仅 load_net 一次。 |
 
 **重要**：`robot_config.json` 和机械臂命令中的关节角度使用**角度制（度）**。孪生推理返回的轨迹使用**弧度制**，skill 内部会进行转换（除以 π × 180）。
@@ -233,17 +239,15 @@ Smart-Pick-and-Place-in-the-Real-World/
 - **抓取检测**：AnyGrasp SDK — 生成 top-50 抓取候选，使用 YOLO 检测边界框（20px 边距）过滤
 - **多类别**：逗号分隔值使用 OR 逻辑（如 `"apple,orange,fruit"`）
 
-## 灵巧手手势预设
+## 末端执行器控制
 
-6 值数组：`[小指, 无名指, 中指, 食指, 拇指, 拇指外展]`（0=弯曲，1000=伸直）
+两条臂末端均为 Robotiq 85 夹爪。`core/gripper.py` 的 `GripperClient` 与 `core/hand.py` 的 `HandClient` 接口对齐（`open/close/get_state/is_grasping/is_fully_open/get_finger_deviation`），`skills/base.py` 的 `hand` property 和 `core/arm_side.py` 都按 `arms.<side>.hand_type` 字段自动分发。
 
-| 手势 | 数值 |
-|---|---|
-| open（张开） | `[1000, 1000, 1000, 1000, 1000, 500]` |
-| close（握拳） | `[0, 0, 0, 0, 0, 0]` |
-| peace（比 V） | `[0, 0, 1000, 1000, 0, 0]` |
-| thumbs_up（点赞） | `[0, 0, 0, 0, 1000, 800]` |
-| grab（抓握） | `[50, 50, 50, 100, 100, 0]` |
+`robot_config.json` 中 `hand_type` 当前两条臂都为 `"gripper"`。如未来某条臂换回灵巧手，把对应字段改回 `"dexterous"` 即可，无需改 skill 代码。
+
+**夹爪指令格式**：2 值数组 `[v, v]`（0..1000，1000=完全张开，0=完全闭合）。
+
+`pose_execute` skill 的手势预设路径在夹爪模式下仅支持 `"open"` / `"close"` 两种语义；其他预设（peace、thumbs_up 等）无夹爪对应，调用时会被映射到 close 并打印警告。
 
 ## 依赖项
 
@@ -312,6 +316,6 @@ python3 tools/pose_record.py delete --name grasp1
 
 ## 开发原则
 
-- **流水线执行中禁止跨 Skill 实例化**：高级 skill（如 `pick_and_place`、`fetch_from_user`）需要执行子任务（递送、扔垃圾、放桌面）时，必须使用 `self.control_arm` / `self.control_hand` 内联逻辑，而非创建新 Skill 实例。新实例会建立额外的 TCP 连接（arm 8010、hand 8000），引入延迟和连接冲突，破坏阶段间的无缝衔接。独立的 skill 类（`handover`、`trash`、`desk_place`）仅保留给独立 CLI 调用。
+- **流水线执行中禁止跨 Skill 实例化**：高级 skill（如 `pick_and_place`、`fetch_from_user`）需要执行子任务（递送、扔垃圾、放桌面）时，必须使用 `self.control_arm` / `self.control_hand` 内联逻辑，而非创建新 Skill 实例。新实例会建立额外的 TCP 连接（左臂 8010、左夹爪 8002 等），引入延迟和连接冲突，破坏阶段间的无缝衔接。独立的 skill 类（`handover`、`trash`、`desk_place`）仅保留给独立 CLI 调用。
 - **Skill 的 `run()` 必须先检查 `kwargs` 再回退 stdin**：`run_skill.py` 从 stdin 读取 JSON 后以 `kwargs` 传入。Skill 应先检查 `kwargs`（`if kwargs.get("field"): data = kwargs`），仅在 `kwargs` 为空时才回退到 `self.json_parser.get_command()`。否则 stdin 已被消费，parser 读不到数据。
 - **位姿查询统一用 `Config.get_pose()`**：不要直接访问 `config.robot_config` 或 `config.default_traj_js`，使用 `config.get_pose(name)` 统一查询（先查顶层再查 `default_traj_js`，附带 `"J1" in pose` 类型校验）。

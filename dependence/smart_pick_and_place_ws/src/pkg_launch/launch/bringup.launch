@@ -10,7 +10,9 @@
     <!-- Left arm hardware nodes (outside namespace to keep original topic names) -->
     <node pkg="rm_65_pkg" type="arm_75_bringup.py" name="arm_75_bringup" output="screen" />
     <node pkg="rm_65_pkg" type="mount_camera.py" name="mount_camera_erdaiji_grasp_left" output="screen" />
-    <node pkg="rm_65_pkg" type="inspire_hand_bringup.py" name="inspire_hand_bringup" output="screen" />
+    <!-- Left arm gripper is driven by dependence/gripper-programming/server.py on :8002
+         (started by start.bash), no ROS node needed. The old inspire_hand_bringup
+         node for the dexterous hand has been removed. -->
 
     <!-- ==================== RIGHT ARM (夹爪, 192.168.1.18, port 8011) ==================== -->
     <group ns="right_arm">

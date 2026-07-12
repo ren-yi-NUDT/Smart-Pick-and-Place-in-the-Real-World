@@ -6,7 +6,8 @@ Protocol (same as HandClient):
   RECV:   raw JSON (no length prefix)
 
 Interface is aligned with HandClient so that ArmSide can use either
-transparently: open(), close(), is_grasping().
+transparently: open(), close(), is_grasping(), is_fully_open(),
+get_finger_deviation().
 """
 
 import json
@@ -21,13 +22,28 @@ SERVICE_SRC = "/right_gripper/movement_control"
 GRIPPER_OPEN_CMD = [1000, 1000]
 GRIPPER_CLOSE_CMD = [0, 0]
 
+# Thresholds for state predicates (gripper position is 0..1000, 1000=open).
+FULLY_OPEN_THRESHOLD = 950
+GRASPING_DEVIATION_THRESHOLD = 50
+
 
 class GripperClient:
     """TCP client for the parallel gripper. Falls back to mock mode if connection fails."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8001):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8001,
+                 src: str = SERVICE_SRC):
+        """
+        Args:
+            host: TCP host of the gripper server.
+            port: TCP port of the gripper server.
+            src: ``src`` field sent in protocol JSON. Identifies the gripper
+                namespace (e.g. ``/right_gripper/movement_control`` or
+                ``/left_gripper/movement_control``). The server currently does
+                not route on this field but it is logged for diagnostics.
+        """
         self.host = host
         self.port = port
+        self._src = src
         self.sock = None
         self._mock = False
         self._cmds = {
@@ -71,7 +87,7 @@ class GripperClient:
     # Public interface (aligned with HandClient)
     # ------------------------------------------------------------------
     def open(self, force: int = None, speed: int = None) -> dict:
-        cmd = {"src": SERVICE_SRC, "type": "set", "cmd": list(self._cmds["open"])}
+        cmd = {"src": self._src, "type": "set", "cmd": list(self._cmds["open"])}
         if force is not None:
             cmd["force"] = force
         if speed is not None:
@@ -79,7 +95,7 @@ class GripperClient:
         return self._send_cmd(cmd)
 
     def close(self, force: int = None, speed: int = None, soft: bool = False) -> dict:
-        cmd = {"src": SERVICE_SRC, "type": "set", "cmd": list(self._cmds["close"])}
+        cmd = {"src": self._src, "type": "set", "cmd": list(self._cmds["close"])}
         if force is not None:
             cmd["force"] = force
         if speed is not None:
@@ -89,15 +105,59 @@ class GripperClient:
         return self._send_cmd(cmd)
 
     def get_state(self) -> dict:
-        cmd = {"src": SERVICE_SRC, "type": "get"}
+        cmd = {"src": self._src, "type": "get"}
         return self._send_cmd(cmd)
 
     def is_grasping(self) -> bool:
+        """Detect whether the gripper is holding an object.
+
+        Uses the gripper's built-in object-detection flag (gOBJ==2) via the
+        server's ``soft`` close mode, which closes at low force and reports
+        ``object_detected`` in the response. This is more reliable than
+        position-threshold heuristics — when the gripper closes empty, it
+        drives to its mechanical limit (~pos 230) which would falsely trip
+        a position threshold.
+        """
         if self._mock:
             return True
-        time.sleep(0.5)
-        self.close()
+        time.sleep(0.3)
+        resp = self.close(force=20, soft=True)
+        if "object_detected" in resp:
+            return bool(resp.get("object_detected"))
+        # Fallback for older servers without object_detected: a grasp is
+        # indicated only if the gripper stopped SHORT of the mechanical limit.
+        # Empty closure reaches ~pos 230/255 (client ≈ 98); a real grasp stops
+        # earlier with a larger client value. Use a generous threshold.
+        value = resp.get("value", [])
+        if isinstance(value, list) and len(value) >= 2:
+            return value[0] > 200
+        return bool(resp.get("value", False))
+
+    def is_fully_open(self) -> bool:
+        """Return True if the gripper is at (or very near) its fully open position.
+
+        Used by destination-action verification (e.g. ``verify_destination_action``)
+        as evidence that the object was released.
+        """
+        if self._mock:
+            return True
         resp = self.get_state()
         value = resp.get("value", [])
-        diff = np.array(value) - np.array(self._cmds["close"])
-        return bool(abs(diff.sum()) > 50)
+        if not value or len(value) < 2:
+            return False
+        return all(v >= FULLY_OPEN_THRESHOLD for v in value[:2])
+
+    def get_finger_deviation(self) -> int:
+        """Return how far the gripper is from its fully closed position (0..1000).
+
+        Larger value = more open. Used by grasp-verification logic as a proxy
+        for ``finger deviation from closed pose``. 0 = fully closed,
+        1000 = fully open.
+        """
+        if self._mock:
+            return 0
+        resp = self.get_state()
+        value = resp.get("value", [])
+        if not value or len(value) < 2:
+            return 0
+        return int(abs(np.array(value[:2]) - np.array(self._cmds["close"])).sum())

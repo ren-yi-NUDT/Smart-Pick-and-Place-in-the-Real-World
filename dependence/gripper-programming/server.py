@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Socket server bridging core/gripper.py (TCP client, port 8001) to the Robotiq 85
+Socket server bridging core/gripper.py (TCP client, port 8001/8002) to the Robotiq 85
 hardware via Modbus RTU. Started standalone — no ROS dependency.
 
 Protocol (raw JSON, no length prefix — same as inspire_hand_bringup):
@@ -18,6 +18,9 @@ in core/gripper.py — 1000=extended/open, 0=flexed/closed, like the dexterous h
   client [   v,    v] -> Robotiq pos = round((1000 - v) / 1000 * 255)
 
   get response: Robotiq pos p -> [round((255 - p) / 255 * 1000)] * 2
+
+Run one instance per gripper (right arm on :8001, left arm on :8002) by
+passing --port, --src and --serial/--slave appropriately.
 """
 
 import argparse
@@ -29,7 +32,9 @@ import time
 
 from robotiq_driver import Robotiq85, describe_status
 
-SERVICE_SRC = "/right_gripper/movement_control"
+DEFAULT_SRC = "/right_gripper/movement_control"
+
+SERVICE_SRC = DEFAULT_SRC  # kept for backwards compatibility (module-level constant)
 
 DEFAULT_PORT = 8001
 DEFAULT_SERIAL = "/dev/ttyUSB0"
@@ -58,10 +63,12 @@ def pos_to_client(pos):
 # Server
 # --------------------------------------------------------------------------- #
 class GripperServer:
-    def __init__(self, gripper: Robotiq85, host: str = "127.0.0.1", port: int = DEFAULT_PORT):
+    def __init__(self, gripper: Robotiq85, host: str = "127.0.0.1",
+                 port: int = DEFAULT_PORT, src: str = DEFAULT_SRC):
         self.gripper = gripper
         self.host = host
         self.port = port
+        self.src = src  # reflected in every response (informational; not routed on)
         self._lock = threading.Lock()  # serialise hardware access across clients
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -126,21 +133,29 @@ class GripperServer:
 
                 # Soft mode: close until object detected (gOBJ==2), then hold at current pos with force=0.
                 # Avoids sustained force on the grasped object.
+                # Response carries an explicit `object_detected` boolean so the client
+                # does not have to infer grasp state from position thresholds (which
+                # fail at the mechanical limit when no object is present).
                 if req.get("soft"):
                     soft_force = kwargs.get("force", 20)
                     with self._lock:
                         self.gripper.move_to(pos, force=soft_force)
                         s = self.gripper.wait_until_idle(timeout=5.0)
-                        if s.get("gOBJ") == 2:
+                        object_detected = (s.get("gOBJ") == 2)
+                        if object_detected:
                             pos_now = s["position"]
                             self.gripper.move_to(pos_now, force=0)
-                            return self._ok(
+                            return self._ok_extra(
                                 True,
                                 f"soft_close: object at pos={pos_now}/255 (closed with force={soft_force}, now holding at force=0)",
+                                object_detected=True,
+                                position=pos_now,
                             )
-                        return self._ok(
+                        return self._ok_extra(
                             True,
                             f"soft_close: no object detected (gOBJ={s.get('gOBJ')}), pos={s.get('position')}/255",
+                            object_detected=False,
+                            position=s.get("position"),
                         )
 
                 with self._lock:
@@ -153,19 +168,23 @@ class GripperServer:
             if cmd_type == "get":
                 with self._lock:
                     s = self.gripper.read_status()
-                return {"src": SERVICE_SRC, "value": pos_to_client(s["position"]),
+                return {"src": self.src, "value": pos_to_client(s["position"]),
                         "info": describe_status(s)}
             return self._err(f"unknown type {cmd_type!r}")
         except Exception as e:
             return self._err(f"{type(e).__name__}: {e}")
 
-    @staticmethod
-    def _ok(value, info):
-        return {"src": SERVICE_SRC, "value": value, "info": info}
+    def _ok(self, value, info):
+        return {"src": self.src, "value": value, "info": info}
 
-    @staticmethod
-    def _err(info):
-        return {"src": SERVICE_SRC, "value": False, "info": info}
+    def _ok_extra(self, value, info, **extra):
+        """Like _ok but merges extra fields (e.g. object_detected, position) into the response."""
+        resp = self._ok(value, info)
+        resp.update(extra)
+        return resp
+
+    def _err(self, info):
+        return {"src": self.src, "value": False, "info": info}
 
 
 # --------------------------------------------------------------------------- #
@@ -173,6 +192,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--src", default=DEFAULT_SRC,
+                   help=f"gripper namespace (default {DEFAULT_SRC}); "
+                        "use /left_gripper/movement_control for the left arm")
     p.add_argument("--serial", default=DEFAULT_SERIAL, help=f"default {DEFAULT_SERIAL}")
     p.add_argument("--baud", type=int, default=DEFAULT_BAUD)
     p.add_argument("--slave", type=int, default=DEFAULT_SLAVE)
@@ -200,7 +222,7 @@ def main():
     except Exception as e:
         print(f"[server] startup open failed: {e}", flush=True)
 
-    server = GripperServer(g, host=args.host, port=args.port)
+    server = GripperServer(g, host=args.host, port=args.port, src=args.src)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

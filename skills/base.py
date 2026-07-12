@@ -83,21 +83,32 @@ class Skill(ABC):
         return self._arm
 
     # ------------------------------------------------------------------
-    # Lazy property: hand client (socket to :8000)
+    # Lazy property: hand client (HandClient or GripperClient, dispatch by hand_type)
     # ------------------------------------------------------------------
     @property
     def hand(self):
-        """Return a connected HandClient."""
+        """Return a connected end-effector client.
+
+        Dispatches between HandClient (dexterous) and GripperClient based on
+        the left arm's ``hand_type`` config field. Both clients share the same
+        open/close/get_state/is_grasping interface.
+        """
         if self._hand is None:
-            from core.hand import HandClient
             if self.config._is_new_format:
                 left_cfg = self.config.get_arm_config("left")
                 host = self.config.shared.get("host", "127.0.0.1")
                 port = left_cfg.get("hand_port", 8000)
+                hand_type = left_cfg.get("hand_type", "dexterous")
             else:
                 from core.config import HOST, HAND_PORT
                 host, port = HOST, HAND_PORT
-            client = HandClient(host, port)
+                hand_type = "dexterous"
+            if hand_type == "gripper":
+                from core.gripper import GripperClient
+                client = GripperClient(host, port, src="/left_gripper/movement_control")
+            else:
+                from core.hand import HandClient
+                client = HandClient(host, port)
             client.connect()
             self._hand = client
         return self._hand

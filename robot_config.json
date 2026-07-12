@@ -3,12 +3,12 @@
     "left": {
       "arm_ip": "192.168.1.19",
       "arm_port": 8010,
-      "hand_port": 8000,
-      "hand_type": "dexterous",
+      "hand_port": 8002,
+      "hand_type": "gripper",
       "camera_serial": "036322250517",
       "twin_struct": "left_arm",
       "base_link_name": "base_link",
-      "hand_effector_name": "L_hand_endeffector",
+      "hand_effector_name": "L_gripper_endeffector",
       "arm_end_link_name": "Link7",
       "default_traj_js": {
         "grasp1": {

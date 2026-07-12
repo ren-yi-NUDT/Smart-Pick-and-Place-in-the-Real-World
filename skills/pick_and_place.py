@@ -6,7 +6,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 from skills.base import Skill, register_skill
-from core.transforms import graspcam2pixel, self_rotation_np, rpy_to_vector, pixel_to_camera_point2
+from core.transforms import graspcam2pixel, self_rotation_np, pixel_to_camera_point2
 
 
 @register_skill("pick_and_place")
@@ -288,13 +288,27 @@ class PickAndPlaceSkill(Skill):
         return True
 
     # ------------------------------------------------------------------
+    def _left_hand_type(self) -> str:
+        """Return left arm's end-effector type ('gripper' or 'dexterous')."""
+        if self.config._is_new_format:
+            return self.config.get_arm_config("left").get("hand_type", "dexterous")
+        return "dexterous"
+
+    def _ready_grasp_hand(self) -> None:
+        """Pre-grasp end-effector prep: gripper opens, dexterous hand closes."""
+        if self._left_hand_type() == "gripper":
+            self.control_hand(cmd_type="open")
+        else:
+            self.control_hand(cmd_type="close")
+
+    # ------------------------------------------------------------------
     def _visual_grasp_phase(self, obj, side="left", location="desk_front"):
         """Visual grasp. Left arm: cycle observation poses. Right arm: single location."""
         if side == "right":
             return self._visual_grasp_right(obj, location)
         # Left arm: cycle through observation poses
         self.control_arm(pose_type="grasp1", speed=30)
-        self.control_hand(cmd_type="close")
+        self._ready_grasp_hand()
 
         check = False
         for key, value in self.config.default_traj_js.items():
@@ -534,7 +548,7 @@ class PickAndPlaceSkill(Skill):
 
             if not len(placing_pos_world):
                 continue
-            check = self._execute_placement(placing_pos_world)
+            check = self._execute_placement(placing_pos_world, initial_js_key=key)
             if check:
                 break
 
@@ -671,13 +685,20 @@ class PickAndPlaceSkill(Skill):
 
                 self_pose_matrix = np.array([[0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
                 self_pose_matrix = self_rotation_np(self_pose_matrix)
+                # self_pose_matrix (Ry(90°)) was calibrated for the Inspire
+                # dexterous hand.  The Robotiq 85 gripper end-effector is
+                # oriented 180° differently about its Z axis relative to the
+                # dexterous hand palm.  Compensate so J7 wrist roll stays
+                # within a natural range.
+                if side == "left":
+                    arm_cfg = self.config.get_arm_config("left")
+                    if arm_cfg.get("hand_type") == "gripper":
+                        rz180 = np.diag([-1.0, -1.0, 1.0, 1.0])
+                        self_pose_matrix = self_pose_matrix @ rz180
 
                 transformed_pose_camera = grasp_transformation_matrix @ self_pose_matrix
                 transformed_pose_world = self.T_base_to_cam @ transformed_pose_camera
-                if side == "left":
-                    transformed_pose_world = self._transform_x_axis(transformed_pose_world)
-                elif side == "right":
-                    transformed_pose_world = self._transform_right_grasp(transformed_pose_world)
+                transformed_pose_world = self._disambiguate_grasp_orientation(transformed_pose_world, side)
 
                 eval_score[id] = {}
                 eval_score[id]["score"] = data["score"]
@@ -691,24 +712,11 @@ class PickAndPlaceSkill(Skill):
         except Exception:
             return []
 
-    def _transform_x_axis(self, transformed_pose_world):
-        r, p, y = R.from_matrix(transformed_pose_world[:3, :3]).as_euler('xyz', degrees=False)
-        x_axis_rotated = rpy_to_vector(r, p, y, axis=[1, 0, 0])
-        y_axis_world = np.array([0, 1, 0])
-        cos_theta = np.dot(x_axis_rotated, y_axis_world) / (
-            np.linalg.norm(x_axis_rotated) * np.linalg.norm(y_axis_world)
-        )
-        if cos_theta > 0:
-            transformed_pose_world = transformed_pose_world @ np.array([[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-        return transformed_pose_world
-
-    def _transform_right_grasp(self, transformed_pose_world):
-        # Disambiguate AnyGrasp's 180°-about-Z symmetry for the right arm.
-        # Pick the orientation whose local X-axis (projected onto R_base_link's
-        # XY plane) points into the +X half-space, so IK tends to give a small
-        # J7 (wrist roll) rather than one rotated ~180° from home.
-        if transformed_pose_world[0, 0] < 0:
-            transformed_pose_world = transformed_pose_world @ np.array([[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    def _disambiguate_grasp_orientation(self, transformed_pose_world, side):
+        grasp_x_axis = transformed_pose_world[:3, 0]
+        if grasp_x_axis[0] < 0:
+            flip = np.diag([-1.0, -1.0, 1.0, 1.0])
+            transformed_pose_world = transformed_pose_world @ flip
         return transformed_pose_world
 
     def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None, side="left", obs_pose=None):
@@ -823,19 +831,19 @@ class PickAndPlaceSkill(Skill):
     def _transform_pose_to_world(self, pose_cam_point):
         placing_translation = pose_cam_point.flatten()
         T_cam_point = np.eye(4, 4)
-        T_cam_point[:3, :3] = R.from_quat([-0.210, 0.016, -0.056, 0.976]).as_matrix()
+        T_cam_point[:3, :3] = np.eye(3)
         T_cam_point[:3, 3] = placing_translation
         T_world_point = self.T_base_to_cam @ T_cam_point
         T_world_pose = T_world_point.copy()
         return T_world_pose
 
-    def _execute_placement(self, placement_pos_world):
+    def _execute_placement(self, placement_pos_world, initial_js_key="grasp1"):
         placement_pos_world[2, 3] += 0.15
         placement_pos_arm = placement_pos_world @ self.T_hand_effector_to_arm_endlink
         pos = placement_pos_arm[:3, 3]
         orn = R.from_matrix(placement_pos_arm[:3, :3]).as_quat()
 
-        default_js_rad = [v / 180 * np.pi for v in self.config.default_traj_js["grasp1"].values()]
+        default_js_rad = [v / 180 * np.pi for v in self.config.default_traj_js[initial_js_key].values()]
         cnfg = {
             "target_pose": [[pos[0], pos[1], pos[2], orn[0], orn[1], orn[2], orn[3]]],
             "current_js": default_js_rad,
