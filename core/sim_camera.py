@@ -1,11 +1,15 @@
 """RGB-D camera backed by the PyBullet SimServer's get_rgbd."""
 import base64
+import io
 import json
 import socket
 import struct
 
 import numpy as np
+from PIL import Image
 from termcolor import cprint
+
+from core.sim_utils import recv_exact
 
 
 class SimCamera:
@@ -29,22 +33,11 @@ class SimCamera:
             cprint(f"[SimCamera] connect failed: {e}", "red")
             return False
 
-    def _recv_exact(self, n):
-        buf = b""
-        while len(buf) < n:
-            chunk = self.sock.recv(n - len(buf))
-            if not chunk:
-                raise ConnectionError("SimServer closed the connection")
-            buf += chunk
-        return buf
-
     def get_rgbd(self):
         self.sock.sendall(json.dumps({"cmd": "get_rgbd", "side": self.side}).encode("utf-8"))
-        n = struct.unpack(">I", self._recv_exact(4))[0]
-        body = self._recv_exact(n)
+        n = struct.unpack(">I", recv_exact(self.sock, 4))[0]
+        body = recv_exact(self.sock, n)
         info = json.loads(body.decode("utf-8"))["info"]
-        from PIL import Image
-        import io
         rgb = np.asarray(Image.open(io.BytesIO(base64.b64decode(info["rgb_b64"])))).copy()
         depth = np.frombuffer(base64.b64decode(info["depth_b64"]), dtype=np.uint16)
         depth = depth.reshape(info["height"], info["width"])

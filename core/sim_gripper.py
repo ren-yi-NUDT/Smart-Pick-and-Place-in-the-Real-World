@@ -1,9 +1,9 @@
 """Gripper client routing open/close to the PyBullet SimServer."""
-import json
 import socket
-import struct
 
 from termcolor import cprint
+
+from core.sim_utils import send_json
 
 
 class SimGripperClient:
@@ -29,20 +29,8 @@ class SimGripperClient:
             self.sock.close()
             self.sock = None
 
-    def _recv_exact(self, n):
-        buf = b""
-        while len(buf) < n:
-            chunk = self.sock.recv(n - len(buf))
-            if not chunk:
-                raise ConnectionError("SimServer closed the connection")
-            buf += chunk
-        return buf
-
     def _send(self, data):
-        self.sock.sendall(json.dumps(data).encode("utf-8"))
-        n = struct.unpack(">I", self._recv_exact(4))[0]
-        body = self._recv_exact(n)
-        return json.loads(body.decode("utf-8"))
+        return send_json(self.sock, data)
 
     def open(self, force=None, speed=None):
         self._pos = 1000

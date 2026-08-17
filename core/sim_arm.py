@@ -2,11 +2,11 @@
 
 Interface mirrors core.arm.ArmClient: degrees everywhere.
 """
-import json
 import socket
-import struct
 
 from termcolor import cprint
+
+from core.sim_utils import send_json
 
 
 class SimArmClient:
@@ -15,7 +15,6 @@ class SimArmClient:
         self.port = port
         self.side = side
         self.sock = None
-        self._cmds = []
 
     def connect(self):
         try:
@@ -31,46 +30,8 @@ class SimArmClient:
             self.sock.close()
             self.sock = None
 
-    def _recv_exact(self, n):
-        buf = b""
-        while len(buf) < n:
-            chunk = self.sock.recv(n - len(buf))
-            if not chunk:
-                raise ConnectionError("SimServer closed the connection")
-            buf += chunk
-        return buf
-
     def _send(self, data):
-        self.sock.sendall(json.dumps(data).encode("utf-8"))
-        n = struct.unpack(">I", self._recv_exact(4))[0]
-        body = self._recv_exact(n)
-        return json.loads(body.decode("utf-8"))
-
-    # -- ArmClient-compatible surface --------------------------------
-    def reset_cmd(self):
-        self._cmds = []
-
-    def start_cmd(self):
-        self._cmds.append({"type": "start", "act": []})
-
-    def add_js_cmd(self, joint_dict, speed=5, block=True):
-        self._cmds.append({"type": "js", "act": joint_dict,
-                           "speed": speed, "block": block})
-
-    def add_ee_cmd(self, ee_trajectory, speed=5, block=True):
-        self._cmds.append({"type": "ee", "act": ee_trajectory,
-                           "speed": speed, "block": block})
-
-    def send_cmds(self):
-        # flatten accumulated js commands into a single execute_trajectory
-        traj = []
-        for c in self._cmds:
-            if c["type"] == "js":
-                act = c["act"]
-                traj.append([act.get(f"J{i}", 0.0) for i in range(1, 8)])
-        self.reset_cmd()
-        return self._send({"cmd": "execute_trajectory",
-                           "side": self.side, "trajectory": traj})
+        return send_json(self.sock, data)
 
     def move_to_named_pose(self, pose_dict, speed=30):
         self._send({"cmd": "move_to_pose", "side": self.side,

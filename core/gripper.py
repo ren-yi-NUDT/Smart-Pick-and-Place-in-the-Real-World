@@ -1,13 +1,9 @@
 """
 Gripper controller -- TCP client to the gripper movement service.
 
-Protocol (same as HandClient):
+Protocol:
   SEND:   raw JSON (no length prefix)
   RECV:   raw JSON (no length prefix)
-
-Interface is aligned with HandClient so that ArmSide can use either
-transparently: open(), close(), is_grasping(), is_fully_open(),
-get_finger_deviation().
 """
 
 import json
@@ -84,7 +80,7 @@ class GripperClient:
         return resp
 
     # ------------------------------------------------------------------
-    # Public interface (aligned with HandClient)
+    # Public interface
     # ------------------------------------------------------------------
     def open(self, force: int = None, speed: int = None) -> dict:
         cmd = {"src": self._src, "type": "set", "cmd": list(self._cmds["open"])}

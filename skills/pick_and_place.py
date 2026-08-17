@@ -131,12 +131,12 @@ class PickAndPlaceSkill(Skill):
         Steps (per 2026-07-05 validated run):
           0. Both arms → preset pose (parallel, speed=15)
           1. Right arm with open gripper → approach pose (speed=10)
-          2. Handover: right gripper close → wait 1.5s → left dexterous open
+          2. Handover: right gripper close → wait 1.5s → left gripper open
           3. Right arm carrying object → preset pose (speed=15)
           4. Both arms → home (parallel, speed=30)  [skipped when return_home=False]
 
         Pose names are inherited from old `right_to_left_handover_*` config keys;
-        actual direction is left→right (object goes from left dexterous hand to
+        actual direction is left→right (object goes from left gripper to
         right gripper). After completion the object is in the right gripper
         (at home when return_home=True, at preset when return_home=False).
         """
@@ -215,8 +215,8 @@ class PickAndPlaceSkill(Skill):
         """Right→left handover (mirror of `_delegate_to_left_arm`).
 
         Same 4-step structure and same poses (right arm always approaches,
-        left dexterous hand stays at preset). Only the close/open roles swap:
-        left dexterous closes (receiver), right gripper opens (giver).
+        left gripper stays at preset). Only the close/open roles swap:
+        left gripper closes (receiver), right gripper opens (giver).
 
         Used when right arm grasped the object and left arm needs to place it
         (side=right + visual container, or side=right + person).
@@ -267,7 +267,7 @@ class PickAndPlaceSkill(Skill):
         cprint("H=================== Step 1: Right arm (carrying object) → approach (speed=10) ===================", "cyan")
         right_arm.move_to_named_pose(right_approach, speed=10)
 
-        # Step 2: Handover — left dexterous close → wait → right gripper open
+        # Step 2: Handover — left gripper close → wait → right gripper open
         cprint("H=================== Step 2: Handover (left close → 1.5s → right open) ===================", "cyan")
         self.control_hand(cmd_type="close")
         time.sleep(1.5)
@@ -284,22 +284,13 @@ class PickAndPlaceSkill(Skill):
         t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(home_right, speed=30))
         t1.start(); t2.start(); t1.join(); t2.join()
 
-        cprint("H=================== Right→left handover done (object now in left dexterous hand at home) ===================", "green")
+        cprint("H=================== Right→left handover done (object now in left gripper at home) ===================", "green")
         return True
 
     # ------------------------------------------------------------------
-    def _left_hand_type(self) -> str:
-        """Return left arm's end-effector type ('gripper' or 'dexterous')."""
-        if self.config._is_new_format:
-            return self.config.get_arm_config("left").get("hand_type", "dexterous")
-        return "dexterous"
-
     def _ready_grasp_hand(self) -> None:
-        """Pre-grasp end-effector prep: gripper opens, dexterous hand closes."""
-        if self._left_hand_type() == "gripper":
-            self.control_hand(cmd_type="open")
-        else:
-            self.control_hand(cmd_type="close")
+        """Pre-grasp end-effector prep: open the Robotiq 85 gripper."""
+        self.control_hand(cmd_type="open")
 
     # ------------------------------------------------------------------
     def _visual_grasp_phase(self, obj, side="left", location="desk_front"):
@@ -482,7 +473,7 @@ class PickAndPlaceSkill(Skill):
             # Right arm → left arm handover → left arm delivers to person
             cprint("H=================== Dual-arm handover: right → left → person ===================", "cyan")
 
-            # Phase 1: Validated 4-step right→left handover (ends with both arms at home, object in left dexterous)
+            # Phase 1: Validated 4-step right→left handover (ends with both arms at home, object in left gripper)
             if not self._handover_right_to_left():
                 cprint("H=================== Handover failed ===================", "red")
                 return False
@@ -691,10 +682,8 @@ class PickAndPlaceSkill(Skill):
                 # dexterous hand palm.  Compensate so J7 wrist roll stays
                 # within a natural range.
                 if side == "left":
-                    arm_cfg = self.config.get_arm_config("left")
-                    if arm_cfg.get("hand_type") == "gripper":
-                        rz180 = np.diag([-1.0, -1.0, 1.0, 1.0])
-                        self_pose_matrix = self_pose_matrix @ rz180
+                    rz180 = np.diag([-1.0, -1.0, 1.0, 1.0])
+                    self_pose_matrix = self_pose_matrix @ rz180
 
                 transformed_pose_camera = grasp_transformation_matrix @ self_pose_matrix
                 transformed_pose_world = self.T_base_to_cam @ transformed_pose_camera
@@ -720,7 +709,7 @@ class PickAndPlaceSkill(Skill):
         return transformed_pose_world
 
     def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None, side="left", obs_pose=None):
-        """Execute grasp trajectory via Twin. Supports left (dexterous hand) and right (gripper)."""
+        """Execute grasp trajectory via Twin. Supports left and right grippers."""
         if side == "right":
             arm_client = self._right_arm
             gripper_client = self._right_gripper

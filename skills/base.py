@@ -75,29 +75,19 @@ class Skill(ABC):
                 client = SimArmClient(host, 8031, side="left")
             else:
                 from core.arm import ArmClient
-                if self.config._is_new_format:
-                    left_cfg = self.config.get_arm_config("left")
-                    host = self.config.shared.get("host", "127.0.0.1")
-                    port = left_cfg.get("arm_port", 8010)
-                else:
-                    from core.config import HOST, ARM_PORT
-                    host, port = HOST, ARM_PORT
+                host = self.config.shared.get("host", "127.0.0.1")
+                port = self.config.get_arm_config("left").get("arm_port", 8010)
                 client = ArmClient(host, port)
             client.connect()
             self._arm = client
         return self._arm
 
     # ------------------------------------------------------------------
-    # Lazy property: hand client (HandClient or GripperClient, dispatch by hand_type)
+    # Lazy property: hand client (Robotiq 85 gripper)
     # ------------------------------------------------------------------
     @property
     def hand(self):
-        """Return a connected end-effector client.
-
-        Dispatches between HandClient (dexterous) and GripperClient based on
-        the left arm's ``hand_type`` config field. Both clients share the same
-        open/close/get_state/is_grasping interface.
-        """
+        """Return a connected Robotiq 85 gripper client (left arm)."""
         if self._hand is None:
             if self.config.sim_mode:
                 from core.sim_gripper import SimGripperClient
@@ -105,21 +95,10 @@ class Skill(ABC):
                 client = SimGripperClient(host, 8031,
                                           src="/left_gripper/movement_control")
             else:
-                if self.config._is_new_format:
-                    left_cfg = self.config.get_arm_config("left")
-                    host = self.config.shared.get("host", "127.0.0.1")
-                    port = left_cfg.get("hand_port", 8000)
-                    hand_type = left_cfg.get("hand_type", "dexterous")
-                else:
-                    from core.config import HOST, HAND_PORT
-                    host, port = HOST, HAND_PORT
-                    hand_type = "dexterous"
-                if hand_type == "gripper":
-                    from core.gripper import GripperClient
-                    client = GripperClient(host, port, src="/left_gripper/movement_control")
-                else:
-                    from core.hand import HandClient
-                    client = HandClient(host, port)
+                from core.gripper import GripperClient
+                host = self.config.shared.get("host", "127.0.0.1")
+                port = self.config.get_arm_config("left").get("hand_port", 8002)
+                client = GripperClient(host, port, src="/left_gripper/movement_control")
             client.connect()
             self._hand = client
         return self._hand
@@ -142,15 +121,10 @@ class Skill(ABC):
         """
         if side not in self._twins:
             from core.twin_client import TwinClient
-            if self.config._is_new_format:
-                host = self.config.shared.get("host", "127.0.0.1")
-                port_key = "twin_port_left" if side == "left" else "twin_port_right"
-                default_port = 8020 if side == "left" else 8021
-                port = self.config.shared.get(port_key, default_port)
-            else:
-                from core.config import HOST, TWIN_PORT, TWIN_PORT_RIGHT
-                host = HOST
-                port = TWIN_PORT if side == "left" else TWIN_PORT_RIGHT
+            host = self.config.shared.get("host", "127.0.0.1")
+            port_key = "twin_port_left" if side == "left" else "twin_port_right"
+            default_port = 8020 if side == "left" else 8021
+            port = self.config.shared.get(port_key, default_port)
             client = TwinClient(host, port)
             client.connect()
             self._twins[side] = client
@@ -177,10 +151,7 @@ class Skill(ABC):
             cam.connect()
             return cam
         from core.camera import RealSenseCapture
-        serial = ""
-        if self.config._is_new_format:
-            arm_cfg = self.config.get_arm_config(side)
-            serial = arm_cfg.get("camera_serial", "")
+        serial = self.config.get_arm_config(side).get("camera_serial", "")
         return RealSenseCapture(
             width=640, height=480, fps=30, save_path=self.save_path, serial=serial,
         )
@@ -294,7 +265,7 @@ class Skill(ABC):
         return json.loads(data_bytes.decode("utf-8"))
 
     def control_hand(self, cmd_type="close"):
-        """Control the dexterous hand (open / close / get_state)."""
+        """Control the gripper (open / close / get_state)."""
         if cmd_type == "close":
             self.hand.close()
         elif cmd_type == "open":
@@ -485,91 +456,3 @@ class Skill(ABC):
     def run(self, **kwargs):
         """Execute the skill.  Subclasses must override."""
         pass
-
-
-# ---------------------------------------------------------------------------
-# Dual-Arm Skill Base
-# ---------------------------------------------------------------------------
-class DualArmSkill(Skill):
-    """
-    Base class for dual-arm skills.
-
-    Holds two :class:`ArmSide` instances (``left`` / ``right``) plus a
-    :class:`DualArmSync` for coordinated operations.  Shared resources
-    (camera, twin, perception, vlm, transforms, etc.) are inherited from
-    :class:`Skill`.
-    """
-
-    def __init__(self, config_path="./robot_config.json", save_path="./log"):
-        super().__init__(config_path, save_path)
-        from core.arm_side import ArmSide
-        from core.sync import DualArmSync
-
-        if not self.config._is_new_format:
-            raise RuntimeError(
-                "DualArmSkill requires the new dual-arm config format "
-                "(top-level 'arms' key in robot_config.json). "
-                f"Found keys: {list(self.config._raw.keys())}"
-            )
-
-        host = self.config.shared.get("host", "127.0.0.1")
-        self.left = ArmSide("left", self.config.get_arm_config("left"), host=host,
-                            sim_mode=self.config.sim_mode)
-        self.right = ArmSide("right", self.config.get_arm_config("right"), host=host,
-                             sim_mode=self.config.sim_mode)
-        self.sync = DualArmSync()
-
-    # ------------------------------------------------------------------
-    # Convenience: move both arms in parallel
-    # ------------------------------------------------------------------
-    def move_both(self, left_pose_type=None, right_pose_type=None, speed=20):
-        """Move both arms to their respective named poses simultaneously."""
-        from threading import Thread
-
-        def _move_arm(arm_side, pose_name, spd):
-            pose = arm_side.get_pose(pose_name)
-            arm_side.arm.move_to_named_pose(pose, speed=spd)
-
-        t1 = Thread(target=_move_arm, args=(self.left, left_pose_type, speed))
-        t2 = Thread(target=_move_arm, args=(self.right, right_pose_type, speed))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-
-    # ------------------------------------------------------------------
-    # Convenience: inter-arm handover
-    # ------------------------------------------------------------------
-    def handover(self, from_side="left", to_side="right"):
-        """
-        Transfer an object from one arm to the other.
-
-        Both arms move to the handover pose pair in parallel, the *giver*
-        opens its hand, and the *receiver* closes.
-        """
-        from threading import Thread
-
-        # Retrieve the handover pose pair from config
-        key = f"{from_side}_to_{to_side}_handover"
-        poses = self.config.get_dual_arm_pose(key)
-        left_pose = poses.get("left_pose")
-        right_pose = poses.get("right_pose")
-        if left_pose is None or right_pose is None:
-            raise KeyError(
-                f"Dual-arm handover pose '{key}' must contain both "
-                f"'left_pose' and 'right_pose', got: {list(poses.keys())}"
-            )
-
-        # Move both arms to their handover positions in parallel
-        t1 = Thread(target=self.left.arm.move_to_named_pose, args=(left_pose,))
-        t2 = Thread(target=self.right.arm.move_to_named_pose, args=(right_pose,))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-
-        # Giver opens, receiver closes
-        giver = self.left if from_side == "left" else self.right
-        receiver = self.right if from_side == "left" else self.left
-        giver.hand.open()
-        receiver.hand.close()

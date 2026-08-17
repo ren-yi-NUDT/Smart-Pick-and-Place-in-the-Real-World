@@ -20,15 +20,3 @@ def is_transition_allowed(from_pose, to_pose, adjacency):
     if from_pose == to_pose or from_pose == "home" or to_pose == "home":
         return True
     return to_pose in adjacency.get(from_pose, [])
-
-
-def plan_transition_sequence(poses, adjacency):
-    """Insert 'home' between consecutive poses where direct transition is not allowed."""
-    if adjacency == "free" or len(poses) <= 1:
-        return list(poses)
-    result = [poses[0]]
-    for i in range(1, len(poses)):
-        if not is_transition_allowed(poses[i - 1], poses[i], adjacency):
-            result.append("home")
-        result.append(poses[i])
-    return result

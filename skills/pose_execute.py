@@ -3,7 +3,7 @@
 """
 位姿执行技能
 ============
-通过技能框架注册，负责机械臂位姿回放、灵巧手手势执行和动作序列播放。
+通过技能框架注册，负责机械臂位姿回放、夹爪控制和动作序列播放。
 
 支持双臂独立控制和并行执行。位姿从 recorded_poses/{left,right}.json 加载，
 通过 socket 服务器（左臂 :8010，右臂 :8011）发送控制指令。
@@ -15,16 +15,12 @@
     {"command": "play",  "sequence": "path/to/sequence.json"}
     {"command": "play",  "sequence": "<json string>", "sequence_is_string": true}
     {"command": "play",  "hand": "open"}
-    {"command": "play",  "hand": [0,0,1000,1000,0,0]}
     {"command": "play",  "parallel": [
         {"name": "handover_pose", "arm": "left", "speed": 30},
         {"name": "home", "arm": "right", "speed": 30}
     ]}
 
-手势格式支持:
-    - 预设名称: "open", "close", "peace", "rock", "pointing", "thumbs_up", "ok", "grab"
-    - 数组: [小指, 无名指, 中指, 食指, 拇指, 拇指外展] (0=弯曲, 1000=张开)
-    - 字典: {"pinky": 0, "ring": 0, "middle": 1000, "index": 1000, "thumb": 0, "thumb_abduct": 0}
+夹爪（Robotiq 85）仅支持 "open" / "close" 两种语义。
 """
 
 import os
@@ -49,15 +45,13 @@ POSES_DIR = os.path.join(
 
 ARM_SERVER_HOST = "127.0.0.1"
 ARM_PORTS = {"left": 8010, "right": 8011}
-HAND_SERVER_HOST = "127.0.0.1"
-HAND_SERVER_PORT = 8000
 
 # 右臂夹爪（Robotiq 85）TCP 桥接服务
 GRIPPER_HOST = "127.0.0.1"
 GRIPPER_PORT = 8001
 GRIPPER_SRC = "/right_gripper/movement_control"
 
-# 左臂夹爪（与右臂同款 Robotiq 85；左臂灵巧手被替换为夹爪后启用）
+# 左臂夹爪（Robotiq 85）
 LEFT_GRIPPER_HOST = "127.0.0.1"
 LEFT_GRIPPER_PORT = 8002
 LEFT_GRIPPER_SRC = "/left_gripper/movement_control"
@@ -74,19 +68,6 @@ TRAJ_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "recorded_trajectories", "right",
 )
-
-# 手势预设 (6值: [小指, 无名指, 中指, 食指, 拇指, 拇指外展])
-# 0=弯曲, 1000=张开
-HAND_GESTURES = {
-    "open": [1000, 1000, 1000, 1000, 1000, 500],      # 全张开
-    "close": [0, 0, 0, 0, 0, 0],                       # 握拳
-    "peace": [0, 0, 1000, 1000, 0, 0],                 # 比耶
-    "rock": [1000, 0, 0, 1000, 0, 0],                  # Rock手势
-    "pointing": [0, 0, 0, 1000, 0, 0],                 # 指向 (食指)
-    "thumbs_up": [0, 0, 0, 0, 1000, 800],              # 竖大拇指
-    "ok": [800, 800, 800, 150, 150, 400],              # OK手势 (食指+拇指圈起，其他张开)
-    "grab": [50, 50, 50, 100, 100, 0],                 # 抓取姿态
-}
 
 # 强制指定臂的"非录制位姿"动作（轨迹回放直驱 SDK，IP 硬编码）
 # 名称 → 唯一允许的臂
@@ -180,38 +161,6 @@ def _send_gripper_cmd(values):
         return False
 
 
-def _parse_hand_gesture(hand_input):
-    """
-    解析手势输入，返回 6 值数组
-
-    支持格式:
-    - 预设名称: "open", "close", "peace", "rock", "pointing", "thumbs_up", "ok", "grab"
-    - 数组: [0, 0, 1000, 1000, 0, 0]
-    - 字典: {"pinky": 0, "ring": 0, "middle": 1000, "index": 1000, "thumb": 0, "thumb_abduct": 0}
-    """
-    if isinstance(hand_input, str):
-        if hand_input in HAND_GESTURES:
-            return HAND_GESTURES[hand_input]
-        else:
-            cprint(f"[pose_execute] 未知手势预设: {hand_input}", "red")
-            return None
-    elif isinstance(hand_input, list):
-        if len(hand_input) == 6:
-            return hand_input
-        else:
-            cprint(f"[pose_execute] 手指数组长度必须为6，收到: {len(hand_input)}", "red")
-            return None
-    elif isinstance(hand_input, dict):
-        finger_map = ["pinky", "ring", "middle", "index", "thumb", "thumb_abduct"]
-        result = []
-        for finger in finger_map:
-            result.append(hand_input.get(finger, 0))
-        return result
-    else:
-        cprint(f"[pose_execute] 不支持的手势格式: {type(hand_input)}", "red")
-        return None
-
-
 def _send_arm_command(sock, joint_angles, speed=50, block=True):
     """
     通过 socket 发送机械臂关节运动指令
@@ -245,29 +194,6 @@ def _send_arm_command(sock, joint_angles, speed=50, block=True):
     return resp
 
 
-def _send_hand_command(sock, gesture):
-    """
-    通过 socket 发送灵巧手手势指令
-
-    Args:
-        sock: 已连接的 socket
-        gesture: 6 值数组
-
-    Returns:
-        dict: 服务器响应
-    """
-    cmd = {
-        "src": "/left_hand/movement_control",
-        "type": "set",
-        "cmd": gesture,
-    }
-    msg = json.dumps(cmd).encode("utf-8")
-    sock.sendall(msg)
-
-    resp = json.loads(sock.recv(1024).decode("utf-8"))
-    return resp
-
-
 # ---------------------------------------------------------------------------
 # 技能类
 # ---------------------------------------------------------------------------
@@ -277,7 +203,7 @@ class PoseExecuteSkill(Skill):
     """
     位姿执行技能（双臂 + 并行）
 
-    通过 socket 服务器回放已录制的机械臂位姿、执行灵巧手手势、播放动作序列。
+    通过 socket 服务器回放已录制的机械臂位姿、执行夹爪动作、播放动作序列。
     支持通过 arm 参数指定左/右臂，以及通过 parallel 参数并行执行多个动作。
 
     使用:
@@ -320,38 +246,19 @@ class PoseExecuteSkill(Skill):
 
     @property
     def hand_sock(self):
-        """获取左臂末端执行器 socket 连接（按 hand_type 分发到夹爪或灵巧手）。
-
-        连接目标由 robot_config.json 的 arms.left.hand_type 决定：
-        - "gripper"  → LEFT_GRIPPER_PORT (8002)
-        - "dexterous" → HAND_SERVER_PORT (8000, 旧灵巧手)
-        """
+        """获取左臂夹爪 socket 连接（Robotiq 85，端口 8002）。"""
         if self._hand_sock is None:
             try:
-                left_cfg = self.config.get_arm_config("left") if self.config._is_new_format else {}
-                hand_type = left_cfg.get("hand_type", "dexterous")
-                if hand_type == "gripper":
-                    host, port = LEFT_GRIPPER_HOST, LEFT_GRIPPER_PORT
-                    label = "左臂夹爪"
-                else:
-                    host, port = HAND_SERVER_HOST, HAND_SERVER_PORT
-                    label = "灵巧手"
                 self._hand_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._hand_sock.connect((host, port))
+                self._hand_sock.connect((LEFT_GRIPPER_HOST, LEFT_GRIPPER_PORT))
                 cprint(
-                    f"[pose_execute] 已连接{label}服务 {host}:{port}",
+                    f"[pose_execute] 已连接左臂夹爪服务 {LEFT_GRIPPER_HOST}:{LEFT_GRIPPER_PORT}",
                     "green",
                 )
             except Exception as e:
-                cprint(f"[pose_execute] 连接左臂末端执行器服务失败: {e}", "red")
+                cprint(f"[pose_execute] 连接左臂夹爪服务失败: {e}", "red")
                 self._hand_sock = None
         return self._hand_sock
-
-    def _left_hand_type(self):
-        """Return left arm's hand_type ("gripper" or "dexterous")."""
-        if self.config._is_new_format:
-            return self.config.get_arm_config("left").get("hand_type", "dexterous")
-        return "dexterous"
 
     # -- 核心: run() --
 
@@ -388,7 +295,7 @@ class PoseExecuteSkill(Skill):
             if parallel is not None:
                 results["parallel"] = self.play_parallel(parallel)
 
-            # 播放灵巧手手势
+            # 播放左臂夹爪动作
             hand = kwargs.get("hand")
             if hand is not None:
                 results["hand"] = self.play_hand_gesture(hand)
@@ -549,27 +456,15 @@ class PoseExecuteSkill(Skill):
         )
         return all_ok
 
-    # -- 灵巧手手势 --
+    # -- 左臂夹爪 --
 
     def play_hand_gesture(self, hand_input):
         """
-        执行手势
+        执行左臂夹爪手势
 
-        Args:
-            hand_input: 手势输入（预设名/数组/字典）
-
-        Returns:
-            bool: 是否执行成功
-
-        Notes:
-            左臂末端执行器类型由 robot_config.json 的 arms.left.hand_type 决定。
-            - 灵巧手模式：发送 6 值手势数组（如 peace/thumbs_up 等预设）
-            - 夹爪模式：仅支持 "open" / "close" 两种语义，其他预设会被映射到 close
-              并打印警告（夹爪物理上无法表达多指手势）
+        仅支持 "open" / "close" 两种语义（Robotiq 85 夹爪），其他预设映射到 close。
         """
-        if self._left_hand_type() == "gripper":
-            return self._play_left_gripper(hand_input)
-        return self._play_dexterous_gesture(hand_input)
+        return self._play_left_gripper(hand_input)
 
     def _play_left_gripper(self, hand_input):
         """夹爪模式：把预设名/数组映射到 2 值指令。"""
@@ -607,27 +502,6 @@ class PoseExecuteSkill(Skill):
             return resp.get("value", False) in (True, [1000, 1000], [0, 0])
         except Exception as e:
             cprint(f"[pose_execute] 左臂夹爪指令失败: {e}", "red")
-            self._hand_sock = None
-            return False
-
-    def _play_dexterous_gesture(self, hand_input):
-        """灵长手模式：原 6 值手势路径。"""
-        gesture = _parse_hand_gesture(hand_input)
-        if gesture is None:
-            return False
-
-        sock = self.hand_sock
-        if sock is None:
-            cprint("[pose_execute] 无可用灵巧手连接", "red")
-            return False
-
-        try:
-            resp = _send_hand_command(sock, gesture)
-            label = hand_input if isinstance(hand_input, str) else gesture
-            cprint(f"[pose_execute] 执行手势 {label}: {resp}", "green")
-            return resp.get("value", False)
-        except Exception as e:
-            cprint(f"[pose_execute] 执行手势失败: {e}", "red")
             self._hand_sock = None
             return False
 
@@ -683,7 +557,7 @@ class PoseExecuteSkill(Skill):
                 if not self.play_parallel(parallel):
                     all_ok = False
 
-            # 灵巧手 (先执行手)
+            # 左臂夹爪 (先执行手)
             hand_gesture = step.get("hand")
             if hand_gesture is not None:
                 if not self.play_hand_gesture(hand_gesture):
