@@ -72,6 +72,7 @@ class SimServer:
         self.robot.load_robot()
         self.robot.reset_robot()
         self._index_camera()
+        self._init_gripper()
 
     def _load_scene(self):
         # 桌面（占位，后续任务再充实可抓物体/容器）
@@ -171,8 +172,35 @@ class SimServer:
             self._step(6)
         return {"value": True, "info": {"js_deg": js_deg}}
 
+    def _init_gripper(self):
+        mimic = parse_mimic_joints(self.urdf_path)
+        active = "L_finger_joint"
+        children = {n: m for n, (parent, m) in mimic.items() if parent == active}
+        self.gripper = {
+            "active": active,
+            "children": children,
+            "active_id": self.robot.jointname_to_id[active],
+            "child_ids": {n: self.robot.jointname_to_id[n] for n in children},
+            "close_angle": 0.0,
+            "open_angle": 0.8,  # rad；GUI 冒烟时按实际手指张角校准
+        }
+
     def _gripper(self, req):
-        return {"value": False, "info": {"error": "not implemented"}}
+        if self.gripper is None:
+            self._init_gripper()
+        action = req.get("action", "close")
+        value = req.get("value", 0 if action == "close" else 1000)
+        angle = map_gripper_value(value,
+                                  self.gripper["close_angle"],
+                                  self.gripper["open_angle"])
+        rid = self.robot.id
+        with self._lock:
+            p.setJointMotorControl2(rid, self.gripper["active_id"],
+                                    p.POSITION_CONTROL, angle)
+            for cid, mult in self.gripper["child_ids"].items():
+                p.setJointMotorControl2(rid, cid, p.POSITION_CONTROL, angle * mult)
+            self._step(6)
+        return {"value": True, "info": {"angle": angle, "value": value}}
 
     def _get_rgbd(self, req):
         return {"value": False, "info": {"error": "not implemented"}}
