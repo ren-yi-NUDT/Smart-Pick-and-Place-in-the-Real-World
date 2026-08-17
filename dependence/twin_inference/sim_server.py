@@ -204,7 +204,8 @@ class SimServer:
         with self._lock:
             p.setJointMotorControl2(rid, self.gripper["active_id"],
                                     p.POSITION_CONTROL, angle)
-            for cid, mult in self.gripper["child_ids"].items():
+            for name, cid in self.gripper["child_ids"].items():
+                mult = self.gripper["children"][name]
                 p.setJointMotorControl2(rid, cid, p.POSITION_CONTROL, angle * mult)
             self._step(6)
         return {"value": True, "info": {"angle": angle, "value": value}}

@@ -31,15 +31,19 @@ class SimArmClient:
             self.sock.close()
             self.sock = None
 
+    def _recv_exact(self, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = self.sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("SimServer closed the connection")
+            buf += chunk
+        return buf
+
     def _send(self, data):
         self.sock.sendall(json.dumps(data).encode("utf-8"))
-        hdr = b""
-        while len(hdr) < 4:
-            hdr += self.sock.recv(4 - len(hdr))
-        n = struct.unpack(">I", hdr)[0]
-        body = b""
-        while len(body) < n:
-            body += self.sock.recv(min(65536, n - len(body)))
+        n = struct.unpack(">I", self._recv_exact(4))[0]
+        body = self._recv_exact(n)
         return json.loads(body.decode("utf-8"))
 
     # -- ArmClient-compatible surface --------------------------------

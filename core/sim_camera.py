@@ -29,15 +29,19 @@ class SimCamera:
             cprint(f"[SimCamera] connect failed: {e}", "red")
             return False
 
+    def _recv_exact(self, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = self.sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("SimServer closed the connection")
+            buf += chunk
+        return buf
+
     def get_rgbd(self):
         self.sock.sendall(json.dumps({"cmd": "get_rgbd", "side": self.side}).encode("utf-8"))
-        hdr = b""
-        while len(hdr) < 4:
-            hdr += self.sock.recv(4 - len(hdr))
-        n = struct.unpack(">I", hdr)[0]
-        body = b""
-        while len(body) < n:
-            body += self.sock.recv(min(1 << 20, n - len(body)))
+        n = struct.unpack(">I", self._recv_exact(4))[0]
+        body = self._recv_exact(n)
         info = json.loads(body.decode("utf-8"))["info"]
         from PIL import Image
         import io
