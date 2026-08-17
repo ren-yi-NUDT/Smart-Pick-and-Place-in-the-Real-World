@@ -73,16 +73,18 @@ class SimServer:
         self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0),
                                   robot_path=self.urdf_path,
                                   config_path=os.path.join(self.urdf_dir, "robot_config.json"),
-                                  fixed_robot=True, vis=self.vis)
+                                  fixed_robot=True, blocking_mode=False, vis=self.vis)
         self.robot.load_robot()
         self.robot.reset_robot()
         self._index_camera()
         self._init_gripper()
 
     def _load_scene(self):
-        # 桌面（占位，后续任务再充实可抓物体/容器）
-        table_pos = [0.45, 0.0, 0.0]
-        p.loadURDF("table/table.urdf", table_pos, useFixedBase=True)
+        # 场景物体（桌面/容器/待抓物体）留待 Phase 2 按真实工作空间标定。
+        # 注意：pybullet 标准 table.urdf 长 1.5m、桌面高 ~0.6m，直接放 [0.45,0,0]
+        # 会与机械臂基座重叠且高于抓取位姿（~0.45m），导致碰撞把臂顶出指令位姿。
+        # 在标定前不加载桌面，避免污染位姿复现验证。
+        pass
 
     def _index_camera(self):
         # 相机 link 名（Task 5 添加到 URDF 后生效）
