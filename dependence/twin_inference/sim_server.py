@@ -138,15 +138,38 @@ class SimServer:
             return self._get_rgbd(req)
         return {"value": False, "info": {"error": f"unknown cmd {cmd}"}}
 
-    # -- handlers（Task 3/4/5 逐个实现）-------------------------------
+    # -- handlers ------------------------------------------------------
+    def _arm_struct(self):
+        return self.robot.robot_structs["left_arm"]
+
     def _get_joint_state(self, req):
-        return {"value": False, "info": {"error": "not implemented"}}
+        with self._lock:
+            js_rad = self._arm_struct().get_joint_pose()  # radians, 7-list
+        return {"value": True, "info": {"js_deg": rad2deg_list(js_rad)}}
 
     def _execute_trajectory(self, req):
-        return {"value": False, "info": {"error": "not implemented"}}
+        trajectory = req.get("trajectory", [])
+        if not trajectory:
+            return {"value": False, "info": {"error": "empty trajectory"}}
+        with self._lock:
+            arm = self._arm_struct()
+            for wp in trajectory:
+                js_rad = deg2rad_list(list(wp))
+                arm.reset_by_joint_states(js_rad)
+                arm.move_joint(js_rad)
+                self._step(3)
+        return {"value": True, "info": {"n_waypoints": len(trajectory)}}
 
     def _move_to_pose(self, req):
-        return {"value": False, "info": {"error": "not implemented"}}
+        pose = req.get("pose", {})
+        js_deg = [pose.get(f"J{i}", 0.0) for i in range(1, 8)]
+        with self._lock:
+            arm = self._arm_struct()
+            js_rad = deg2rad_list(js_deg)
+            arm.reset_by_joint_states(js_rad)
+            arm.move_joint(js_rad)
+            self._step(6)
+        return {"value": True, "info": {"js_deg": js_deg}}
 
     def _gripper(self, req):
         return {"value": False, "info": {"error": "not implemented"}}
@@ -165,4 +188,3 @@ if __name__ == "__main__":
     server = SimServer(vis=not args.novis, port=args.port)
     while not rospy.is_shutdown():
         server._step()
-        rospy.sleep(SIM_STEP_DELAY)
