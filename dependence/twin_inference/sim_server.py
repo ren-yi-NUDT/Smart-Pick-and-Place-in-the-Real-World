@@ -37,6 +37,11 @@ SIM_PORT = 8031
 
 
 class SimServer:
+    CAM_INTRINSICS = {
+        "left": dict(fx=392.268, fy=392.268, cx=325.468, cy=242.282,
+                     width=640, height=480, near=0.01, far=3.0),
+    }
+
     def __init__(self, vis=True, port=SIM_PORT):
         self.vis = vis
         self.side = "left"
@@ -203,7 +208,39 @@ class SimServer:
         return {"value": True, "info": {"angle": angle, "value": value}}
 
     def _get_rgbd(self, req):
-        return {"value": False, "info": {"error": "not implemented"}}
+        if self.camera_link_id is None:
+            return {"value": False, "info": {"error": "no camera link"}}
+        intr = self.CAM_INTRINSICS[self.side]
+        with self._lock:
+            pos, orn = p.getLinkState(self.robot.id, self.camera_link_id)[:2]
+            rot = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+            forward = rot @ np.array([0, 0, 1.0])
+            up = rot @ np.array([0, -1.0, 0])
+            view = p.computeViewMatrix(pos, pos + forward, up)
+            left, right, bottom, top = projection_bounds(
+                intr["fx"], intr["fy"], intr["cx"], intr["cy"],
+                intr["width"], intr["height"], intr["near"],
+            )
+            proj = p.computeProjectionMatrix(left, right, bottom, top,
+                                             intr["near"], intr["far"])
+            w, h, rgb, depth, _ = p.getCameraImage(
+                intr["width"], intr["height"], view, proj,
+                renderer=p.ER_TINY_RENDERER,
+            )
+        rgb_arr = np.asarray(rgb, dtype=np.uint8).reshape(h, w, 4)[:, :, :3]
+        depth_mm = depth_buffer_to_mm(np.asarray(depth, dtype=np.float32),
+                                      intr["near"], intr["far"])
+        buf = io.BytesIO()
+        from PIL import Image
+        Image.fromarray(rgb_arr).save(buf, format="PNG")
+        return {
+            "value": True,
+            "info": {
+                "width": w, "height": h,
+                "rgb_b64": base64.b64encode(buf.getvalue()).decode("ascii"),
+                "depth_b64": base64.b64encode(depth_mm.tobytes()).decode("ascii"),
+            },
+        }
 
 
 if __name__ == "__main__":

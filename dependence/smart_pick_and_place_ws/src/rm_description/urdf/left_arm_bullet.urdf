@@ -814,4 +814,11 @@
     <axis xyz="0 0 0" />
   </joint>
 
+  <joint name="cam_link_grasp_joint" type="fixed">
+    <parent link="Link7"/>
+    <child link="cam_link_grasp"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+  </joint>
+  <link name="cam_link_grasp"/>
+
 </robot>
