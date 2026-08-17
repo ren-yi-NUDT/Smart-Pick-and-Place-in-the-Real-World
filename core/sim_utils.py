@@ -2,7 +2,6 @@
 
 Kept free of pybullet/rospy imports so they can be unit-tested in isolation.
 """
-import os
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -45,7 +44,11 @@ def map_gripper_value(value_0_1000, close=0.0, open=0.8):
 
 
 def parse_mimic_joints(urdf_path):
-    """Return {mimic_child_name: (parent_joint_name, multiplier)} from a URDF."""
+    """Return {mimic_child_name: (parent_joint_name, multiplier)} from a URDF.
+
+    The URDF ``<mimic offset="...">`` attribute is intentionally ignored: all
+    coupled joints in this project's URDF use offset=0.
+    """
     tree = ET.parse(urdf_path)
     root = tree.getroot()
     mapping = {}

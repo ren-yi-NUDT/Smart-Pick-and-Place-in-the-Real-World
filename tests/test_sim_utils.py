@@ -57,6 +57,10 @@ def test_parse_mimic_joints():
     <parent link="k"/><child link="f2"/>
     <mimic joint="L_finger_joint" multiplier="-1" offset="0"/>
   </joint>
+  <joint name="L_right_outer_knuckle_joint" type="revolute">
+    <parent link="b"/><child link="rk"/>
+    <mimic joint="L_finger_joint" offset="0"/>
+  </joint>
 </robot>"""
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False) as f:
@@ -66,6 +70,7 @@ def test_parse_mimic_joints():
     os.unlink(path)
     assert mapping["L_left_inner_knuckle_joint"] == ("L_finger_joint", 1.0)
     assert mapping["L_left_inner_finger_joint"] == ("L_finger_joint", -1.0)
+    assert mapping["L_right_outer_knuckle_joint"] == ("L_finger_joint", 1.0)
     assert "L_finger_joint" not in mapping
 
 
