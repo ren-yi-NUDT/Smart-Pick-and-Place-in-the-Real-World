@@ -15,7 +15,8 @@ from core.gripper import GripperClient
 class ArmSide:
     """Encapsulates one arm + its end-effector and configuration."""
 
-    def __init__(self, side: str, arm_config: dict, host: str = "127.0.0.1"):
+    def __init__(self, side: str, arm_config: dict, host: str = "127.0.0.1",
+                 sim_mode: bool = False):
         """
         Args:
             side: "left" or "right"
@@ -29,6 +30,7 @@ class ArmSide:
         self.side = side
         self._arm_config = arm_config
         self._host = host
+        self._sim_mode = sim_mode
         self._arm = None
         self._hand = None
 
@@ -39,28 +41,41 @@ class ArmSide:
     def arm(self) -> ArmClient:
         """ArmClient, created and connected on first access."""
         if self._arm is None:
-            port = self._arm_config["arm_port"]
-            self._arm = ArmClient(host=self._host, port=port)
-            self._arm.connect()
-            cprint(f"[ArmSide:{self.side}] ArmClient connected on :{port}", "green")
+            if self._sim_mode:
+                from core.sim_arm import SimArmClient
+                self._arm = SimArmClient(host=self._host, port=8031, side=self.side)
+                self._arm.connect()
+            else:
+                port = self._arm_config["arm_port"]
+                self._arm = ArmClient(host=self._host, port=port)
+                self._arm.connect()
+                cprint(f"[ArmSide:{self.side}] ArmClient connected on :{port}", "green")
         return self._arm
 
     @property
     def hand(self):
         """HandClient or GripperClient, chosen by *hand_type*, lazily connected."""
         if self._hand is None:
-            hand_type = self._arm_config.get("hand_type", "dexterous")
-            port = self._arm_config["hand_port"]
-            if hand_type == "gripper":
-                src = f"/{self.side}_gripper/movement_control"
-                self._hand = GripperClient(host=self._host, port=port, src=src)
+            if self._sim_mode:
+                from core.sim_gripper import SimGripperClient
+                self._hand = SimGripperClient(
+                    host=self._host, port=8031,
+                    src=f"/{self.side}_gripper/movement_control",
+                )
+                self._hand.connect()
             else:
-                self._hand = HandClient(host=self._host, port=port)
-            self._hand.connect()
-            cprint(
-                f"[ArmSide:{self.side}] {type(self._hand).__name__} connected on :{port}",
-                "green",
-            )
+                hand_type = self._arm_config.get("hand_type", "dexterous")
+                port = self._arm_config["hand_port"]
+                if hand_type == "gripper":
+                    src = f"/{self.side}_gripper/movement_control"
+                    self._hand = GripperClient(host=self._host, port=port, src=src)
+                else:
+                    self._hand = HandClient(host=self._host, port=port)
+                self._hand.connect()
+                cprint(
+                    f"[ArmSide:{self.side}] {type(self._hand).__name__} connected on :{port}",
+                    "green",
+                )
         return self._hand
 
     # ------------------------------------------------------------------

@@ -142,6 +142,8 @@ class SimServer:
             return self._gripper(req)
         if cmd == "get_rgbd":
             return self._get_rgbd(req)
+        if cmd == "get_link_pose":
+            return self._get_link_pose(req)
         return {"value": False, "info": {"error": f"unknown cmd {cmd}"}}
 
     # -- handlers ------------------------------------------------------
@@ -241,6 +243,14 @@ class SimServer:
                 "depth_b64": base64.b64encode(depth_mm.tobytes()).decode("ascii"),
             },
         }
+
+    def _get_link_pose(self, req):
+        name = req.get("link")
+        if name not in self.robot.linkName_to_id:
+            return {"value": False, "info": {"error": f"unknown link {name}"}}
+        with self._lock:
+            pos, orn = p.getLinkState(self.robot.id, self.robot.linkName_to_id[name])[:2]
+        return {"value": True, "info": {"pos": list(pos), "orn": list(orn)}}
 
 
 if __name__ == "__main__":

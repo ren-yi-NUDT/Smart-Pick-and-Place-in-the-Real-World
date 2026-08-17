@@ -69,15 +69,20 @@ class Skill(ABC):
     def arm(self):
         """Return an initialized ArmController + connected socket client."""
         if self._arm is None:
-            from core.arm import ArmClient
-            if self.config._is_new_format:
-                left_cfg = self.config.get_arm_config("left")
+            if self.config.sim_mode:
+                from core.sim_arm import SimArmClient
                 host = self.config.shared.get("host", "127.0.0.1")
-                port = left_cfg.get("arm_port", 8010)
+                client = SimArmClient(host, 8031, side="left")
             else:
-                from core.config import HOST, ARM_PORT
-                host, port = HOST, ARM_PORT
-            client = ArmClient(host, port)
+                from core.arm import ArmClient
+                if self.config._is_new_format:
+                    left_cfg = self.config.get_arm_config("left")
+                    host = self.config.shared.get("host", "127.0.0.1")
+                    port = left_cfg.get("arm_port", 8010)
+                else:
+                    from core.config import HOST, ARM_PORT
+                    host, port = HOST, ARM_PORT
+                client = ArmClient(host, port)
             client.connect()
             self._arm = client
         return self._arm
@@ -94,21 +99,27 @@ class Skill(ABC):
         open/close/get_state/is_grasping interface.
         """
         if self._hand is None:
-            if self.config._is_new_format:
-                left_cfg = self.config.get_arm_config("left")
+            if self.config.sim_mode:
+                from core.sim_gripper import SimGripperClient
                 host = self.config.shared.get("host", "127.0.0.1")
-                port = left_cfg.get("hand_port", 8000)
-                hand_type = left_cfg.get("hand_type", "dexterous")
+                client = SimGripperClient(host, 8031,
+                                          src="/left_gripper/movement_control")
             else:
-                from core.config import HOST, HAND_PORT
-                host, port = HOST, HAND_PORT
-                hand_type = "dexterous"
-            if hand_type == "gripper":
-                from core.gripper import GripperClient
-                client = GripperClient(host, port, src="/left_gripper/movement_control")
-            else:
-                from core.hand import HandClient
-                client = HandClient(host, port)
+                if self.config._is_new_format:
+                    left_cfg = self.config.get_arm_config("left")
+                    host = self.config.shared.get("host", "127.0.0.1")
+                    port = left_cfg.get("hand_port", 8000)
+                    hand_type = left_cfg.get("hand_type", "dexterous")
+                else:
+                    from core.config import HOST, HAND_PORT
+                    host, port = HOST, HAND_PORT
+                    hand_type = "dexterous"
+                if hand_type == "gripper":
+                    from core.gripper import GripperClient
+                    client = GripperClient(host, port, src="/left_gripper/movement_control")
+                else:
+                    from core.hand import HandClient
+                    client = HandClient(host, port)
             client.connect()
             self._hand = client
         return self._hand
@@ -156,13 +167,20 @@ class Skill(ABC):
         return self._camera
 
     def _make_camera(self, side="left"):
-        """Create a RealSenseCapture bound to the camera of the given arm side."""
+        """Create a camera bound to the given arm side (sim or real)."""
+        self._camera_for_side = side
+        if self.config.sim_mode:
+            from core.sim_camera import SimCamera
+            host = self.config.shared.get("host", "127.0.0.1")
+            cam = SimCamera(width=640, height=480, fps=30, save_path=self.save_path,
+                            serial="", host=host, port=8031, side=side)
+            cam.connect()
+            return cam
         from core.camera import RealSenseCapture
         serial = ""
         if self.config._is_new_format:
             arm_cfg = self.config.get_arm_config(side)
             serial = arm_cfg.get("camera_serial", "")
-        self._camera_for_side = side
         return RealSenseCapture(
             width=640, height=480, fps=30, save_path=self.save_path, serial=serial,
         )
@@ -361,6 +379,9 @@ class Skill(ABC):
 
     def save_current_transformation(self):
         """Cache the base-to-camera and hand-effector-to-arm-endlink transforms."""
+        if self.config.sim_mode:
+            self._save_transforms_from_sim()
+            return
         from_frame = self.config.base_link_name
         to_frame = self.config.camera_link_name
         self.T_base_to_cam, _, _ = (
@@ -373,6 +394,35 @@ class Skill(ABC):
                 grasping_from_frame, grasping_to_frame
             )
         )
+
+    def _save_transforms_from_sim(self):
+        """Sim-mode TF bypass: read link poses from the SimServer.
+
+        The single-arm URDF's base sits at the world origin with identity
+        orientation, so a link's world pose equals its base-frame pose.
+        """
+        import numpy as np
+        from scipy.spatial.transform import Rotation as R
+
+        def _link_pose(name):
+            rsp = self.arm._send({"cmd": "get_link_pose", "side": "left", "link": name})
+            info = rsp.get("info", {})
+            return info.get("pos"), info.get("orn")
+
+        cam_pos, cam_orn = _link_pose(self.config.camera_link_name)
+        self.T_base_to_cam = np.eye(4)
+        self.T_base_to_cam[:3, :3] = R.from_quat(cam_orn).as_matrix()
+        self.T_base_to_cam[:3, 3] = cam_pos
+
+        end_pos, end_orn = _link_pose(self.config.arm_end_link_name)
+        hand_pos, hand_orn = _link_pose(self.config.hand_effector_name)
+        T_end = np.eye(4)
+        T_end[:3, :3] = R.from_quat(end_orn).as_matrix()
+        T_end[:3, 3] = end_pos
+        T_hand = np.eye(4)
+        T_hand[:3, :3] = R.from_quat(hand_orn).as_matrix()
+        T_hand[:3, 3] = hand_pos
+        self.T_hand_effector_to_arm_endlink = np.linalg.inv(T_end) @ T_hand
 
     def get_camera_obs(self, side="left"):
         """Capture a single RGB-D frame from the specified arm's camera."""
@@ -463,8 +513,10 @@ class DualArmSkill(Skill):
             )
 
         host = self.config.shared.get("host", "127.0.0.1")
-        self.left = ArmSide("left", self.config.get_arm_config("left"), host=host)
-        self.right = ArmSide("right", self.config.get_arm_config("right"), host=host)
+        self.left = ArmSide("left", self.config.get_arm_config("left"), host=host,
+                            sim_mode=self.config.sim_mode)
+        self.right = ArmSide("right", self.config.get_arm_config("right"), host=host,
+                             sim_mode=self.config.sim_mode)
         self.sync = DualArmSync()
 
     # ------------------------------------------------------------------
