@@ -190,6 +190,20 @@ class Config:
         return self._shared
 
     @property
+    def sim_mode(self) -> bool:
+        """True when running against the PyBullet sim backend.
+
+        Priority: SIM_MODE env var (explicit 1/true/yes/on or 0/false/no/off)
+        overrides robot_config.json ``shared.sim_mode``.
+        """
+        env = os.environ.get("SIM_MODE", "").strip().lower()
+        if env in ("1", "true", "yes", "on"):
+            return True
+        if env in ("0", "false", "no", "off"):
+            return False
+        return bool(self._shared.get("sim_mode", False))
+
+    @property
     def dual_arm(self) -> dict:
         """Return the dual-arm configuration section."""
         return self._dual_arm
