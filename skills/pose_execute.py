@@ -739,6 +739,9 @@ class PoseExecuteSkill(Skill):
         Returns:
             bool: 是否回放成功
         """
+        if self.config.sim_mode:
+            return self._play_trajectory_sim(name, speed=speed)
+
         from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
 
         ARM_IP = "192.168.1.18"
@@ -815,6 +818,68 @@ class PoseExecuteSkill(Skill):
         except KeyboardInterrupt:
             cprint(f"\n[pose_execute] 轨迹 {name} 用户中断", "yellow")
             return False
+
+    def _play_trajectory_sim(self, name, speed=1.5):
+        """回放右臂录制轨迹到 PyBullet SimServer（sim 模式）。
+
+        抽屉轨迹固定由右臂执行。关节航点批量通过 ``execute_trajectory`` 下发，
+        夹爪状态在航点间变化时分段回放，以还原"抓把手→拉开→松手"的时序。
+        """
+        t = _load_trajectory(name)
+        if t is None:
+            return False
+
+        waypoints = t["waypoints"]
+        has_gripper = t.get("recorded_gripper", False)
+        if len(waypoints) < 2:
+            cprint("[pose_execute] 轨迹点不足", "red")
+            return False
+
+        from core.sim_arm import SimArmClient
+        from core.sim_gripper import SimGripperClient
+        host = self.config.shared.get("host", "127.0.0.1")
+        arm = SimArmClient(host, 8031, side="right")
+        if not arm.connect():
+            return False
+        gripper = None
+        if has_gripper:
+            gripper = SimGripperClient(host, 8031, src="/right_gripper/movement_control")
+            gripper.connect()
+
+        cprint(
+            f"[pose_execute] (sim) 回放右臂轨迹 {name}: "
+            f"{len(waypoints)} 航点 × {speed}x",
+            "cyan",
+        )
+
+        def _set_gripper(v):
+            if gripper is None:
+                return
+            action = "open" if v[0] > 500 else "close"
+            gripper._send({"cmd": "gripper", "side": "right",
+                           "action": action, "value": int(v[0])})
+
+        # 起始夹爪
+        if has_gripper:
+            _set_gripper(waypoints[0][8:10])
+
+        # 按夹爪状态分段回放关节轨迹
+        seg = []
+        prev_gv = tuple(waypoints[0][8:10]) if has_gripper else None
+        for wp in waypoints:
+            gv = tuple(wp[8:10]) if has_gripper else None
+            if has_gripper and gv != prev_gv:
+                if seg:
+                    arm.execute_trajectory(seg, speed=20)
+                    seg = []
+                _set_gripper(gv)
+                prev_gv = gv
+            seg.append(list(wp[1:8]))
+        if seg:
+            arm.execute_trajectory(seg, speed=20)
+
+        cprint(f"[pose_execute] 轨迹 {name} 回放完成 ✓", "green")
+        return True
 
     def play_open_drawer(self, speed=1.5):
         """开抽屉：home → 抓把手 → 拉开 → 松手 → 回 home。

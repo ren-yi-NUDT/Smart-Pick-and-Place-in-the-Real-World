@@ -4,6 +4,9 @@
 Serves on 127.0.0.1:8031. Protocol (mirrors twin.py):
   RECV: raw JSON (no length prefix)
   SEND: 4-byte big-endian length prefix + JSON
+
+Loads both arms (left + right) as independent ``ErdaijiRobot`` bodies. Every
+command carries a ``side`` field ("left"/"right") routing it to the matching arm.
 """
 import os
 import sys
@@ -35,11 +38,18 @@ from core.sim_utils import (  # noqa: E402
 SIM_STEP_DELAY = 1.0 / 240.0
 SIM_PORT = 8031
 
+# 双臂相对位姿，取自 dual_arm.urdf 的 base_to_R_base（右臂基座相对左臂）。
+# 左臂基座在原点，右臂在 (0.99, -0.72, 0)，绕 Z 转 90°。
+_RIGHT_BASE_POS = (0.99, -0.72, 0.0)
+_RIGHT_BASE_ORI = (0.0, 0.0, 1.5708)
+
 
 class SimServer:
     CAM_INTRINSICS = {
         "left": dict(fx=392.268, fy=392.268, cx=325.468, cy=242.282,
                      width=640, height=480, near=0.01, far=3.0),
+        "right": dict(fx=392.268, fy=392.268, cx=325.468, cy=242.282,
+                      width=640, height=480, near=0.01, far=3.0),
     }
 
     def __init__(self, vis=True, port=SIM_PORT):
@@ -50,10 +60,9 @@ class SimServer:
             os.path.dirname(__file__),
             "../smart_pick_and_place_ws/src/rm_description/urdf",
         )
-        self.urdf_path = os.path.join(self.urdf_dir, "left_arm_bullet.urdf")
-        self.robot = None
-        self.gripper = None
-        self.camera_link_id = None
+        self.robots = {}           # side -> ErdaijiRobot
+        self.grippers = {}         # side -> gripper dict
+        self.camera_link_ids = {}  # side -> link id or None
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind(("127.0.0.1", port))
@@ -70,14 +79,30 @@ class SimServer:
                                      cameraPitch=-35, cameraTargetPosition=[0.4, 0, 0.3])
         p.loadURDF("plane.urdf")
         self._load_scene()
-        self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0),
-                                  robot_path=self.urdf_path,
-                                  config_path=os.path.join(self.urdf_dir, "robot_config.json"),
-                                  fixed_robot=True, blocking_mode=False, vis=self.vis)
-        self.robot.load_robot()
-        self.robot.reset_robot()
-        self._index_camera()
-        self._init_gripper()
+        self._load_arms()
+        self._index_cameras()
+        self._init_grippers()
+
+    def _load_arms(self):
+        self.robots["left"] = self._make_robot(
+            os.path.join(self.urdf_dir, "left_arm_bullet.urdf"),
+            os.path.join(self.urdf_dir, "robot_config.json"),
+            (0.0, 0.0, 0.0), (0, 0, 0),
+        )
+        self.robots["right"] = self._make_robot(
+            os.path.join(self.urdf_dir, "right_arm.urdf"),
+            os.path.join(self.urdf_dir, "right_arm_robot_config.json"),
+            _RIGHT_BASE_POS, _RIGHT_BASE_ORI,
+        )
+
+    def _make_robot(self, urdf_path, config_path, pos, ori):
+        robot = ErdaijiRobot(pos, ori,
+                             robot_path=urdf_path,
+                             config_path=config_path,
+                             fixed_robot=True, blocking_mode=False, vis=self.vis)
+        robot.load_robot()
+        robot.reset_robot()
+        return robot
 
     def _load_scene(self):
         # 场景物体（桌面/容器/待抓物体）留待 Phase 2 按真实工作空间标定。
@@ -86,18 +111,38 @@ class SimServer:
         # 在标定前不加载桌面，避免污染位姿复现验证。
         pass
 
-    def _index_camera(self):
-        # 相机 link 名（Task 5 添加到 URDF 后生效）
-        name = "cam_link_grasp"
-        if name in self.robot.linkName_to_id:
-            self.camera_link_id = self.robot.linkName_to_id[name]
-        else:
-            self.camera_link_id = None
+    def _index_cameras(self):
+        cam_names = {"left": "cam_link_grasp", "right": "R_cam_link_grasp"}
+        for side, name in cam_names.items():
+            robot = self.robots[side]
+            if name in robot.linkName_to_id:
+                self.camera_link_ids[side] = robot.linkName_to_id[name]
+            else:
+                self.camera_link_ids[side] = None
+
+    def _init_grippers(self):
+        for side, prefix in [("left", "L_"), ("right", "R_")]:
+            self.grippers[side] = self._make_gripper(side, prefix)
+
+    def _make_gripper(self, side, prefix):
+        robot = self.robots[side]
+        mimic = parse_mimic_joints(robot.robot_path)
+        active = prefix + "finger_joint"
+        children = {n: m for n, (parent, m) in mimic.items() if parent == active}
+        return {
+            "active": active,
+            "children": children,
+            "active_id": robot.jointname_to_id[active],
+            "child_ids": {n: robot.jointname_to_id[n] for n in children},
+            "close_angle": 0.0,
+            "open_angle": 0.8,  # rad；GUI 冒烟时按实际手指张角校准
+        }
 
     def _step(self, n=1):
         with self._lock:
             for _ in range(n):
-                self.robot.apply_actions()
+                for robot in self.robots.values():
+                    robot.apply_actions()
                 p.stepSimulation()
                 rospy.sleep(SIM_STEP_DELAY)
 
@@ -149,20 +194,22 @@ class SimServer:
         return {"value": False, "info": {"error": f"unknown cmd {cmd}"}}
 
     # -- handlers ------------------------------------------------------
-    def _arm_struct(self):
-        return self.robot.robot_structs["left_arm"]
+    def _arm_struct(self, side):
+        return self.robots[side].robot_structs[f"{side}_arm"]
 
     def _get_joint_state(self, req):
+        side = req.get("side", "left")
         with self._lock:
-            js_rad = self._arm_struct().get_joint_pose()  # radians, 7-list
+            js_rad = self._arm_struct(side).get_joint_pose()  # radians, 7-list
         return {"value": True, "info": {"js_deg": rad2deg_list(js_rad)}}
 
     def _execute_trajectory(self, req):
+        side = req.get("side", "left")
         trajectory = req.get("trajectory", [])
         if not trajectory:
             return {"value": False, "info": {"error": "empty trajectory"}}
         with self._lock:
-            arm = self._arm_struct()
+            arm = self._arm_struct(side)
             for wp in trajectory:
                 js_rad = deg2rad_list(list(wp))
                 arm.reset_by_joint_states(js_rad)
@@ -171,53 +218,46 @@ class SimServer:
         return {"value": True, "info": {"n_waypoints": len(trajectory)}}
 
     def _move_to_pose(self, req):
+        side = req.get("side", "left")
         pose = req.get("pose", {})
         js_deg = [pose.get(f"J{i}", 0.0) for i in range(1, 8)]
         with self._lock:
-            arm = self._arm_struct()
+            arm = self._arm_struct(side)
             js_rad = deg2rad_list(js_deg)
             arm.reset_by_joint_states(js_rad)
             arm.move_joint(js_rad)
             self._step(6)
         return {"value": True, "info": {"js_deg": js_deg}}
 
-    def _init_gripper(self):
-        mimic = parse_mimic_joints(self.urdf_path)
-        active = "L_finger_joint"
-        children = {n: m for n, (parent, m) in mimic.items() if parent == active}
-        self.gripper = {
-            "active": active,
-            "children": children,
-            "active_id": self.robot.jointname_to_id[active],
-            "child_ids": {n: self.robot.jointname_to_id[n] for n in children},
-            "close_angle": 0.0,
-            "open_angle": 0.8,  # rad；GUI 冒烟时按实际手指张角校准
-        }
-
     def _gripper(self, req):
-        if self.gripper is None:
-            self._init_gripper()
+        side = req.get("side", "left")
+        gripper = self.grippers.get(side)
+        if gripper is None:
+            return {"value": False, "info": {"error": f"no gripper for {side}"}}
         action = req.get("action", "close")
         value = req.get("value", 0 if action == "close" else 1000)
         angle = map_gripper_value(value,
-                                  self.gripper["close_angle"],
-                                  self.gripper["open_angle"])
-        rid = self.robot.id
+                                  gripper["close_angle"],
+                                  gripper["open_angle"])
+        rid = self.robots[side].id
         with self._lock:
-            p.setJointMotorControl2(rid, self.gripper["active_id"],
+            p.setJointMotorControl2(rid, gripper["active_id"],
                                     p.POSITION_CONTROL, angle)
-            for name, cid in self.gripper["child_ids"].items():
-                mult = self.gripper["children"][name]
+            for name, cid in gripper["child_ids"].items():
+                mult = gripper["children"][name]
                 p.setJointMotorControl2(rid, cid, p.POSITION_CONTROL, angle * mult)
             self._step(6)
         return {"value": True, "info": {"angle": angle, "value": value}}
 
     def _get_rgbd(self, req):
-        if self.camera_link_id is None:
-            return {"value": False, "info": {"error": "no camera link"}}
-        intr = self.CAM_INTRINSICS[self.side]
+        side = req.get("side", self.side)
+        camera_link_id = self.camera_link_ids.get(side)
+        if camera_link_id is None:
+            return {"value": False, "info": {"error": f"no camera link for {side}"}}
+        intr = self.CAM_INTRINSICS[side]
+        robot = self.robots[side]
         with self._lock:
-            pos, orn = p.getLinkState(self.robot.id, self.camera_link_id)[:2]
+            pos, orn = p.getLinkState(robot.id, camera_link_id)[:2]
             rot = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
             forward = rot @ np.array([0, 0, 1.0])
             up = rot @ np.array([0, -1.0, 0])
@@ -248,11 +288,13 @@ class SimServer:
         }
 
     def _get_link_pose(self, req):
+        side = req.get("side", "left")
         name = req.get("link")
-        if name not in self.robot.linkName_to_id:
+        robot = self.robots[side]
+        if name not in robot.linkName_to_id:
             return {"value": False, "info": {"error": f"unknown link {name}"}}
         with self._lock:
-            pos, orn = p.getLinkState(self.robot.id, self.robot.linkName_to_id[name])[:2]
+            pos, orn = p.getLinkState(robot.id, robot.linkName_to_id[name])[:2]
         return {"value": True, "info": {"pos": list(pos), "orn": list(orn)}}
 
 
