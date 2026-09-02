@@ -30,12 +30,19 @@ import sys
 import json
 import argparse
 import time
+import shutil
 from datetime import datetime
 
 import cv2
 import numpy as np
 import threading
 from termcolor import cprint
+
+if not hasattr(cv2, "aruco"):
+    raise SystemExit(
+        "需要带 aruco 模块的 OpenCV（opencv-contrib-python）。"
+        "请使用 /home/zz/anaconda3/envs/anygrasp/bin/python 运行本工具。"
+    )
 
 # ---------------------------------------------------------------------------
 # 项目路径
@@ -44,6 +51,7 @@ from termcolor import cprint
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "robot_config.json")
 CALIB_LOG_DIR = os.path.join(PROJECT_ROOT, "log", "calib_fail")
+CALIB_BACKUP_DIR = os.path.join(PROJECT_ROOT, "log", "calibration_backups")
 
 # ---------------------------------------------------------------------------
 # 相机配置
@@ -782,6 +790,22 @@ def calibrate(preview=True):
 # ---------------------------------------------------------------------------
 
 def save_calibration(T_matrix, num_obs, error_mm=None):
+    """Persist a measured calibration without making the old one unrecoverable."""
+    T_matrix = np.asarray(T_matrix, dtype=float)
+    if T_matrix.shape != (4, 4) or not np.all(np.isfinite(T_matrix)):
+        raise ValueError("标定矩阵必须是有限的 4x4 数值矩阵")
+    if not np.allclose(T_matrix[3], [0.0, 0.0, 0.0, 1.0], atol=1e-6):
+        raise ValueError("标定矩阵齐次最后一行无效")
+    rotation = T_matrix[:3, :3]
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-3):
+        raise ValueError("标定矩阵旋转部分不是正交矩阵")
+    if np.linalg.det(rotation) <= 0.0:
+        raise ValueError("标定矩阵旋转部分行列式无效")
+    if int(num_obs) < MIN_POSITIONS:
+        raise ValueError(f"有效观测位置不足: {num_obs} < {MIN_POSITIONS}")
+    if error_mm is not None and (not np.isfinite(error_mm) or error_mm < 0):
+        raise ValueError("标定误差无效")
+
     with open(CONFIG_PATH, "r") as f:
         config = json.load(f)
 
@@ -796,10 +820,26 @@ def save_calibration(T_matrix, num_obs, error_mm=None):
 
     config.setdefault("shared", {})["calibration"] = calib
 
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+    os.makedirs(CALIB_BACKUP_DIR, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(
+        CALIB_BACKUP_DIR, f"robot_config_before_calibration_{timestamp}.json"
+    )
+    shutil.copy2(CONFIG_PATH, backup_path)
+
+    # Atomic replacement prevents an interrupted write from leaving a corrupt config.
+    tmp_path = CONFIG_PATH + ".tmp"
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp_path, CONFIG_PATH)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
     cprint(f"[标定] 已保存到 {CONFIG_PATH}", "green")
+    cprint(f"[标定] 旧配置备份: {os.path.relpath(backup_path, PROJECT_ROOT)}", "green")
 
 
 def load_calibration():

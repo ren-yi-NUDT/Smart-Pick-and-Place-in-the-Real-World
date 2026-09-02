@@ -43,6 +43,12 @@ class RM_ARM():
         self.movejoint_r = 50  #交融半径百分比系数，0~100
         self.movejoint_connect = 0
         self.movejoint_block = 0 #0 no_block_mode 1 block_mode
+        # The SDK state-read call can temporarily fail after a controller
+        # reconnect.  Keep the last successfully commanded joint target so
+        # the ROS TF tree can continue to describe the commanded pose while
+        # the next state read is retried.
+        self.last_commanded_joint = None
+        self.arm_joint_state = {"joint": [0.0] * 7}
 
 
     def arm_connet(self, mode=None):  #connet to the arm
@@ -138,6 +144,7 @@ class RM_ARM():
         # print(end_joint)
         tag = self.robot_arm.rm_movej(joint=end_joint, v=movejoint_speed, r=self.movejoint_r, connect=connect_tag, block=move_joint_block)
         if tag == 0:
+            self.last_commanded_joint = list(end_joint)
             log = "Succeed to move joint to end_joint!"
             print("Succeed to move joint to end_joint!")
         else:
@@ -232,6 +239,8 @@ class RM_ARM():
             rospy.sleep(interval_time)
         
         if tag == 0:
+            if len(trajectory) > 0:
+                self.last_commanded_joint = list(trajectory[-1])
             print("Succeed to move end effector to end pose!")
         else:
             print(f"Faild to move end effector to end pose!\nthe rm_movel tag is {tag}")

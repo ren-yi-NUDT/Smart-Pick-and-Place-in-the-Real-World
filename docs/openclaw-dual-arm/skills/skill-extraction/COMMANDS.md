@@ -75,7 +75,7 @@ echo '{"container":"desk"}' | python run_skill.py fetch_from_user
 
 仅需 `container`，物品由用户递给机械臂。流程：移到 handover → 张手等待 → 用户放入 → 闭合 → 放置。
 
-### `grasp_to_drawer` — 双臂交接放入抽屉 ⭐ 已实现
+### `grasp_to_drawer` — 双臂交接放入抽屉
 
 ```bash
 # 左臂抓橘子 → 右臂打开抽屉 → 双臂交接（左→右）→ 右臂放入抽屉

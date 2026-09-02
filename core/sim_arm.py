@@ -22,6 +22,12 @@ class SimArmClient:
             self.sock.connect((self.host, self.port))
             return True
         except Exception as e:  # noqa: BLE001
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
+            self.sock = None
             cprint(f"[SimArmClient] connect failed: {e}", "red")
             return False
 
@@ -35,10 +41,12 @@ class SimArmClient:
 
     def move_to_named_pose(self, pose_dict, speed=30):
         self._send({"cmd": "move_to_pose", "side": self.side,
-                    "pose": pose_dict, "speed": speed})
+                    "pose": {k: float(v) for k, v in pose_dict.items()},
+                    "speed": speed})
         return True
 
     def execute_trajectory(self, trajectory, speed=20):
+        traj = [[float(x) for x in wp] for wp in trajectory]
         self._send({"cmd": "execute_trajectory", "side": self.side,
-                    "trajectory": list(trajectory), "speed": speed})
+                    "trajectory": traj, "speed": speed})
         return True

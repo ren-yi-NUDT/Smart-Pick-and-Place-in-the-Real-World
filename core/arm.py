@@ -40,11 +40,20 @@ def _send_cmd(sock: socket.socket, data: dict) -> dict:
 class ArmClient:
     """Stateless wrapper around the arm TCP service."""
 
-    SERVICE_NAME = "/right_arm/movement_control"
+    SERVICE_NAMES = {
+        "left": "/left_arm/movement_control",
+        "right": "/right_arm/movement_control",
+    }
+    # Backward-compatible default for callers that do not specify a side.
+    SERVICE_NAME = SERVICE_NAMES["right"]
 
-    def __init__(self, host: str = HOST, port: int = ARM_PORT):
+    def __init__(self, host: str = HOST, port: int = ARM_PORT, side: str = "right"):
+        if side not in self.SERVICE_NAMES:
+            raise ValueError(f"Unsupported arm side: {side}")
         self.host = host
         self.port = port
+        self.side = side
+        self.service_name = self.SERVICE_NAMES[side]
         self.sock = None   # type: socket.socket | None
         self._cmds = []     # type: list[dict]
 
@@ -54,10 +63,17 @@ class ArmClient:
     def connect(self) -> bool:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(180.0)
             self.sock.connect((self.host, self.port))
             cprint(f"[ArmClient] Connected to {self.host}:{self.port}", "green")
             return True
         except Exception as e:
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
+            self.sock = None
             cprint(f"[ArmClient] Connection failed: {e}", "red")
             return False
 
@@ -110,12 +126,10 @@ class ArmClient:
             raise RuntimeError("ArmClient is not connected -- call connect() first")
 
         self._cmds.append({"type": "end", "act": []})
-        req = {"srv": self.SERVICE_NAME, "cmd": self._cmds}
+        req = {"srv": self.service_name, "cmd": self._cmds}
         resp = _send_cmd(self.sock, req)
         self.reset_cmd()
 
-        state = resp.get("value")
-        _info = resp.get("info", {})
         return resp
 
     # ------------------------------------------------------------------

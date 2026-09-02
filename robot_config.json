@@ -10,6 +10,48 @@
       "base_link_name": "base_link",
       "hand_effector_name": "L_gripper_endeffector",
       "arm_end_link_name": "Link7",
+      "camera_extrinsic": {
+        "parent_frame": "Link7",
+        "child_frame": "cam_link_grasp",
+        "matrix": [
+          [-0.06503404712968464, -0.997644867154117, 0.021801187008471494, 0.0708009744931787],
+          [0.9978377577069856, -0.0652237167782832, -0.00810407699381243, 0.023445568410749785],
+          [0.00950694526276967, 0.021227006634725668, 0.9997294794998796, 0.09466674449783057],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      },
+      "camera_intrinsics": {
+        "width": 640,
+        "height": 480,
+        "fx": 384.7166748046875,
+        "fy": 384.3431396484375,
+        "cx": 309.2347412109375,
+        "cy": 236.91583251953125
+      },
+      "grasp_scoring": {
+        "weights": {"anygrasp": 0.40, "twin": 0.30, "width": 0.15, "length": 0.05, "angle": 0.10},
+        "preferred_width_m": 0.045,
+        "width_tolerance_m": 0.035,
+        "max_width_m": 0.085,
+        "gripper_height_m": 0.03,
+        "preferred_gripper_height_m": 0.03,
+        "height_tolerance_m": 0.01,
+        "preferred_approach_axis_base": [0.0, 0.0, -1.0],
+        "approach_axis_local": [0.0, 0.0, 1.0],
+        "high_pregrasp_offset_m": 0.08,
+        "pregrasp_offset_m": 0.02,
+        "execution_offset_base_m": [-0.020, 0.0, 0.0],
+        "approach_interval_m": 0.025,
+        "approach_rotation_interval_rad": 0.15,
+        "joint_step_limit_rad": 0.12,
+        "grasp_observation_speed": 15,
+        "grasp_trajectory_speed": 6,
+        "gripper_close_force": 10,
+        "gripper_close_speed": 10,
+        "grasp_recovery_speed": 10,
+        "grasp_post_lift_speed": 15,
+        "verify_lift": true
+      },
       "default_traj_js": {
         "grasp1": {
           "J1": 1.745,
@@ -67,13 +109,13 @@
         "J7": -67.002
       },
       "handover_pose": {
-        "J1": 100.089,
-        "J2": 52.18,
-        "J3": 41.826,
-        "J4": 27.366,
-        "J5": 138.396,
-        "J6": -55.994,
-        "J7": -67.002
+        "J1": -14.08,
+        "J2": 40.12,
+        "J3": -12.72,
+        "J4": 51.44,
+        "J5": 97.81,
+        "J6": -66.0,
+        "J7": 0.91
       },
       "throw_to_trash_pose": {
         "J1": 9.42,
@@ -150,6 +192,48 @@
       "base_link_name": "R_base_link",
       "hand_effector_name": "R_gripper_endeffector",
       "arm_end_link_name": "R_Link7",
+      "camera_extrinsic": {
+        "parent_frame": "R_Link7",
+        "child_frame": "R_cam_link_grasp",
+        "matrix": [
+          [-0.06503404712968464, -0.997644867154117, 0.021801187008471494, 0.0708009744931787],
+          [0.9978377577069856, -0.0652237167782832, -0.00810407699381243, 0.023445568410749785],
+          [0.00950694526276967, 0.021227006634725668, 0.9997294794998796, 0.09466674449783057],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      },
+      "camera_intrinsics": {
+        "width": 640,
+        "height": 480,
+        "fx": 385.76739501953125,
+        "fy": 385.3938903808594,
+        "cx": 323.5818176269531,
+        "cy": 239.84815979003906
+      },
+      "grasp_scoring": {
+        "weights": {"anygrasp": 0.40, "twin": 0.30, "width": 0.15, "length": 0.05, "angle": 0.10},
+        "preferred_width_m": 0.045,
+        "width_tolerance_m": 0.035,
+        "max_width_m": 0.085,
+        "gripper_height_m": 0.03,
+        "preferred_gripper_height_m": 0.03,
+        "height_tolerance_m": 0.01,
+        "preferred_approach_axis_base": [0.0, 0.0, -1.0],
+        "approach_axis_local": [0.0, 0.0, 1.0],
+        "high_pregrasp_offset_m": 0.08,
+        "pregrasp_offset_m": 0.02,
+        "execution_offset_base_m": [-0.020, 0.0, 0.0],
+        "approach_interval_m": 0.025,
+        "approach_rotation_interval_rad": 0.15,
+        "joint_step_limit_rad": 0.12,
+        "grasp_observation_speed": 15,
+        "grasp_trajectory_speed": 6,
+        "gripper_close_force": 10,
+        "gripper_close_speed": 10,
+        "grasp_recovery_speed": 10,
+        "grasp_post_lift_speed": 15,
+        "verify_lift": true
+      },
       "default_traj_js": {
         "desk_front": {
           "J1": -8.065,
@@ -244,19 +328,31 @@
     "twin_port_right": 8021,
     "anygrasp_host": "127.0.0.1",
     "anygrasp_port": 8030,
+    "place_execution_offset_base_m": [-0.030, 0.0, 0.0],
+    "sim_suction": {
+      "enabled": true,
+      "radius_m": 0.08,
+      "twin_xyz_threshold_m": 0.08,
+      "twin_rpy_threshold_rad": 0.15
+    },
+    "sim_camera": {
+      "mode": "scene_fixed",
+      "position": [0.25, -0.70, 1.25],
+      "target": [0.18, -0.38, 0.30]
+    },
     "calibration": {
       "T_right_to_left": [
         [
           6.123233995736766e-17,
           -1.0,
           0.0,
-          0.99
+          0.35
         ],
         [
           1.0,
           6.123233995736766e-17,
           0.0,
-          0.72
+          -0.71
         ],
         [
           0.0,
@@ -274,6 +370,248 @@
       "method": "manual_measurement",
       "num_observations": 0,
       "timestamp": "2026-05-31T17:42:31.534969"
+    }
+  },
+  "robot_models": {
+    "left_gripper": {
+      "left_arm": {
+        "struct_type": "arm",
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6",
+          "joint7"
+        ],
+        "link_names": [
+          "base_link",
+          "Link1",
+          "Link2",
+          "Link3",
+          "Link4",
+          "Link5",
+          "Link6",
+          "Link7",
+          "arm_end_link"
+        ],
+        "controllable_joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6",
+          "joint7"
+        ],
+        "end_link": "arm_end_link",
+        "end_effector_links": [
+          "L_gripper_base",
+          "L_left_outer_knuckle",
+          "L_left_outer_finger",
+          "L_left_inner_knuckle",
+          "L_left_inner_finger",
+          "L_right_inner_knuckle",
+          "L_right_inner_finger",
+          "L_right_outer_knuckle",
+          "L_right_outer_finger",
+          "L_gripper_endeffector"
+        ],
+        "default_pose": {
+          "reset": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mimic": {}
+      }
+    },
+    "right_gripper": {
+      "right_arm": {
+        "struct_type": "arm",
+        "joint_names": [
+          "R_joint1",
+          "R_joint2",
+          "R_joint3",
+          "R_joint4",
+          "R_joint5",
+          "R_joint6",
+          "R_joint7"
+        ],
+        "link_names": [
+          "R_base_link",
+          "R_Link1",
+          "R_Link2",
+          "R_Link3",
+          "R_Link4",
+          "R_Link5",
+          "R_Link6",
+          "R_Link7",
+          "R_arm_end_link"
+        ],
+        "controllable_joint_names": [
+          "R_joint1",
+          "R_joint2",
+          "R_joint3",
+          "R_joint4",
+          "R_joint5",
+          "R_joint6",
+          "R_joint7"
+        ],
+        "end_link": "R_arm_end_link",
+        "end_effector_links": [
+          "R_gripper_base",
+          "R_left_outer_knuckle",
+          "R_left_outer_finger",
+          "R_left_inner_knuckle",
+          "R_left_inner_finger",
+          "R_right_inner_knuckle",
+          "R_right_inner_finger",
+          "R_right_outer_knuckle",
+          "R_right_outer_finger",
+          "R_gripper_endeffector",
+          "R_cam_link_grasp"
+        ],
+        "default_pose": {
+          "reset": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mimic": {}
+      }
+    },
+    "dual_arm": {
+      "left_arm": {
+        "struct_type": "arm",
+        "joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6",
+          "joint7"
+        ],
+        "link_names": [
+          "base_link",
+          "Link1",
+          "Link2",
+          "Link3",
+          "Link4",
+          "Link5",
+          "Link6",
+          "Link7",
+          "arm_end_link"
+        ],
+        "controllable_joint_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6",
+          "joint7"
+        ],
+        "end_link": "arm_end_link",
+        "end_effector_links": [
+          "L_hand_base_link",
+          "left_thumb_swing",
+          "left_thumb_1",
+          "left_thumb_2",
+          "left_thumb_3",
+          "left_index_1",
+          "left_index_2",
+          "left_middle_1",
+          "left_middle_2",
+          "left_ring_1",
+          "left_ring_2",
+          "left_little_1",
+          "left_little_2",
+          "L_hand_endeffector"
+        ],
+        "default_pose": {
+          "reset": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mimic": {}
+      },
+      "right_arm": {
+        "struct_type": "arm",
+        "joint_names": [
+          "R_joint1",
+          "R_joint2",
+          "R_joint3",
+          "R_joint4",
+          "R_joint5",
+          "R_joint6",
+          "R_joint7"
+        ],
+        "link_names": [
+          "R_base_link",
+          "R_Link1",
+          "R_Link2",
+          "R_Link3",
+          "R_Link4",
+          "R_Link5",
+          "R_Link6",
+          "R_Link7",
+          "R_arm_end_link"
+        ],
+        "controllable_joint_names": [
+          "R_joint1",
+          "R_joint2",
+          "R_joint3",
+          "R_joint4",
+          "R_joint5",
+          "R_joint6",
+          "R_joint7"
+        ],
+        "end_link": "R_arm_end_link",
+        "end_effector_links": [
+          "R_gripper_base",
+          "R_left_outer_knuckle",
+          "R_left_outer_finger",
+          "R_left_inner_knuckle",
+          "R_left_inner_finger",
+          "R_right_inner_knuckle",
+          "R_right_inner_finger",
+          "R_right_outer_knuckle",
+          "R_right_outer_finger",
+          "R_gripper_endeffector",
+          "R_cam_link_grasp"
+        ],
+        "default_pose": {
+          "reset": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "mimic": {}
+      }
     }
   }
 }

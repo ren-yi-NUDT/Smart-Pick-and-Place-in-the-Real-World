@@ -810,23 +810,8 @@
     <axis xyz="0 0 0" />
   </joint>
 
-  <joint
-    name="R_cam_link_grasp_joint"
-    type="fixed">
-    <origin
-      xyz="0.08 0 0"
-      rpy="0 0 0" />
-    <parent
-      link="R_Link7" />
-    <child
-      link="R_cam_link_grasp" />
-  </joint>
+  <!-- The real camera TF is published by mount_camera_right.py from the
+       calibrated R_Link7 -> R_cam_link_grasp extrinsic.  Do not define a
+       second zero-offset URDF edge for the same frame pair. -->
 
-  <link name="R_cam_link_grasp">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <mass value="0.0" />
-      <inertia ixx="0.0" ixy="0.0" ixz="0.0" iyy="0.0" iyz="0.0" izz="0.0" />
-    </inertial>
-  </link>
 </robot>

@@ -78,8 +78,6 @@ class LookAroundSkill(Skill):
 
     def _run_right(self, reset_pose=None):
         """Right-arm drawer inspection: capture drawer interior, list contents via VLM."""
-        from core.arm import ArmClient
-
         cprint("=================== Look Around: Drawer inspection (right arm) ===================", "cyan")
 
         right_cfg = self.config.get_arm_config("right")
@@ -88,8 +86,7 @@ class LookAroundSkill(Skill):
             cprint("错误: robot_config.json 中右臂没有定义 drawer_1_placement", "red")
             return None
 
-        right_arm = ArmClient("127.0.0.1", 8011)
-        right_arm.connect()
+        right_arm = self.arm_for("right")
         right_arm.move_to_named_pose(obs_pose, speed=15)
         time.sleep(1)
 

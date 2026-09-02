@@ -5,7 +5,22 @@ import tf2_ros
 import geometry_msgs.msg
 import tf.transformations as tr
 import numpy as np
-import os, sys
+import json
+from pathlib import Path
+
+
+def load_calibrated_extrinsic():
+    """Load the calibrated Link7 -> camera transform from the project config."""
+    config_path = Path(__file__).resolve().parents[5] / "robot_config.json"
+    with config_path.open("r", encoding="utf-8") as stream:
+        config = json.load(stream)
+    extrinsic = config["arms"]["left"]["camera_extrinsic"]
+    if extrinsic["parent_frame"] != "Link7" or extrinsic["child_frame"] != "cam_link_grasp":
+        raise RuntimeError("Left camera extrinsic frame names do not match the TF frames")
+    matrix = np.asarray(extrinsic["matrix"], dtype=float)
+    if matrix.shape != (4, 4):
+        raise RuntimeError(f"Expected a 4x4 left camera extrinsic, got {matrix.shape}")
+    return matrix
 
 class MountCamera():
     def __init__(self, name, parent_frame, child_frame):
@@ -21,14 +36,7 @@ class MountCamera():
         return list(translation) + list(quaternion)
 
     def calculate_and_broadcast(self):
-        # M = [5.9347703553566745e-02, 8.9649222326041933e-03, 8.4151605238849683e-02, 
-        #      -5.4467853498316133e-03,  2.8652407786822413e-03, 7.1181678637942480e-01, 7.0314294620378559e-01]
-        T_matrix = np.array([
-            [-0.06503404712968464, -0.997644867154117, 0.021801187008471494, 0.0708009744931787], 
-            [0.9978377577069856, -0.0652237167782832, -0.00810407699381243, 0.023445568410749785], 
-            [0.00950694526276967, 0.021227006634725668, 0.9997294794998796, 0.09466674449783057], 
-            [0.0, 0.0, 0.0, 1.0]
-        ])
+        T_matrix = load_calibrated_extrinsic()
         L = self.matrix_to_list(T_matrix)
         # N = [-0.059, -0.000, 0.000,
         #      0.501, -0.498, 0.501, 0.501]

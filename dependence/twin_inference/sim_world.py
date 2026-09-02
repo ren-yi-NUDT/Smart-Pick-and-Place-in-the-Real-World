@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os, sys
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+sys.path.append(PROJECT_ROOT)
 
 import rospy
 import numpy as np
@@ -10,6 +12,7 @@ import pybullet_data
 import threading
 from robot import ErdaijiRobot
 import tqdm
+from core.config import Config
 
 
 SIMULATION_STEP_DELAY = 1 / 240.
@@ -25,7 +28,7 @@ class World:
         
         urdf_base_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf")
         self.robot_path = os.path.join(urdf_base_dir, "dual_arm.urdf")
-        self.robot_config_path = os.path.join(urdf_base_dir, "dual_arm_robot_config.json")
+        self.robot_config_path = Config().get_robot_model("dual_arm")
         self.robot = ErdaijiRobot((0.0, 0.0, 0.0), (0, 0, 0), robot_path = self.robot_path, config_path = self.robot_config_path, blocking_mode=self.blocking_mode, vis=self.vis)
         self.setup()
     

@@ -1,0 +1,107 @@
+{
+  "observation_poses": {
+    "left": ["grasp1", "grasp2", "grasp3", "grasp4"],
+    "right": [
+      {"pose": "observe_left_arm", "tag": "center"},
+      {"pose": "observe_left_arm", "tag": "j1_plus12", "joint_offsets_deg": {"J1": 12.0}},
+      {"pose": "observe_left_arm", "tag": "j1_minus12", "joint_offsets_deg": {"J1": -12.0}}
+    ]
+  },
+  "scene_inventory_sides": ["left", "right"],
+  "group_arm_assignments": {
+    "fruit": "right",
+    "vegetable": "left"
+  },
+  "groups": {
+    "fruit": {
+      "description": "按日常食用分类的水果，例如苹果、橙子、香蕉；送到粉色盘子",
+      "destination_role": "fruit_destination"
+    },
+    "vegetable": {
+      "description": "按日常烹饪分类的蔬菜，例如黄瓜、番茄、胡萝卜、青椒等；送到蓝色盘子",
+      "destination_role": "vegetable_destination"
+    }
+  },
+  "destinations": {
+    "fruit_destination": {
+      "description": "接收水果的粉色盘子、粉色盒子或其他粉色容器",
+      "labels": ["粉色盘子", "粉色托盘", "粉色盒子", "pink plate", "pink tray", "pink box"]
+    },
+    "vegetable_destination": {
+      "description": "接收蔬菜的蓝色盘子、蓝色盒子或其他蓝色容器",
+      "labels": ["蓝色盘子", "蓝色托盘", "蓝色盒子", "blue plate", "blue tray", "blue box"]
+    }
+  },
+  "pipeline_destination_lanes": {
+    "fruit_destination": "right",
+    "vegetable_destination": "left"
+  },
+  "safety": {
+    "allow_parallel": true,
+    "allow_pipeline_parallel": true,
+    "allow_shared_source_cross_lane": true,
+    "enforce_arm_lanes": true,
+    "observation_speed": 10,
+    "grasp_speed": 7.5,
+    "place_speed": 12,
+    "home_speed": 12,
+    "holding_home_speed": 6,
+    "observation_settle_s": 1.0,
+    "multi_view_merge_distance_m": 0.065,
+        "dedup_distance_m": 0.03,
+        "cross_view_merge_distance_m": 0.12,
+        "cross_view_label_merge_distance_m": 0.35,
+        "source_cluster_distance_m": 0.35,
+    "place_clearance_m": 0.05,
+    "place_approach_m": 0.12,
+    "place_yaw_variants_deg": [90.0, -90.0, 180.0],
+    "place_target_offsets_m": [[0.0, 0.0], [0.02, 0.0], [-0.02, 0.0], [0.0, 0.02], [0.0, -0.02]],
+    "place_xyz_threshold_m": 0.06,
+    "place_rpy_threshold_rad": 0.15,
+    "grasp_xyz_threshold_m": 0.06,
+    "grasp_rpy_threshold_rad": 0.05,
+    "destination_object_overlap_threshold": 0.30,
+    "min_grasp_approach_alignment": 0.96,
+        "max_objects": 32,
+    "max_grasp_candidates_per_object_view": 2,
+    "max_twin_candidates_per_object_arm": 1,
+        "grasp_projection_reanchor_gap_m": 0.008,
+        "same_camera_label_merge_distance_m": 0.08,
+        "grasp_retry_pose_variants": [
+          {"yaw_deg": 90.0, "offset_m": [0.0, 0.0]},
+          {"yaw_deg": -90.0, "offset_m": [0.0, 0.0]}
+        ],
+        "max_grasp_retry_candidates": 3,
+        "max_visual_grasp_attempts": 3,
+        "max_post_home_regrasp_attempts": 2,
+    "twin_request_timeout_s": 30,
+    "max_planning_time_s": 180,
+    "enable_twin_generation3_fallback": true,
+    "max_grasp_projection_gap_px": 120,
+    "max_grasp_fallback_gap_px": 220,
+    "max_observation_offset_deg": 12.0,
+    "enable_cross_camera_grasp_candidates": false,
+    "allow_local_anygrasp_orientation_fallback": true,
+    "max_destinations_per_role": 1,
+    "force_fused_right_candidates": false,
+    "force_bidirectional_camera_candidates": false,
+    "force_cross_arm_fallback": false,
+    "min_vlm_confidence": 0.45,
+    "min_depth_m": 0.10,
+    "max_depth_m": 3.0,
+    "require_visual_destinations": true,
+    "require_empty_grippers": true
+  },
+  "arm_lanes": {
+    "left": {
+      "axis": "x",
+      "x_min": 0.30,
+      "x_max": 0.70
+    },
+    "right": {
+      "axis": "x",
+      "x_min": 0.70,
+      "x_max": 1.35
+    }
+  }
+}

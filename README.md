@@ -89,6 +89,9 @@ Agent 在后台调用 `run_skill.py` 执行具体技能，无需手动输入 JSO
 conda activate anygrasp
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib
 
+# 可选：启用 VLM 目标词扩展（使用 GLM-4.5V，不设置则自动使用原始目标词）
+export GLM_API_TOKEN="你的智谱 API Token"
+
 # 1. 确保硬件连接
 ping 192.168.1.19     # 机械臂
 ping 192.168.11.209   # 灵巧手
@@ -148,7 +151,7 @@ lsof -ti:8000,8010,8020  # 应返回 3 个 PID
 
 | Skill | 说明 |
 |-------|------|
-| `grasp` | 视觉抓取（YOLO 检测 + AnyGrasp + Twin 轨迹） |
+| `grasp` | 视觉抓取（VLM 目标词扩展 + YOLO-World + AnyGrasp + Twin 轨迹） |
 | `place` | 视觉放置（检测容器位置 → 生成放置轨迹） |
 | `handover` | 递交给人（插值轨迹经中间点到 handover 位姿） |
 | `trash` | 扔垃圾（移动到垃圾桶位姿松手） |
@@ -173,6 +176,16 @@ lsof -ti:8000,8010,8020  # 应返回 3 个 PID
 | JSON 顶层 | `handover_pose`、`get_ready_to_handover_*`、`throw_to_trash_pose`、`desk_pose_*` | `config.robot_config.get(name)` |
 
 **统一查询方式**：始终使用 `config.get_pose(name)` 方法，该方法会先查顶层再查 `default_traj_js`，无需关心位姿存储在哪个位置。
+
+### 统一机器人配置
+
+根目录的 `robot_config.json` 是唯一机器人配置入口：
+
+- `arms`：真实机械臂/夹爪的网络、相机、坐标系和预定义位姿。
+- `shared`：双臂共享的服务地址、端口和标定参数。
+- `robot_models`：仿真和 Twin 使用的 URDF 结构描述，包含 `left_gripper`、`right_gripper` 和 `dual_arm` 三套模型。
+
+仿真代码通过 `Config.get_robot_model(name)` 读取模型，不再从 `rm_description/urdf/` 加载独立的机器人 JSON。RViz 配置、URDF 文件和录制轨迹仍是各自格式的资源文件，不属于机器人参数配置。
 
 ## 开发原则
 

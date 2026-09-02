@@ -38,10 +38,18 @@ class TwinClient:
     def connect(self) -> bool:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Reachability is a planning request, not an unbounded wait.
+            self.sock.settimeout(60.0)
             self.sock.connect((self.host, self.port))
             cprint(f"[TwinClient] Connected to {self.host}:{self.port}", "green")
             return True
         except Exception as e:
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
+            self.sock = None
             cprint(f"[TwinClient] Connection failed: {e}", "red")
             return False
 
@@ -76,7 +84,14 @@ class TwinClient:
             data_bytes += chunk
 
         resp = json.loads(data_bytes.decode("utf-8"))
-        cprint(f"Control twin response: {resp}", "red")
+        info = resp.get("info", {}) if isinstance(resp, dict) else {}
+        trajectory = info.get("trajectory", []) if isinstance(info, dict) else []
+        cprint(
+            "[TwinClient] trajectory_generation2 "
+            f"value={resp.get('value') if isinstance(resp, dict) else '?'} "
+            f"waypoints={len(trajectory) if isinstance(trajectory, list) else 0}",
+            "cyan" if isinstance(resp, dict) and resp.get("value") else "yellow",
+        )
         return resp
 
     # ------------------------------------------------------------------

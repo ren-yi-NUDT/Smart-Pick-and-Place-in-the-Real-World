@@ -1,8 +1,9 @@
 #!/home/zz/anaconda3/envs/semgrasp/bin/python3.9
-import os, sys
+import os, sys, json
 
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(curr_dir)
+PROJECT_ROOT = os.path.abspath(os.path.join(curr_dir, "..", "..", ".."))
 
 import numpy as np
 import open3d as o3d
@@ -12,6 +13,18 @@ from graspnetAPI import GraspGroup
 from datetime import datetime
 
 _ANYGRASP_CACHE = {}
+
+
+def _camera_intrinsics(model):
+    """Read the same per-arm intrinsics used by the runtime server."""
+    try:
+        with open(os.path.join(PROJECT_ROOT, "robot_config.json"), "r") as f:
+            arms = json.load(f).get("arms", {})
+        side = model.removeprefix("rs_")
+        intr = arms[side]["camera_intrinsics"]
+        return tuple(float(intr[key]) for key in ("fx", "fy", "cx", "cy"))
+    except Exception:
+        return (320.0, 320.0, 319.5, 239.5)
 
 def _get_anygrasp(checkpoint_path):
     """Cache the heavy AnyGrasp network across calls.
@@ -46,15 +59,7 @@ def anygrasp_get_poses(checkpoint_path, color, depth, text_prompt=None, model = 
         depths = np.array(depth)
     # get camera intrinsics
     
-    if model == "rs_right":
-        fx, fy = 386.4509582519531, 385.8191223144531
-        cx, cy = 318.2220153808594, 238.8162841796875
-    elif model == "rs_left":
-        fx, fy = 392.26812744140625, 392.26812744140625
-        cx, cy = 325.4682312011719, 242.28213500976562
-    else:
-        fx, fy = 320.0, 320.0
-        cx, cy = 319.5, 239.5
+    fx, fy, cx, cy = _camera_intrinsics(model)
     
     scale = 1000.0
     # set workspace to filter output grasps
@@ -95,6 +100,9 @@ def anygrasp_get_poses(checkpoint_path, color, depth, text_prompt=None, model = 
         score =  gg_pick[i].score
         rotation_matrix = gg_pick[i].rotation_matrix
         save_dict = {"trans": translation.tolist(), "score": score, "rotation_matrix": rotation_matrix.tolist()}
+        for attr in ("width", "height", "depth"):
+            if hasattr(gg_pick[i], attr):
+                save_dict[attr] = float(getattr(gg_pick[i], attr))
         results.append(save_dict)
 
     # visualization

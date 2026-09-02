@@ -1,3 +1,11 @@
 pyrealsense2
 pymodbus==2.5.3
 ctranslate2==4.4.0
+
+# YOLO-World perception runtime. Keep torchvision paired with the existing
+# Torch 2.6 environment; installing the newest torchvision may upgrade Torch.
+ultralytics==8.3.253
+torchvision==0.21.0
+ultralytics-thop==2.1.6
+git+https://github.com/ultralytics/CLIP.git
+ftfy==6.3.1

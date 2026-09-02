@@ -130,7 +130,24 @@ class RM_ARM_bringup(RM_ARM):
         pub = rospy.Publisher("joint_states", JointState, queue_size=10)
         rate = rospy.Rate(self.publish_rate)
         while not rospy.is_shutdown():
-            _, self.arm_joint_state = self.robot_arm.rm_get_current_arm_state()
+            # rm_get_current_arm_state() may block indefinitely during a
+            # controller reconnect.  rm_get_joint_degree() fails quickly and
+            # lets us keep publishing a bounded, last-commanded TF fallback.
+            tag, joints = self.robot_arm.rm_get_joint_degree()
+            if tag == 0 and len(joints) == 7:
+                self.arm_joint_state = {"joint": list(joints)}
+            elif self.last_commanded_joint is not None:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "Left arm joint state unavailable; publishing last commanded pose for TF"
+                )
+                self.arm_joint_state = {"joint": list(self.last_commanded_joint)}
+            else:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "Left arm joint state unavailable and no commanded pose is known"
+                )
+                self.arm_joint_state = {"joint": [0.0] * 7}
             joint_state_msg = JointState()
             joint_state_msg.header.stamp = rospy.Time.now()
             joint_state_msg.name = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
@@ -139,7 +156,7 @@ class RM_ARM_bringup(RM_ARM):
             rate.sleep()
 
     def rm_75_execute_trajectory_usr(self, data):
-        print("=== RECEIVED REQUEST (RIGHT ARM) ===")
+        print("=== RECEIVED REQUEST (LEFT ARM) ===")
         print(f"Data type: {type(data)}")
         print(f"Data content: {data}")
         print("data: ", data)
@@ -188,7 +205,7 @@ class RM_ARM_bringup(RM_ARM):
                         break
             check = True
 
-        return_dict = {"srv": "/right_arm/movement_control", "value": check, "info": log}
+        return_dict = {"srv": "/left_arm/movement_control", "value": check, "info": log}
         rsp = json.dumps(return_dict)
         
         return rsp

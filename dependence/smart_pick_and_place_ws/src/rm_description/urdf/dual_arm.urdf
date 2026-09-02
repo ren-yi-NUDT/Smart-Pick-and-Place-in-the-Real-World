@@ -839,9 +839,9 @@
 
 
   <!-- ===== Fixed joint: left base -> right base (T_right_to_left) ===== -->
-  <!-- T_right_to_left: Rz(+90deg) + translation [0.99, 0.72, 0] -->
+  <!-- T_right_to_left: Rz(+90deg) + translation [0.35, -0.71, 0] -->
   <joint name="base_to_R_base" type="fixed">
-    <origin xyz="0.99 -0.72 0" rpy="0 0 1.5708"/>
+    <origin xyz="0.35 -0.71 0" rpy="0 0 1.5708"/>
     <parent link="base"/>
     <child link="R_base"/>
     <axis xyz="0 0 0"/>
@@ -1657,26 +1657,6 @@
     <child link="R_gripper_endeffector" />
     <axis xyz="0 0 0" />
   </joint>
-
-  <joint
-    name="R_cam_link_grasp_joint"
-    type="fixed">
-    <origin
-      xyz="0.08 0 0"
-      rpy="0 0 0" />
-    <parent
-      link="R_Link7" />
-    <child
-      link="R_cam_link_grasp" />
-  </joint>
-
-  <link name="R_cam_link_grasp">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <mass value="0.0" />
-      <inertia ixx="0.0" ixy="0.0" ixz="0.0" iyy="0.0" iyz="0.0" izz="0.0" />
-    </inertial>
-  </link>
 
   <!-- ==================== TABLE ==================== -->
   <!-- Left arm at (0, 0) on long edge (+X), right arm at (0.99, -0.72) on short edge (-Y) -->

@@ -38,10 +38,17 @@ class AnyGraspClient:
     def connect(self) -> bool:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(120.0)
             self.sock.connect((self.host, self.port))
             cprint(f"[AnyGraspClient] Connected to {self.host}:{self.port}", "green")
             return True
         except Exception as e:
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
+            self.sock = None
             cprint(
                 f"[AnyGraspClient] Connection failed: {e}. "
                 f"Is the server running? Start it via start.bash "
@@ -77,13 +84,17 @@ class AnyGraspClient:
     # High-level API
     # ------------------------------------------------------------------
     def detect_grasps(self, rgb: np.ndarray, depth: np.ndarray,
-                      model: str = "rs_right") -> List[dict]:
+                      model: str = "rs_right", intrinsics: dict = None,
+                      depth_scale: float = None) -> List[dict]:
         """Run AnyGrasp on the RGB-D pair.
 
         Returns
         -------
         list[dict]
-            Each dict has keys ``"trans"``, ``"score"``, ``"rotation_matrix"``.
+            Each dict has ``"trans"``, ``"score"`` and
+            ``"rotation_matrix"``; current servers also return the optional
+            official gripper dimensions ``"width"``, ``"height"`` and
+            ``"depth"``.
         """
         if self.sock is None:
             raise RuntimeError("AnyGraspClient is not connected -- call connect() first")
@@ -106,6 +117,19 @@ class AnyGraspClient:
             "rgb_shape": list(rgb.shape),
             "rgb_dtype": "uint8",
         }
+        if isinstance(intrinsics, dict):
+            required = ("fx", "fy", "cx", "cy")
+            if all(key in intrinsics for key in required):
+                header["intrinsics"] = {
+                    key: float(intrinsics[key]) for key in required
+                }
+        if depth_scale is not None:
+            try:
+                depth_scale = float(depth_scale)
+                if np.isfinite(depth_scale) and depth_scale > 0.0:
+                    header["depth_scale_m"] = depth_scale
+            except (TypeError, ValueError):
+                pass
         header_bytes = json.dumps(header).encode("utf-8")
         payload = header_bytes + b"\n" + depth.tobytes() + rgb.tobytes()
 

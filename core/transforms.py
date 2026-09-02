@@ -102,25 +102,40 @@ class TransformationUtil:
 # ======================================================================
 
 # -- camera intrinsics --
-_RS_RIGHT_FX = 385.9778137207031
-_RS_RIGHT_FY = 385.34674072265625
-_RS_RIGHT_CX = 318.2220153808594
-_RS_RIGHT_CY = 238.8162841796875
+try:
+    from core.config import Config as _Config
+    _cfg = _Config()
+    _right_intr = _cfg.get_camera_intrinsics("right")
+    _left_intr = _cfg.get_camera_intrinsics("left")
+    _RS_RIGHT_FX, _RS_RIGHT_FY = _right_intr["fx"], _right_intr["fy"]
+    _RS_RIGHT_CX, _RS_RIGHT_CY = _right_intr["cx"], _right_intr["cy"]
+    _RS_LEFT_FX, _RS_LEFT_FY = _left_intr["fx"], _left_intr["fy"]
+    _RS_LEFT_CX, _RS_LEFT_CY = _left_intr["cx"], _left_intr["cy"]
+except Exception:
+    # Import-time fallback for standalone utility use outside this project.
+    _RS_RIGHT_FX = 386.4509582519531
+    _RS_RIGHT_FY = 385.8191223144531
+    _RS_RIGHT_CX = 318.2220153808594
+    _RS_RIGHT_CY = 238.8162841796875
+    _RS_LEFT_FX = 392.26812744140625
+    _RS_LEFT_FY = 392.26812744140625
+    _RS_LEFT_CX = 325.4682312011719
+    _RS_LEFT_CY = 242.28213500976562
 
-_RS_LEFT_FX = 392.26812744140625
-_RS_LEFT_FY = 392.26812744140625
-_RS_LEFT_CX = 325.4682312011719
-_RS_LEFT_CY = 242.28213500976562
 
-
-def _get_intrinsics(cam_type: str):
+def _get_intrinsics(cam_type: str, intrinsics=None):
+    if intrinsics is not None:
+        return (
+            float(intrinsics["fx"]), float(intrinsics["fy"]),
+            float(intrinsics["cx"]), float(intrinsics["cy"]),
+        )
     if cam_type == "right":
         return _RS_RIGHT_FX, _RS_RIGHT_FY, _RS_RIGHT_CX, _RS_RIGHT_CY
     else:
         return _RS_LEFT_FX, _RS_LEFT_FY, _RS_LEFT_CX, _RS_LEFT_CY
 
 
-def graspcam2pixel(grasping_pose, cam_type: str = "right"):
+def graspcam2pixel(grasping_pose, cam_type: str = "right", intrinsics=None):
     """Project 3-D grasp translations to 2-D pixel coordinates.
 
     Parameters
@@ -143,7 +158,7 @@ def graspcam2pixel(grasping_pose, cam_type: str = "right"):
     grasp_points = np.concatenate(grasp_points, axis=0)
 
     X_c, Y_c, Z_c = grasp_points[:, 0], grasp_points[:, 1], grasp_points[:, 2]
-    fx, fy, cx, cy = _get_intrinsics(cam_type)
+    fx, fy, cx, cy = _get_intrinsics(cam_type, intrinsics)
     u = (fx * X_c / Z_c) + cx
     v = (fy * Y_c / Z_c) + cy
     points_screen = np.vstack((u, v)).T
@@ -151,7 +166,7 @@ def graspcam2pixel(grasping_pose, cam_type: str = "right"):
     return points_screen[:, :2], grasping_pose
 
 
-def pixel_to_camera_point(pixel_points, depth_image, cam_type: str = "right"):
+def pixel_to_camera_point(pixel_points, depth_image, cam_type: str = "right", intrinsics=None):
     """Back-project pixel coordinates to 3-D camera-frame points using a
     depth image.
 
@@ -159,7 +174,7 @@ def pixel_to_camera_point(pixel_points, depth_image, cam_type: str = "right"):
     -------
     grasp_points_3d_m : np.ndarray (N, 3)  -- units: metres
     """
-    fx, fy, cx, cy = _get_intrinsics(cam_type)
+    fx, fy, cx, cy = _get_intrinsics(cam_type, intrinsics)
     u_points = pixel_points[:, 0].astype(np.int16)
     v_points = pixel_points[:, 1].astype(np.int16)
     depth_values = depth_image[v_points, u_points]
@@ -173,7 +188,7 @@ def pixel_to_camera_point(pixel_points, depth_image, cam_type: str = "right"):
     return grasp_points_3d_m
 
 
-def pixel_to_camera_point2(pixel_points, depth_value_m, cam_type: str = "right"):
+def pixel_to_camera_point2(pixel_points, depth_value_m, cam_type: str = "right", intrinsics=None):
     """Back-project pixel coordinates to 3-D camera-frame points using a
     scalar / array depth value (metres).
 
@@ -181,7 +196,7 @@ def pixel_to_camera_point2(pixel_points, depth_value_m, cam_type: str = "right")
     -------
     grasp_points_3d_m : np.ndarray (N, 3)
     """
-    fx, fy, cx, cy = _get_intrinsics(cam_type)
+    fx, fy, cx, cy = _get_intrinsics(cam_type, intrinsics)
 
     u_points = pixel_points[:, 0]
     v_points = pixel_points[:, 1]

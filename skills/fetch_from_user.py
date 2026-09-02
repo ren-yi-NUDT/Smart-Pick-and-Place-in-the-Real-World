@@ -155,7 +155,9 @@ class FetchFromUserSkill(Skill):
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
                 center_cam_point = pixel_to_camera_point2(
-                    np.array([center_x, center_y]).reshape(-1, 2), mean_depth_m
+                    np.array([center_x, center_y]).reshape(-1, 2), mean_depth_m,
+                    cam_type="left",
+                    intrinsics=self.config.get_camera_intrinsics("left"),
                 ).flatten()
                 placing_pos_world = self._transform_pose_to_world(center_cam_point)
                 return placing_pos_world

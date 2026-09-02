@@ -104,14 +104,8 @@ class PickAndPlaceSkill(Skill):
 
         cprint(f"P=================== Right arm fixed placement: {pose_name} → {target_pose_name} ===================", "cyan")
 
-        right_arm = getattr(self, "_right_arm", None)
-        if right_arm is None:
-            right_arm = ArmClient("127.0.0.1", 8011)
-            right_arm.connect()
-        right_gripper = getattr(self, "_right_gripper", None)
-        if right_gripper is None:
-            right_gripper = GripperClient("127.0.0.1", 8001)
-            right_gripper.connect()
+        right_arm = self.arm_for("right")
+        right_gripper = self.gripper_for("right")
 
         pose = right_cfg.get(target_pose_name)
         if pose is None:
@@ -126,166 +120,67 @@ class PickAndPlaceSkill(Skill):
         return True
 
     def _delegate_to_left_arm(self, container, return_home=True):
-        """Two-arm handover using the validated 4-step sequence (left→right by direction).
+        """Replay the latest recorded left→right dual-arm handover trajectory.
 
-        Steps (per 2026-07-05 validated run):
-          0. Both arms → preset pose (parallel, speed=15)
-          1. Right arm with open gripper → approach pose (speed=10)
-          2. Handover: right gripper close → wait 1.5s → left gripper open
-          3. Right arm carrying object → preset pose (speed=15)
-          4. Both arms → home (parallel, speed=30)  [skipped when return_home=False]
-
-        Pose names are inherited from old `right_to_left_handover_*` config keys;
-        actual direction is left→right (object goes from left gripper to
-        right gripper). After completion the object is in the right gripper
-        (at home when return_home=True, at preset when return_home=False).
+        The latest recording contains the synchronized arm motion and the
+        timed gripper events (right close, left open, then both arms home).
+        ``container`` is retained for callers that use the older API.
         """
-        import json
-        import os
-        cprint(f"D=================== Two-arm handover (container={container}) ===================", "cyan")
-        from core.arm import ArmClient
-        from core.gripper import GripperClient
-
-        # Load validated poses
+        cprint(
+            f"D=================== Two-arm handover (latest recording, container={container}) ===================",
+            "cyan",
+        )
+        if not return_home:
+            cprint(
+                "D=================== Latest recording includes the final home motion ===================",
+                "yellow",
+            )
         try:
-            poses_left = json.load(open(os.path.join("recorded_poses", "left.json")))
-            poses_right = json.load(open(os.path.join("recorded_poses", "right.json")))
-            left_preset_lst = poses_left["right_to_left_handover_left_preset"]["joint_angles_deg"]
-            right_preset_lst = poses_right["right_to_left_handover_right_preset"]["joint_angles_deg"]
-            right_approach_lst = poses_right["right_to_left_handover_right_approach"]["joint_angles_deg"]
-            home_left_lst = poses_left["home"]["joint_angles_deg"]
-            home_right_lst = poses_right["home"]["joint_angles_deg"]
-        except (FileNotFoundError, KeyError) as e:
-            cprint(f"D=================== Missing pose: {e} ===================", "red")
-            cprint("D=================== Record via tools/pose_record.py first ===================", "red")
+            from tools.play_dual_handover import play
+
+            ok = play(
+                "dual_handover_timed_20260826_v2",
+                speed=0.9,
+                require_confirmation=False,
+                direction="left_to_right",
+            )
+            if ok:
+                cprint(
+                    "D=================== Latest handover done (object now in right gripper at home) ===================",
+                    "green",
+                )
+            return bool(ok)
+        except Exception as exc:
+            cprint(f"D=================== Latest handover failed: {exc} ===================", "red")
             return False
 
-        def to_dict(lst):
-            return {f"J{i+1}": lst[i] for i in range(7)}
-
-        left_preset = to_dict(left_preset_lst)
-        right_preset = to_dict(right_preset_lst)
-        right_approach = to_dict(right_approach_lst)
-        home_left = to_dict(home_left_lst)
-        home_right = to_dict(home_right_lst)
-
-        right_arm = getattr(self, "_right_arm", None)
-        if right_arm is None:
-            right_arm = ArmClient("127.0.0.1", 8011)
-            right_arm.connect()
-        right_gripper = getattr(self, "_right_gripper", None)
-        if right_gripper is None:
-            right_gripper = GripperClient("127.0.0.1", 8001)
-            right_gripper.connect()
-
-        # Step 0: Both arms → preset
-        cprint("D=================== Step 0: Both arms → preset (speed=15) ===================", "cyan")
-        t1 = threading.Thread(target=lambda: self.arm.move_to_named_pose(left_preset, speed=15))
-        t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(right_preset, speed=15))
-        t1.start(); t2.start(); t1.join(); t2.join()
-
-        # Step 1: Right arm with open gripper → approach
-        cprint("D=================== Step 1: Right arm (gripper open) → approach (speed=10) ===================", "cyan")
-        right_gripper.open()
-        time.sleep(0.5)
-        right_arm.move_to_named_pose(right_approach, speed=10)
-
-        # Step 2: Handover — right close → wait → left open
-        cprint("D=================== Step 2: Handover (right close → 1.5s → left open) ===================", "cyan")
-        right_gripper.close()
-        time.sleep(1.5)
-        self.control_hand(cmd_type="open")
-        time.sleep(1.0)
-
-        # Step 3: Right arm carrying object → preset
-        cprint("D=================== Step 3: Right arm (carrying object) → preset (speed=15) ===================", "cyan")
-        right_arm.move_to_named_pose(right_preset, speed=15)
-
-        # Step 4: Both arms → home (skippable for flows that don't need return)
-        if return_home:
-            cprint("D=================== Step 4: Both arms → home (speed=30) ===================", "cyan")
-            t1 = threading.Thread(target=lambda: self.arm.move_to_named_pose(home_left, speed=30))
-            t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(home_right, speed=30))
-            t1.start(); t2.start(); t1.join(); t2.join()
-
-        cprint("D=================== Handover sequence done (object now in right gripper at home) ===================", "green")
-        return True
-
     def _handover_right_to_left(self):
-        """Right→left handover (mirror of `_delegate_to_left_arm`).
-
-        Same 4-step structure and same poses (right arm always approaches,
-        left gripper stays at preset). Only the close/open roles swap:
-        left gripper closes (receiver), right gripper opens (giver).
+        """Right→left handover: same recorded trajectory as left→right,
+        gripper event roles swapped via ``direction`` (left closes to
+        receive, right opens to release).
 
         Used when right arm grasped the object and left arm needs to place it
         (side=right + visual container, or side=right + person).
         """
-        import json
-        import os
-        cprint("H=================== Right→left handover ===================", "cyan")
-        from core.arm import ArmClient
-        from core.gripper import GripperClient
-
+        cprint("H=================== Right→left handover (recorded replay) ===================", "cyan")
         try:
-            poses_left = json.load(open(os.path.join("recorded_poses", "left.json")))
-            poses_right = json.load(open(os.path.join("recorded_poses", "right.json")))
-            left_preset_lst = poses_left["right_to_left_handover_left_preset"]["joint_angles_deg"]
-            right_preset_lst = poses_right["right_to_left_handover_right_preset"]["joint_angles_deg"]
-            right_approach_lst = poses_right["right_to_left_handover_right_approach"]["joint_angles_deg"]
-            home_left_lst = poses_left["home"]["joint_angles_deg"]
-            home_right_lst = poses_right["home"]["joint_angles_deg"]
-        except (FileNotFoundError, KeyError) as e:
-            cprint(f"H=================== Missing pose: {e} ===================", "red")
+            from tools.play_dual_handover import play
+
+            ok = play(
+                "dual_handover_timed_20260826_v2",
+                speed=0.9,
+                require_confirmation=False,
+                direction="right_to_left",
+            )
+            if ok:
+                cprint(
+                    "H=================== Handover done (object now in left gripper at home) ===================",
+                    "green",
+                )
+            return bool(ok)
+        except Exception as exc:
+            cprint(f"H=================== Right→left handover failed: {exc} ===================", "red")
             return False
-
-        def to_dict(lst):
-            return {f"J{i+1}": lst[i] for i in range(7)}
-
-        left_preset = to_dict(left_preset_lst)
-        right_preset = to_dict(right_preset_lst)
-        right_approach = to_dict(right_approach_lst)
-        home_left = to_dict(home_left_lst)
-        home_right = to_dict(home_right_lst)
-
-        right_arm = getattr(self, "_right_arm", None)
-        if right_arm is None:
-            right_arm = ArmClient("127.0.0.1", 8011)
-            right_arm.connect()
-        right_gripper = getattr(self, "_right_gripper", None)
-        if right_gripper is None:
-            right_gripper = GripperClient("127.0.0.1", 8001)
-            right_gripper.connect()
-
-        # Step 0: Both arms → preset
-        cprint("H=================== Step 0: Both arms → preset (speed=15) ===================", "cyan")
-        t1 = threading.Thread(target=lambda: self.arm.move_to_named_pose(left_preset, speed=15))
-        t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(right_preset, speed=15))
-        t1.start(); t2.start(); t1.join(); t2.join()
-
-        # Step 1: Right arm (carrying object) → approach
-        cprint("H=================== Step 1: Right arm (carrying object) → approach (speed=10) ===================", "cyan")
-        right_arm.move_to_named_pose(right_approach, speed=10)
-
-        # Step 2: Handover — left gripper close → wait → right gripper open
-        cprint("H=================== Step 2: Handover (left close → 1.5s → right open) ===================", "cyan")
-        self.control_hand(cmd_type="close")
-        time.sleep(1.5)
-        right_gripper.open()
-        time.sleep(1.0)
-
-        # Step 3: Right arm (empty) → preset
-        cprint("H=================== Step 3: Right arm (empty) → preset (speed=15) ===================", "cyan")
-        right_arm.move_to_named_pose(right_preset, speed=15)
-
-        # Step 4: Both arms → home
-        cprint("H=================== Step 4: Both arms → home (speed=30) ===================", "cyan")
-        t1 = threading.Thread(target=lambda: self.arm.move_to_named_pose(home_left, speed=30))
-        t2 = threading.Thread(target=lambda: right_arm.move_to_named_pose(home_right, speed=30))
-        t1.start(); t2.start(); t1.join(); t2.join()
-
-        cprint("H=================== Right→left handover done (object now in left gripper at home) ===================", "green")
-        return True
 
     # ------------------------------------------------------------------
     def _ready_grasp_hand(self) -> None:
@@ -294,115 +189,16 @@ class PickAndPlaceSkill(Skill):
 
     # ------------------------------------------------------------------
     def _visual_grasp_phase(self, obj, side="left", location="desk_front"):
-        """Visual grasp. Left arm: cycle observation poses. Right arm: single location."""
-        if side == "right":
-            return self._visual_grasp_right(obj, location)
-        # Left arm: cycle through observation poses
-        self.control_arm(pose_type="grasp1", speed=30)
-        self._ready_grasp_hand()
-
-        check = False
-        for key, value in self.config.default_traj_js.items():
-            if "grasp" not in key:
-                continue
-            self.control_arm(pose_type=key, speed=30)
-            self.rgb, self.depth = self.get_camera_obs()
-            cprint(f"G=================== 3. Save current rgb and depth observations: {self.save_path} ===================", "cyan")
-
-            anygrasp_pose = self.perception.detect_grasps(self.rgb, self.depth)
-            cprint(f"G=================== 4. Generate the grasping pose and save it in file: {self.save_path}/result.json ===================", "cyan")
-            self.save_current_transformation()
-            if not anygrasp_pose:
-                continue
-
-            filtering_grasping_pose = self._filtering_pose(anygrasp_pose, class_name=obj, image=self.rgb)
-            if not filtering_grasping_pose:
-                continue
-
-            grasping_pose_world = self._transform_anygrasp_pose(filtering_grasping_pose, _visualization=False)
-            if not len(grasping_pose_world):
-                continue
-
-            for i in range(len(grasping_pose_world)):
-                cprint(f"=================== Checking pose: {i+1} / {len(grasping_pose_world)} ===================", "yellow")
-                check = self._execute_grasping_twin_js_2(grasping_pose_world[i], idx=key)
-                if check:
-                    break
-
-            if check:
-                break
-
-        if not check:
-            cprint("G=================== Grasping task failed ===================", "red")
-        return check
+        """Unified visual grasp for both arms."""
+        return self.visual_grasp(obj, side=side, location=location)
 
     def _visual_grasp_right(self, obj, location="desk_front"):
-        """Right arm visual grasp: single observation pose, no cycling."""
-        from core.arm import ArmClient
-        from core.gripper import GripperClient
-
-        right_cfg = self.config.get_arm_config("right")
-        obs_pose = right_cfg["default_traj_js"].get(location)
-        if obs_pose is None:
-            cprint(f"G=================== Right arm pose '{location}' not found ===================", "red")
-            return False
-
-        self._right_arm = ArmClient("127.0.0.1", 8011)
-        self._right_arm.connect()
-        self._right_gripper = GripperClient("127.0.0.1", 8001)
-        self._right_gripper.connect()
-
-        # Move to observation pose
-        self._right_arm.move_to_named_pose(obs_pose, speed=20)
-        self._right_gripper.open()
-
-        # Capture from right camera
-        cam = self.get_camera("right")
-        rgb, depth = cam.get_rgbd()
-        cprint(f"G=================== [right:{location}] Captured RGB-D ===================", "cyan")
-
-        # Save right arm TF transforms
-        self._save_right_arm_transforms()
-
-        # Detect grasps
-        anygrasp_pose = self.perception.detect_grasps(rgb, depth)
-        if not anygrasp_pose:
-            cprint("G=================== No grasp candidates ===================", "red")
-            return False
-
-        filtering = self._filtering_pose(anygrasp_pose, class_name=obj, image=rgb)
-        if not filtering:
-            cprint(f"G=================== No filtered grasps for '{obj}' ===================", "red")
-            return False
-
-        grasping_poses = self._transform_anygrasp_pose(filtering, _visualization=False, side="right")
-        if not len(grasping_poses):
-            cprint("G=================== No transformed poses ===================", "red")
-            return False
-
-        # Try each grasp pose
-        check = False
-        for i, gp in enumerate(grasping_poses):
-            cprint(f"=================== Checking pose: {i+1} / {len(grasping_poses)} ===================", "yellow")
-            check = self._execute_grasping_twin_js_2(gp, side="right", obs_pose=obs_pose)
-            if check:
-                break
-
-        if not check:
-            cprint("G=================== Right arm grasping task failed ===================", "red")
-        return check
+        """Compatibility wrapper retained for callers of the old right path."""
+        return self.visual_grasp(obj, side="right", location=location)
 
     def _save_right_arm_transforms(self):
-        """Cache TF transforms for right arm."""
-        right_cfg = self.config.get_arm_config("right")
-        self.T_base_to_cam, _, _ = (
-            self.transforms.get_transform_from_frame_to_frame(
-                right_cfg["base_link_name"], "R_cam_link_grasp")
-        )
-        self.T_hand_effector_to_arm_endlink, _, _ = (
-            self.transforms.get_transform_from_frame_to_frame(
-                right_cfg["hand_effector_name"], right_cfg["arm_end_link_name"])
-        )
+        """Compatibility wrapper for the side-aware TF cache."""
+        self.save_current_transformation("right")
 
     def _receive_from_user(self, side="left"):
         """Receive object from user at handover pose."""
@@ -572,14 +368,8 @@ class PickAndPlaceSkill(Skill):
             cprint("T=================== throw_to_trash_pose not found for right arm ===================", "red")
             return False
 
-        right_arm = getattr(self, "_right_arm", None)
-        if right_arm is None:
-            right_arm = ArmClient("127.0.0.1", 8011)
-            right_arm.connect()
-        right_gripper = getattr(self, "_right_gripper", None)
-        if right_gripper is None:
-            right_gripper = GripperClient("127.0.0.1", 8001)
-            right_gripper.connect()
+        right_arm = self.arm_for("right")
+        right_gripper = self.gripper_for("right")
 
         cprint("T=================== Right arm: home → throw_to_trash_pose (release) → home ===================", "cyan")
         right_arm.move_to_named_pose(throw_pose, speed=15)
@@ -601,16 +391,8 @@ class PickAndPlaceSkill(Skill):
             return False
 
         # Reuse right arm client from grasp phase, or create new one
-        right_arm = getattr(self, "_right_arm", None)
-        if right_arm is None:
-            from core.arm import ArmClient
-            right_arm = ArmClient("127.0.0.1", 8011)
-            right_arm.connect()
-        right_gripper = getattr(self, "_right_gripper", None)
-        if right_gripper is None:
-            from core.gripper import GripperClient
-            right_gripper = GripperClient("127.0.0.1", 8001)
-            right_gripper.connect()
+        right_arm = self.arm_for("right")
+        right_gripper = self.gripper_for("right")
 
         right_arm.move_to_named_pose(throw_pose, speed=15)
         right_gripper.open()
@@ -728,7 +510,6 @@ class PickAndPlaceSkill(Skill):
         basic_mat = np.eye(4)
         execution_grasping_pos = grasping_pose_world_hand @ basic_mat
         print("=-============================", execution_grasping_pos[2, 3])
-        execution_grasping_pos[2, 3] = max(execution_grasping_pos[2, 3], 0.042)
         execution_grasping_pos = execution_grasping_pos @ self.T_hand_effector_to_arm_endlink
         execution_grasping_pos_position = execution_grasping_pos[:3, 3]
         execution_grasping_pos_orientation = R.from_matrix(execution_grasping_pos[:3, :3]).as_quat()
@@ -809,8 +590,29 @@ class PickAndPlaceSkill(Skill):
 
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
-                center_cam_point = pixel_to_camera_point2(np.array([center_x, center_y]).reshape(-1, 2), mean_depth_m)
+                center_cam_point = pixel_to_camera_point2(
+                    np.array([center_x, center_y]).reshape(-1, 2),
+                    mean_depth_m,
+                    cam_type="left",
+                    intrinsics=self.config.get_camera_intrinsics("left"),
+                )
                 center_cam_point = center_cam_point.flatten()
+                self._placement_rotation = None
+                best_grasp = self._select_best_container_grasp(
+                    self.rgb, self.depth, (x1, y1, x2, y2), side="left"
+                )
+                if best_grasp is None:
+                    cprint(
+                        f"[place] AnyGrasp returned no grasp point inside {class_name}",
+                        "yellow",
+                    )
+                    return []
+                self._placement_rotation = best_grasp["rotation"]
+                cprint(
+                    f"[place] using highest-score AnyGrasp pose for {class_name}: "
+                    f"index={best_grasp['index']} score={best_grasp['score']:.4f}",
+                    "cyan",
+                )
                 placing_pos_world = self._transform_pose_to_world(center_cam_point)
                 return placing_pos_world
         except Exception:
@@ -824,6 +626,8 @@ class PickAndPlaceSkill(Skill):
         T_cam_point[:3, 3] = placing_translation
         T_world_point = self.T_base_to_cam @ T_cam_point
         T_world_pose = T_world_point.copy()
+        if getattr(self, "_placement_rotation", None) is not None:
+            T_world_pose[:3, :3] = self._placement_rotation
         return T_world_pose
 
     def _execute_placement(self, placement_pos_world, initial_js_key="grasp1"):

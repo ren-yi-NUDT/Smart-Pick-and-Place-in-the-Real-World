@@ -62,6 +62,40 @@ echo '{"object":"orange","container":"drawer1"}' | python run_skill.py grasp_to_
 
 ## 拍照与观测
 
+### 水果/蔬菜分拣
+
+默认任务配置已经是水果/蔬菜分拣：水果放入粉色盘子，蔬菜放入蓝色盘子。
+建议先只规划，检查日志中的场景识别、目标盘子和轨迹；确认无误后再执行。
+执行时先由双相机 VLM 建立物体分类和左右臂任务队列；之后每个任务调用对应机械臂的单臂视觉抓取，由该臂自己的相机重新生成抓取位姿。采用 home 同步流水线：第一只臂完成单臂视觉抓取并回 home，第二只臂才开始抓取；第二只臂回 home 后，第一只臂放置，再放置第二只臂。
+全部动作成功后，双臂再次回到 home，并确认左右夹爪完全打开。
+
+```bash
+# 真机：只拍照、识别并规划，不抓取
+python -m tools.dual_vlm_sorting --plan-only
+
+# 真机：确认工作区安全且 plan.json 正确后执行
+DUAL_SORT_REAL_CONFIRM=1 python -m tools.dual_vlm_sorting --execute --real-confirm
+
+# 仿真：先规划，再执行
+SIM_MODE=1 python -m tools.dual_vlm_sorting --sim --plan-only --yes
+SIM_MODE=1 python -m tools.dual_vlm_sorting --sim --execute --yes
+```
+
+### 双臂 Charuco 多点标定
+
+标定脚本需要 `cv2.aruco`，请使用 `anygrasp` 环境。先打印并实测 24 mm 方格的 Charuco 板，保持两臂相机固定，在至少 8 个不同位置采集；保存前脚本会校验矩阵并备份旧的 `robot_config.json`。
+
+```bash
+# 生成/更新打印板
+/home/zz/anaconda3/envs/anygrasp/bin/python tools/calibrate_arms.py generate-charuco
+
+# 交互式采集（双臂固定，标定板每次换位置且同时可见）
+/home/zz/anaconda3/envs/anygrasp/bin/python tools/calibrate_arms.py calibrate
+
+# 使用未参与拟合的新位置做至少 3 点验证
+/home/zz/anaconda3/envs/anygrasp/bin/python tools/calibrate_arms.py verify
+```
+
 ### look_around — 环视桌面 + VLM 分析
 
 ```bash
@@ -101,6 +135,10 @@ echo '{"command":"play","parallel":[{"arm":"left","name":"wave"},{"arm":"right",
 
 # 播放灵巧手手势（预设：open/close/peace/grab/thumbs_up 等）
 echo '{"command":"play","hand":"peace"}' | python run_skill.py pose_execute
+
+# 控制左/右 Robotiq 夹爪（未指定 arm 时默认为 left）
+echo '{"command":"play","hand":"open","arm":"left"}' | python run_skill.py pose_execute
+echo '{"command":"play","hand":"open","arm":"right"}' | python run_skill.py pose_execute
 ```
 
 #### 抽屉操作（右臂轨迹回放）
@@ -131,9 +169,13 @@ echo '{"object":"orange"}' | python run_skill.py grasp
 ### place — 视觉放置
 
 ```bash
-# 检测容器位置 + 生成放置轨迹
+# VLM框/容器内部安全区域/多SE(3)候选/Twin筛选/近距离视觉修正/释放后验证
 echo '{"object":"orange","container":"green bowl"}' | python run_skill.py place
+# 可选：指定右臂和橘子保守尺寸（米）
+echo '{"object":"orange","container":"pink bowl","side":"right","object_size_m":0.06}' | python run_skill.py place
 ```
+
+`object` 用于释放后的“物体是否进入容器”验证；省略时仍会检查夹爪是否打开和容器是否可见，但属于兼容模式，不能做物体语义确认。
 
 ### handover — 递交给用户
 

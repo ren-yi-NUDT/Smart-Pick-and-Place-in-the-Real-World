@@ -68,7 +68,13 @@ class ErdaijiRobot:
         self.base_ori = p.getQuaternionFromEuler(ori)
         self.robot_path =robot_path
         self.config_path = config_path
-        self.robot_config = load_json_file(self.config_path)
+        # The canonical robot_config.json now embeds all simulator/URDF
+        # model descriptions.  Accept a selected model dictionary as well
+        # as a legacy file path so callers do not need duplicate JSON files.
+        if isinstance(config_path, dict):
+            self.robot_config = config_path
+        else:
+            self.robot_config = load_json_file(self.config_path)
         # self.camera_config = load_json_file(self.config_path.replace('robot_config', 'camera_config'))
         self.fixed_robot = fixed_robot
         self.blocking_mode = blocking_mode
@@ -230,7 +236,9 @@ class ErdaijiRobot:
             arm_joint_ids.update(self.robot_structs[struct_name].controllable_joint_ids)
         for jid in self.controllable_joints:
             if jid not in arm_joint_ids:
-                p.setJointMotorControl2(self.id, jid, p.POSITION_CONTROL, targetPosition=0.0, force=50.0)
+                p.setJointMotorControl2(self.id, jid, p.POSITION_CONTROL,
+                                        targetPosition=0.0, force=200.0,
+                                        maxVelocity=1.0)
         rospy.loginfo(f"HELD {len(self.controllable_joints) - len(arm_joint_ids)} NON-ARM JOINTS AT POSITION 0")
 
         # construct collision pairs
@@ -1042,7 +1050,6 @@ TYPE_MAPPER = {
     "gripper":Gripper,
     "head":Head
 }
-
 
 
 

@@ -27,7 +27,7 @@ class GripperClient:
     """TCP client for the parallel gripper. Falls back to mock mode if connection fails."""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8001,
-                 src: str = SERVICE_SRC):
+                 src: str = SERVICE_SRC, allow_mock: bool = True):
         """
         Args:
             host: TCP host of the gripper server.
@@ -40,6 +40,7 @@ class GripperClient:
         self.host = host
         self.port = port
         self._src = src
+        self.allow_mock = bool(allow_mock)
         self.sock = None
         self._mock = False
         self._cmds = {
@@ -53,10 +54,20 @@ class GripperClient:
     def connect(self) -> bool:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(20.0)
             self.sock.connect((self.host, self.port))
             cprint(f"[GripperClient] Connected to {self.host}:{self.port}", "green")
             return True
         except Exception as e:
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
+            self.sock = None
+            if not self.allow_mock:
+                cprint(f"[GripperClient] Connection failed: {e}", "red")
+                return False
             cprint(f"[GripperClient] Connection failed: {e}, using mock mode", "yellow")
             self._mock = True
             return True
@@ -104,7 +115,7 @@ class GripperClient:
         cmd = {"src": self._src, "type": "get"}
         return self._send_cmd(cmd)
 
-    def is_grasping(self) -> bool:
+    def is_grasping(self, force: int = 20) -> bool:
         """Detect whether the gripper is holding an object.
 
         Uses the gripper's built-in object-detection flag (gOBJ==2) via the
@@ -117,7 +128,7 @@ class GripperClient:
         if self._mock:
             return True
         time.sleep(0.3)
-        resp = self.close(force=20, soft=True)
+        resp = self.close(force=force, soft=True)
         if "object_detected" in resp:
             return bool(resp.get("object_detected"))
         # Fallback for older servers without object_detected: a grasp is

@@ -116,19 +116,7 @@ class GraspToDrawer(PickAndPlaceSkill):
     # Right-arm client caching (avoid re-connecting across phases)
     # ------------------------------------------------------------------
     def _ensure_right_arm(self):
-        right_arm = getattr(self, "_right_arm", None)
-        if right_arm is None:
-            from core.arm import ArmClient
-            right_arm = ArmClient("127.0.0.1", 8011)
-            right_arm.connect()
-            self._right_arm = right_arm
-        return right_arm
+        return self.arm_for("right")
 
     def _ensure_right_gripper(self):
-        right_gripper = getattr(self, "_right_gripper", None)
-        if right_gripper is None:
-            from core.gripper import GripperClient
-            right_gripper = GripperClient("127.0.0.1", 8001)
-            right_gripper.connect()
-            self._right_gripper = right_gripper
-        return right_gripper
+        return self.gripper_for("right")

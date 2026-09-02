@@ -41,6 +41,8 @@
 import os
 import sys
 import json
+import math
+import socket
 import time
 import argparse
 import threading
@@ -74,6 +76,30 @@ ARM_CONFIGS = {
     "right": {"ip": "192.168.1.18", "label": "右臂（夹爪）"},
 }
 ARM_PORT = 8080
+GRIPPER_PORTS = {"left": 8002, "right": 8001}
+GRIPPER_SRCS = {
+    "left": "/left_gripper/movement_control",
+    "right": "/right_gripper/movement_control",
+}
+GRIPPER_COMMANDS = {"open": [1000, 1000], "close": [0, 0]}
+
+# RealMan controller arm-error codes surfaced by rm_get_current_arm_state().
+# Keep this informational only: a non-zero code must still block motion.
+ARM_ERROR_DESCRIPTIONS = {
+    14: "机械臂碰撞",
+    19: "自碰撞",
+    20: "电子围栏碰撞",
+    21: "关节超出软限位",
+}
+
+# Replay safety parameters. The JSON trajectory is the only replay source;
+# controller-side native trajectories may belong to an earlier recording.
+START_MOVE_SPEED = 20
+START_POSITION_TOLERANCE_DEG = 1.0
+FINAL_POSITION_TOLERANCE_DEG = 1.5
+STATE_POLL_INTERVAL_S = 0.05
+HEALTH_CHECK_INTERVAL_S = 0.2
+START_SETTLE_TIME_S = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -401,17 +427,6 @@ def traj_record(name, description="", arm_side="left", rate_hz=50):
             cprint("[traj] 未录制到任何数据点", "red")
             return False
 
-        # 保存 SDK 备份
-        sdk_backup_path = os.path.join(
-            TRAJ_DIRS[arm_side], f"{name}_sdk_backup.txt"
-        )
-        os.makedirs(TRAJ_DIRS[arm_side], exist_ok=True)
-        save_tag, num_points = arm.rm_save_trajectory(sdk_backup_path)
-        if save_tag == 0:
-            cprint(f"[traj] SDK 备份已保存 ({num_points} 点): {sdk_backup_path}", "green")
-        else:
-            cprint(f"[traj] SDK 备份保存失败 (返回码: {save_tag})，主数据不受影响", "yellow")
-
         # 构建轨迹数据
         traj_data = {
             "name": name,
@@ -478,14 +493,185 @@ def _move_to_start(arm, start_joints, timeout_s=30):
     Returns:
         bool: 是否成功到达
     """
-    cprint("[traj] 正在运动到轨迹起点...", "cyan")
-    tag = arm.rm_movej(
-        joint=start_joints, v=20, r=0, connect=0, block=1
-    )
-    if tag != 0:
-        cprint(f"[traj] 运动到起点失败，返回码: {tag}", "red")
+    if len(start_joints) != 7 or not all(
+        isinstance(j, (int, float)) and math.isfinite(float(j))
+        for j in start_joints
+    ):
+        cprint("[traj] 起点关节数据无效，拒绝运动", "red")
         return False
-    return True
+
+    def read_joints():
+        try:
+            tag, joints = arm.rm_get_joint_degree()
+            if tag != 0 or len(joints) != 7:
+                return None
+            if not all(math.isfinite(float(j)) for j in joints):
+                return None
+            return [float(j) for j in joints]
+        except Exception:
+            return None
+
+    def at_target(joints, tolerance):
+        return joints is not None and all(
+            abs(current - target) <= tolerance
+            for current, target in zip(joints, start_joints)
+        )
+
+    current = read_joints()
+    if current is None:
+        cprint("[traj] 无法读取当前关节状态，拒绝运动到起点", "red")
+        return False
+    healthy, reason = _check_arm_health(arm)
+    if not healthy:
+        cprint(f"[traj] 起点运动前安全状态检查失败: {reason}", "red")
+        return False
+    if at_target(current, START_POSITION_TOLERANCE_DEG):
+        cprint("[traj] 当前已在轨迹起点附近", "green")
+        return True
+
+    cprint("[traj] 正在运动到轨迹起点（非阻塞，随后轮询确认）...", "cyan")
+    try:
+        # Some RM controllers return 1 from the multi-threaded block=1 path
+        # after printing `receive_state: false`. Send non-blocking and verify
+        # arrival from joint feedback instead of trusting that wait path.
+        tag = arm.rm_movej(
+            joint=list(start_joints), v=START_MOVE_SPEED,
+            r=0, connect=0, block=0
+        )
+    except Exception as exc:
+        cprint(f"[traj] 发送起点运动失败: {type(exc).__name__}: {exc}", "red")
+        return False
+
+    if tag != 0:
+        # On this controller/SDK combination rm_movej may return 1 with
+        # `receive_state: false` and leave the arm stationary.  Do not send
+        # the first recorded waypoint as a jump.  Halt any possible pending
+        # command, refresh feedback, and approach the start with small
+        # CAN-FD joint increments instead.
+        cprint(
+            f"[traj] rm_movej 起点运动返回 {tag}，切换为小步长 CAN-FD 到起点",
+            "yellow",
+        )
+        _safe_slow_stop(arm)
+        time.sleep(0.1)
+        current = read_joints()
+        if current is None:
+            cprint("[traj] 无法刷新当前位置，拒绝起点插值", "red")
+            return False
+
+        max_delta = max(abs(current[i] - start_joints[i]) for i in range(7))
+        if max_delta <= START_POSITION_TOLERANCE_DEG:
+            return True
+        duration_s = max(3.0, min(15.0, max_delta / 10.0))
+        step_s = 0.05
+        steps = max(2, int(math.ceil(duration_s / step_s)))
+        cprint(
+            f"[traj] 起点插值: {max_delta:.1f}° 最大关节差，"
+            f"{steps} 步、约 {steps * step_s:.1f}s",
+            "cyan",
+        )
+        motion_started = False
+        for step in range(1, steps + 1):
+            healthy, reason = _check_arm_health(arm)
+            if not healthy:
+                cprint(f"[traj] 起点插值安全状态检查失败: {reason}", "red")
+                _safe_slow_stop(arm)
+                return False
+            ratio = step / steps
+            waypoint = [
+                current[i] + (start_joints[i] - current[i]) * ratio
+                for i in range(7)
+            ]
+            tag = arm.rm_movej_canfd(joint=waypoint, follow=False, expand=0)
+            motion_started = True
+            if tag != 0:
+                cprint(f"[traj] 起点插值 CAN-FD 失败，返回码: {tag}", "red")
+                _safe_slow_stop(arm)
+                return False
+            time.sleep(step_s)
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            healthy, reason = _check_arm_health(arm)
+            if not healthy:
+                cprint(f"[traj] 起点插值后安全状态检查失败: {reason}", "red")
+                _safe_slow_stop(arm)
+                return False
+            if at_target(read_joints(), START_POSITION_TOLERANCE_DEG):
+                cprint("[traj] 已通过 CAN-FD 插值到达轨迹起点", "green")
+                return True
+            time.sleep(STATE_POLL_INTERVAL_S)
+        cprint("[traj] CAN-FD 插值到达起点超时，执行缓停", "red")
+        _safe_slow_stop(arm)
+        return False
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        healthy, reason = _check_arm_health(arm)
+        if not healthy:
+            cprint(f"[traj] 到起点过程中安全状态检查失败: {reason}", "red")
+            _safe_slow_stop(arm)
+            return False
+        current = read_joints()
+        if at_target(current, START_POSITION_TOLERANCE_DEG):
+            cprint("[traj] 已到达轨迹起点", "green")
+            return True
+        time.sleep(STATE_POLL_INTERVAL_S)
+
+    cprint("[traj] 到达轨迹起点超时，执行缓停", "red")
+    _safe_slow_stop(arm)
+    return False
+
+
+def _validate_waypoints(waypoints):
+    """Validate and normalize [elapsed_ms, J1..J7] trajectory points."""
+    if not isinstance(waypoints, list) or len(waypoints) < 2:
+        raise ValueError("轨迹至少需要 2 个采样点")
+
+    normalized = []
+    previous_t = None
+    for index, waypoint in enumerate(waypoints):
+        if not isinstance(waypoint, list) or len(waypoint) < 8:
+            raise ValueError(f"第 {index + 1} 个轨迹点不是 [时间 + 7轴] 格式")
+        timestamp = float(waypoint[0])
+        joints = [float(value) for value in waypoint[1:8]]
+        if not math.isfinite(timestamp) or not all(math.isfinite(j) for j in joints):
+            raise ValueError(f"第 {index + 1} 个轨迹点包含非有限数值")
+        if previous_t is not None and timestamp <= previous_t:
+            raise ValueError(f"轨迹时间戳必须严格递增（第 {index + 1} 点）")
+        previous_t = timestamp
+        normalized.append((timestamp, joints))
+    return normalized
+
+
+def _safe_slow_stop(arm):
+    """Best-effort slow stop for an already-started motion."""
+    try:
+        tag = arm.rm_set_arm_slow_stop()
+        if tag != 0:
+            cprint(f"[traj] 缓停返回码: {tag}", "yellow")
+    except Exception as exc:
+        cprint(f"[traj] 缓停异常: {type(exc).__name__}: {exc}", "red")
+
+
+def _check_arm_health(arm):
+    """Return (healthy, reason); unknown state is treated as unhealthy."""
+    try:
+        tag, state = arm.rm_get_current_arm_state()
+        if tag != 0 or not isinstance(state, dict):
+            return False, f"读取机械臂状态失败(tag={tag})"
+        arm_err = state.get("arm_err", 0)
+        sys_err = state.get("sys_err", 0)
+        if arm_err or sys_err:
+            arm_err_value = int(arm_err) if isinstance(arm_err, (int, float)) else arm_err
+            description = ARM_ERROR_DESCRIPTIONS.get(arm_err_value, "未知机械臂错误")
+            return False, (
+                f"机械臂错误 arm_err={arm_err}, sys_err={sys_err}"
+                f"（{description}；请在示教器清除错误并确认机械臂离开安全围栏边界）"
+            )
+        return True, ""
+    except Exception as exc:
+        return False, f"读取机械臂状态异常: {type(exc).__name__}: {exc}"
 
 
 def _playback_canfd(arm, waypoints, speed_multiplier=1.0):
@@ -500,54 +686,158 @@ def _playback_canfd(arm, waypoints, speed_multiplier=1.0):
     Returns:
         bool: 是否回放完成
     """
-    if len(waypoints) < 2:
-        cprint("[traj] 轨迹点不足，无法回放", "red")
+    try:
+        normalized = _validate_waypoints(waypoints)
+    except (TypeError, ValueError) as exc:
+        cprint(f"[traj] 轨迹校验失败: {exc}", "red")
         return False
 
-    # 计算平均采样间隔
-    total_dt_ms = waypoints[-1][0] - waypoints[0][0]
-    num_intervals = len(waypoints) - 1
-    base_interval_s = (total_dt_ms / num_intervals) / 1000.0
 
-    # 应用速度倍率
-    adjusted_interval_s = base_interval_s / speed_multiplier
-    adjusted_interval_s = max(0.005, adjusted_interval_s)
+    if not isinstance(speed_multiplier, (int, float)) or not math.isfinite(float(speed_multiplier)):
+        cprint("[traj] 速度倍率无效", "red")
+        return False
+    speed_multiplier = float(speed_multiplier)
+    if speed_multiplier <= 0:
+        cprint("[traj] 速度倍率必须大于 0", "red")
+        return False
 
-    effective_rate = 1.0 / adjusted_interval_s
+    intervals_s = [
+        (normalized[i][0] - normalized[i - 1][0]) / 1000.0 / speed_multiplier
+        for i in range(1, len(normalized))
+    ]
+    if any(interval <= 0 for interval in intervals_s):
+        cprint("[traj] 轨迹时间间隔无效", "red")
+        return False
+
+    effective_interval_s = sum(intervals_s) / len(intervals_s)
+    effective_rate = 1.0 / effective_interval_s
     cprint(
         f"[traj] 回放参数: {speed_multiplier}x 速度, "
-        f"间隔 {adjusted_interval_s * 1000:.1f}ms, "
+        f"平均间隔 {effective_interval_s * 1000:.1f}ms, "
         f"有效频率 {effective_rate:.0f}Hz",
         "cyan",
     )
 
-    # follow=True 要求 ≤10ms 周期，录制频率 ≤100Hz 时间隔 ≥10ms
-    # 使用 follow=False（低跟随模式）以容忍更宽的间隔
-    use_follow = adjusted_interval_s <= 0.01
+    # follow=True 要求不超过 10ms 周期；更慢的轨迹使用普通模式。
+    use_follow = effective_interval_s <= 0.01
+    health_check_every = max(1, round(HEALTH_CHECK_INTERVAL_S / effective_interval_s))
+    motion_started = False
+    playback_started = time.monotonic()
 
     try:
-        for i, wp in enumerate(waypoints):
-            joint = wp[1:]  # 去掉 elapsed_ms
-            tag = arm.rm_movej_canfd(joint=joint, follow=use_follow, expand=0)
-            if tag != 0 and tag != 1:
-                cprint(f"[traj] CAN-FD 发送失败 at 点 {i + 1}/{len(waypoints)}: tag={tag}", "red")
+        elapsed_schedule = [0.0]
+        for interval_s in intervals_s:
+            elapsed_schedule.append(elapsed_schedule[-1] + interval_s)
 
-            # 进度显示
-            if (i + 1) % max(1, len(waypoints) // 10) == 0:
+        for i, (_, joint) in enumerate(normalized):
+            remaining = elapsed_schedule[i] - (time.monotonic() - playback_started)
+            if remaining > 0:
+                time.sleep(remaining)
+
+            tag = arm.rm_movej_canfd(joint=joint, follow=use_follow, expand=0)
+            motion_started = True
+            if tag != 0:
+                cprint(f"[traj] CAN-FD 发送失败 at 点 {i + 1}/{len(normalized)}: tag={tag}", "red")
+                _safe_slow_stop(arm)
+                return False
+
+            if i % health_check_every == 0:
+                healthy, reason = _check_arm_health(arm)
+                if not healthy:
+                    cprint(f"[traj] 安全状态检查失败: {reason}", "red")
+                    _safe_slow_stop(arm)
+                    return False
+
+            if (i + 1) % max(1, len(normalized) // 10) == 0:
                 cprint(
-                    f"[traj] 进度: {i + 1}/{len(waypoints)} "
-                    f"({(i + 1) * 100 // len(waypoints)}%)",
+                    f"[traj] 进度: {i + 1}/{len(normalized)} "
+                    f"({(i + 1) * 100 // len(normalized)}%)",
                     "yellow",
                 )
 
-            time.sleep(adjusted_interval_s)
+        final_joints = normalized[-1][1]
+        deadline = time.monotonic() + max(3.0, min(10.0, effective_interval_s * 20))
+        while time.monotonic() < deadline:
+            tag, current = arm.rm_get_joint_degree()
+            if tag == 0 and len(current) == 7 and all(
+                abs(float(current[j]) - final_joints[j]) <= FINAL_POSITION_TOLERANCE_DEG
+                for j in range(7)
+            ):
+                cprint("[traj] 轨迹终点已确认", "green")
+                return True
+            time.sleep(STATE_POLL_INTERVAL_S)
 
-        cprint("[traj] 回放完成!", "green")
-        return True
+        cprint("[traj] 轨迹指令已发完，但终点未确认，执行缓停", "red")
+        _safe_slow_stop(arm)
+        return False
 
     except KeyboardInterrupt:
-        cprint(f"\n[traj] 用户中断回放 at 点 {i + 1}/{len(waypoints)}", "yellow")
+        cprint(f"\n[traj] 用户中断回放 at 点 {i + 1}/{len(normalized)}", "yellow")
+        if motion_started:
+            _safe_slow_stop(arm)
         return False
+    except Exception as exc:
+        cprint(f"[traj] 回放异常: {type(exc).__name__}: {exc}", "red")
+        if motion_started:
+            _safe_slow_stop(arm)
+        return False
+
+
+def _execute_post_actions(traj_data):
+    """Execute explicit actions that follow a successfully finished arm path."""
+    actions = traj_data.get("post_actions", [])
+    if not actions:
+        return True
+    if not isinstance(actions, list):
+        cprint("[traj] post_actions 格式无效，拒绝执行", "red")
+        return False
+
+    for action in actions:
+        if not isinstance(action, dict):
+            cprint("[traj] post_action 项格式无效，拒绝执行", "red")
+            return False
+        if action.get("type") != "gripper":
+            cprint(f"[traj] 不支持的 post_action 类型: {action.get('type')}", "red")
+            return False
+        side = action.get("side")
+        command = action.get("action")
+        if side not in GRIPPER_PORTS or command not in GRIPPER_COMMANDS:
+            cprint(f"[traj] 无效的夹爪后置动作: {action}", "red")
+            return False
+
+        request = {
+            "src": GRIPPER_SRCS[side],
+            "type": "set",
+            "cmd": GRIPPER_COMMANDS[command],
+        }
+        try:
+            with socket.create_connection(
+                ("127.0.0.1", GRIPPER_PORTS[side]), timeout=3.0
+            ) as sock:
+                sock.sendall(json.dumps(request).encode("utf-8"))
+                response = json.loads(sock.recv(1024).decode("utf-8"))
+            if response.get("value") is False:
+                cprint(f"[traj] 夹爪后置动作失败: {response}", "red")
+                return False
+            cprint(f"[traj] post-action: {side} gripper -> {command}", "green")
+        except Exception as exc:
+            cprint(f"[traj] 夹爪后置动作异常: {exc}", "red")
+            return False
+    return True
+
+
+def _load_home_joints(arm_side):
+    """Load the configured home joint pose for an arm."""
+    config_path = os.path.join(PROJECT_ROOT, "robot_config.json")
+    with open(config_path, "r") as f:
+        config = json.load(f)
+    home = config.get("arms", {}).get(arm_side, {}).get("home")
+    if not isinstance(home, dict):
+        raise ValueError(f"配置中缺少 {arm_side} 臂 home 位姿")
+    joints = [float(home[f"J{i}"]) for i in range(1, 8)]
+    if not all(math.isfinite(joint) for joint in joints):
+        raise ValueError(f"配置中的 {arm_side} 臂 home 位姿包含无效关节值")
+    return joints
 
 
 def traj_play(name, arm_side="left", speed=1.0):
@@ -572,7 +862,16 @@ def traj_play(name, arm_side="left", speed=1.0):
         cprint("[traj] 使用 traj-list 查看可用轨迹", "yellow")
         return False
 
-    waypoints = traj_data["waypoints"]
+    waypoints = traj_data.get("waypoints")
+    try:
+        normalized = _validate_waypoints(waypoints)
+    except (TypeError, ValueError) as exc:
+        cprint(f"[traj] 轨迹校验失败: {exc}", "red")
+        return False
+
+    # 只使用 JSON 采样轨迹。*_sdk_backup.txt 可能来自控制器中残留的
+    # 旧原生轨迹，不能作为本次录制的回放源。
+    start_joints = normalized[0][1]
     label = ARM_CONFIGS[arm_side]["label"]
     cprint(f"\n[traj] 轨迹: {name} ({label})", "cyan")
     cprint(f"  时长: {traj_data['duration_ms'] / 1000:.1f}s", "cyan")
@@ -585,15 +884,60 @@ def traj_play(name, arm_side="left", speed=1.0):
 
     try:
         # 运动到起点
-        if not _move_to_start(arm, traj_data["start_joint_deg"]):
+        if not _move_to_start(arm, start_joints):
+            return False
+        # The RM controller can briefly report a transient arm error when
+        # CAN-FD streaming starts immediately after the positioning move.
+        # Let the confirmed start pose settle before the first waypoint.
+        if START_SETTLE_TIME_S > 0:
+            cprint(
+                f"[traj] 起点已确认，等待 {START_SETTLE_TIME_S:.1f}s 稳定后开始回放",
+                "cyan",
+            )
+            time.sleep(START_SETTLE_TIME_S)
+
+        # 流式回放；只有轨迹终点确认后才执行夹爪等后置动作。
+        if not _playback_canfd(arm, waypoints, speed):
+            return False
+        if not _execute_post_actions(traj_data):
             return False
 
-        # 流式回放
-        return _playback_canfd(arm, waypoints, speed)
+        # A handover trajectory may explicitly bind a delayed return-home
+        # motion after its release action.  Keep the delay after the gripper
+        # command so the recipient has time to take the object.
+        return_home_after_s = traj_data.get("return_home_after_s")
+        if return_home_after_s is None:
+            return True
+        try:
+            return_home_after_s = float(return_home_after_s)
+        except (TypeError, ValueError):
+            cprint("[traj] return_home_after_s 格式无效，拒绝回 home", "red")
+            return False
+        if not math.isfinite(return_home_after_s) or return_home_after_s < 0:
+            cprint("[traj] return_home_after_s 必须是非负有限数值", "red")
+            return False
+        if return_home_after_s:
+            cprint(
+                f"[traj] 夹爪动作完成，等待 {return_home_after_s:.1f}s 后回 home",
+                "cyan",
+            )
+            time.sleep(return_home_after_s)
+        home_joints = _load_home_joints(arm_side)
+        cprint(f"[traj] 开始移动 {label} 到 home", "cyan")
+        if not _move_to_start(arm, home_joints):
+            cprint(f"[traj] {label} 回 home 失败", "red")
+            return False
+        cprint(f"[traj] {label} 已回到 home", "green")
+        return True
 
     except KeyboardInterrupt:
         cprint("\n[traj] 用户中断回放", "yellow")
         return False
+    finally:
+        try:
+            arm.rm_delete_robot_arm()
+        except Exception as exc:
+            cprint(f"[traj] 关闭机械臂连接失败: {type(exc).__name__}: {exc}", "yellow")
 
 
 # ---------------------------------------------------------------------------

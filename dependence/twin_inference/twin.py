@@ -2,6 +2,8 @@
 
 import os, sys
 sys.path.append(os.path.dirname(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+sys.path.append(PROJECT_ROOT)
 import argparse
 import rospy
 import numpy as np
@@ -25,6 +27,7 @@ from utils import save_dict_to_json, slerp, draw_axis, calcul_transformation_mat
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 from pynput import keyboard
+from core.config import Config
 
 SIMULATION_STEP_DELAY = 1 / 240.
 ROUND_NUMBER = 3
@@ -33,7 +36,7 @@ def visualize_pose(pos, orn, d = 1):
     T = calcul_transformation_matrix(pos, orn)
     draw_axis(T, duration=d)
 
-SUPPORTED_TWIN_SRV_TYPE = ["reachability_check", "collision_check", "IK_calculation","trajectory_generation" , "trajectory_generation2"]
+SUPPORTED_TWIN_SRV_TYPE = ["reachability_check", "collision_check", "IK_calculation", "trajectory_generation", "trajectory_generation2", "trajectory_generation3"]
 
 class TwinTest2(World):
     """单进程只加载一条臂的 IK 服务。
@@ -54,12 +57,13 @@ class TwinTest2(World):
             raise ValueError(f"side must be 'left' or 'right', got: {side}")
 
         urdf_base_dir = os.path.join(os.path.dirname(__file__), "../smart_pick_and_place_ws/src/rm_description/urdf")
+        robot_config = Config()
         if side == "left":
             self.urdf_path = os.path.join(urdf_base_dir, "left_arm_bullet.urdf")
-            self.config_path = os.path.join(urdf_base_dir, "robot_config.json")
+            self.config_path = robot_config.get_robot_model("left_gripper")
         else:
             self.urdf_path = os.path.join(urdf_base_dir, "right_arm.urdf")
-            self.config_path = os.path.join(urdf_base_dir, "right_arm_robot_config.json")
+            self.config_path = robot_config.get_robot_model("right_gripper")
 
         # struct_name 由 side 决定，client 传入的 struct 仅用于校验
         self.struct_name = self.STRUCT_NAME[side]
@@ -181,6 +185,12 @@ class TwinTest2(World):
             info["infos"] = infos
         elif srv_type == "trajectory_generation2":
             check, traj, traj_ee, infos = self.linear_traj_generation2(srv_config)
+            info = {}
+            info["trajectory"] = traj
+            info["trajectory_ee"] = traj_ee
+            info["infos"] = infos
+        elif srv_type == "trajectory_generation3":
+            check, traj, traj_ee, infos = self.linear_traj_generation3(srv_config)
             info = {}
             info["trajectory"] = traj
             info["trajectory_ee"] = traj_ee
@@ -360,7 +370,11 @@ class TwinTest2(World):
         target_pose_list = config["target_pose"]
         curr_js = config["current_js"]
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
+        rotation_interval_rad = config.get("rotation_interval_rad", 0.15)
+        joint_step_limit_rad = config.get("joint_step_limit_rad", 0.12)
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
+        xyz_threshold = config.get("xyz_threshold", 0.015)
+        rpy_threshold = config.get("rpy_threshold", 0.05)
         z_min_threshold = config["z_min_threshold"] if "z_min_threshold" in config else 0.02  # 关节最低高度阈值
         if struct_name != self.struct_name:
             rospy.logwarn(f"TWIN INFERENCER '{self.side}' side got mismatched struct: {struct_name}")
@@ -392,8 +406,19 @@ class TwinTest2(World):
             js_fake = self.robot.robot_structs[self.struct_name].get_joint_pose()
 
             # condition check for target IK
+            # Use strict defaults for ordinary grasping, while allowing the
+            # caller to provide an explicit tolerance for a placement target
+            # such as a plate.  Placement is a container task: requiring the
+            # same 10 mm / 0.01 rad precision as object pickup rejects valid
+            # home->plate trajectories near a workspace boundary.
+            check_xyz_threshold = float(
+                config.get("xyz_threshold", 0.08 if config.get("sim_suction", False) else 0.01)
+            )
+            check_rpy_threshold = float(
+                config.get("rpy_threshold", 0.15 if config.get("sim_suction", False) else 0.01)
+            )
             is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[self.struct_name].check_reach(target_pos, target_orn
-                                                                                                , xyz_threshold =0.01, rpy_threshold = 0.01)
+                                                                                                , xyz_threshold =check_xyz_threshold, rpy_threshold = check_rpy_threshold)
             is_collide, collide_id = self.robot.check_collision()
             # 检查关节Z高度是否安全
             is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(z_min_threshold)
@@ -450,7 +475,20 @@ class TwinTest2(World):
             # generate traj from fake pose to target
             target_pos_arr, target_orn_arr = np.array(target_pos), np.array(target_orn)
             delta_xyz = np.linalg.norm(target_pos_arr - fake_pos)
-            loop_num  = max(int(np.floor(delta_xyz/interval_threshold)), 1)
+            # Position-only subdivision can leave a large wrist rotation in
+            # one command when the grasp orientation differs from the
+            # observation pose. Subdivide by both translation and the
+            # shortest quaternion angle so the controller receives a gradual
+            # pose change.
+            quat_dot = float(np.dot(np.asarray(fake_orn), target_orn_arr))
+            rotation_angle = 2.0 * np.arccos(
+                np.clip(abs(quat_dot), -1.0, 1.0)
+            )
+            loop_num = max(
+                int(np.ceil(delta_xyz / max(interval_threshold, 1e-6))),
+                int(np.ceil(rotation_angle / max(rotation_interval_rad, 1e-6))),
+                1,
+            )
 
             intermediate_pos_list = [fake_pos + (target_pos_arr - fake_pos)*((l+1)/loop_num) for l in range(loop_num)]
             intermediate_orn_list = slerp(fake_orn, target_orn_arr, loop_num+1)[1:]
@@ -465,17 +503,63 @@ class TwinTest2(World):
                     time.sleep(0.1)
 
                 # reset robot to interval pose
+                joint_start_js = np.asarray(intermediate_js, dtype=float).copy()
                 self.robot.robot_structs[self.struct_name].reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
                 self.step()
 
                 # condition check
                 intermediate_js = self.robot.robot_structs[self.struct_name].get_joint_pose()
+                check_xyz_threshold = 0.01
+                check_rpy_threshold = 0.01
+                if config.get("sim_suction", False):
+                    check_xyz_threshold = xyz_threshold
+                    check_rpy_threshold = rpy_threshold
                 is_reach, delta_xyz, delta_rpy = self.robot.robot_structs[self.struct_name].check_reach(intermediate_pos, intermediate_orn
-                                                                                                , xyz_threshold =0.01, rpy_threshold = 0.01)
+                                                                                                , xyz_threshold =check_xyz_threshold, rpy_threshold = check_rpy_threshold)
                 is_collide, collide_id = self.robot.check_collision()
                 # 检查关节Z高度
                 is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(z_min_threshold)
 
+                # IK can occasionally switch solution branches even when the
+                # Cartesian step is small. Insert joint-space waypoints and
+                # validate every inserted state before sending the path out.
+                joint_delta = np.max(
+                    np.abs(np.asarray(intermediate_js) - joint_start_js)
+                )
+                joint_steps = max(
+                    int(np.ceil(joint_delta / max(joint_step_limit_rad, 1e-6))),
+                    1,
+                )
+                for joint_step in range(1, joint_steps):
+                    ratio = joint_step / float(joint_steps)
+                    safe_js = (
+                        joint_start_js
+                        + ratio * (
+                            np.asarray(intermediate_js, dtype=float)
+                            - joint_start_js
+                        )
+                    ).tolist()
+                    self.robot.robot_structs[self.struct_name].reset_by_joint_states(
+                        safe_js
+                    )
+                    self.step()
+                    safe_collided, safe_collide_id = self.robot.check_collision()
+                    safe_z, safe_unsafe_links, safe_min_z = (
+                        self.check_arm_joints_z_height(z_min_threshold)
+                    )
+                    if safe_collided or not safe_z:
+                        rospy.logwarn(
+                            "UNSAFE JOINT INTERPOLATION: "
+                            f"collision={safe_collided}, z_safe={safe_z}, "
+                            f"collide_body={safe_collide_id}"
+                        )
+                        return 0, trajectory, trajectory_ee, infos
+                    trajectory.append(list(safe_js))
+                    safe_pos, safe_orn = (
+                        self.robot.robot_structs[self.struct_name]
+                        .get_end_link_pose_self()
+                    )
+                    trajectory_ee.append(list(safe_pos) + list(safe_orn))
 
                 trajectory.append(list(intermediate_js))
                 trajectory_ee.append(list(intermediate_pos) + list(intermediate_orn))
@@ -519,6 +603,8 @@ class TwinTest2(World):
         curr_js = config["current_js"]
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
+        xyz_threshold = config.get("xyz_threshold", 0.015)
+        rpy_threshold = config.get("rpy_threshold", 0.05)
 
         if struct_name != self.struct_name:
             rospy.logwarn(f"TWIN INFERENCER '{self.side}' side got mismatched struct: {struct_name}")
@@ -566,7 +652,11 @@ class TwinTest2(World):
                 js_fake = solved_js # 更新下一个点的种子
 
             # 验证 Reach (双重确认 IK 误差)
-            is_reach, delta_xyz, delta_rpy = arm_struct.check_reach(target_pos, target_orn, xyz_threshold=0.015, rpy_threshold=0.05)
+            is_reach, delta_xyz, delta_rpy = arm_struct.check_reach(
+                target_pos, target_orn,
+                xyz_threshold=xyz_threshold,
+                rpy_threshold=rpy_threshold,
+            )
             # 验证 Collision
             is_collide, collide_id = self.robot.check_collision()
             

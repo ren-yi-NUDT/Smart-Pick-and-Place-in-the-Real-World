@@ -1,39 +1,95 @@
-import socket
-import json
-import time, struct
-from termcolor import cprint
+#!/usr/bin/env python3
+"""Manual Twin trajectory-generation smoke test.
 
-# 连接到运行 HandController 的机器 IP
-HOST = '127.0.0.1' 
-PORT = 8020
+This file intentionally keeps the historical ``test_twin.py`` name because
+it is used by existing operators.  It must remain safe to import: pytest
+discovers files named ``test_*.py`` during collection, and importing this
+module must never connect to a live Twin service or send a robot request.
 
-def send_cmd(sock, data):
-    msg = json.dumps(data).encode('utf-8')
-    length_prefix = struct.pack('>I', len(msg))
-    sock.sendall(length_prefix)
-    sock.sendall(msg)
-    resp = json.loads(sock.recv(1024).decode('utf-8'))
-    cprint(f"Response: {resp}", "red")
+Run manually with::
 
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((HOST, PORT))
+    python dependence/twin_inference/test_twin.py --side left --port 8020
 
-try:
-    print("Sending Close command...")
-    data = {
-        "srv": "twin_inference",
-        "type": "trajectory_generation2",
-        "cnfg":{
-            "target_pose":[
-                # [-0.28701299065166197, -0.10952208102805991, 0.18770306518519692, 0.7429832323953516, -0.3406782645617565, -0.5639482092149282, -0.11779920949573683],
-                [-0.29824502615690757, -0.1048591177826923, 0.1558604879639906, 0.7429832323953516, -0.3406782645617565, -0.5639482092149282, -0.11779920949573683]
-                ],
-            "current_js": [-0.021013764194011724, -0.15385077356330015, 1.0034596001416198, -0.05811946409141117, 1.986167235477027, -0.00020943951023931956],
-            "struct": "left_arm"
-        }
+The request uses the current project protocol through :class:`TwinClient`:
+raw JSON on send and a four-byte length-prefixed JSON response.
+"""
+
+import argparse
+import os
+import sys
+
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from core.twin_client import TwinClient  # noqa: E402
+
+
+TARGET_POSE = [
+    -0.29824502615690757,
+    -0.1048591177826923,
+    0.1558604879639906,
+    0.7429832323953516,
+    -0.3406782645617565,
+    -0.5639482092149282,
+    -0.11779920949573683,
+]
+CURRENT_JS_RAD = [
+    -0.021013764194011724,
+    -0.15385077356330015,
+    1.0034596001416198,
+    -0.05811946409141117,
+    1.986167235477027,
+    -0.00020943951023931956,
+]
+
+
+def build_smoke_config(side="left"):
+    """Build one safe, deterministic trajectory-generation request."""
+    if side not in ("left", "right"):
+        raise ValueError(f"side must be 'left' or 'right', got {side!r}")
+    return {
+        "target_pose": [TARGET_POSE],
+        "current_js": list(CURRENT_JS_RAD),
+        "struct": f"{side}_arm",
     }
-    send_cmd(client, data)
-    
-finally:
-    # 保持连接，不主动断开
-    pass
+
+
+def run_smoke_test(host="127.0.0.1", port=8020, side="left"):
+    """Send one explicit Twin smoke request and return its response.
+
+    No connection is made until this function is called.  The socket is
+    always closed, including when Twin reports an error.
+    """
+    client = TwinClient(host=host, port=int(port))
+    if not client.connect():
+        raise ConnectionError(f"unable to connect to Twin at {host}:{port}")
+    try:
+        response = client.generate_trajectory2(build_smoke_config(side))
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Twin returned a non-object response: {response!r}")
+        if "value" not in response:
+            raise RuntimeError(f"Twin response has no 'value' field: {response!r}")
+        return response
+    finally:
+        client.close()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default=os.getenv("TWIN_TEST_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("TWIN_TEST_PORT", "8020")))
+    parser.add_argument("--side", choices=("left", "right"), default="left")
+    args = parser.parse_args(argv)
+
+    response = run_smoke_test(args.host, args.port, args.side)
+    print(f"Twin smoke test passed: value={response.get('value')}")
+    info = response.get("info")
+    if isinstance(info, dict) and isinstance(info.get("trajectory"), list):
+        print(f"trajectory waypoints: {len(info['trajectory'])}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

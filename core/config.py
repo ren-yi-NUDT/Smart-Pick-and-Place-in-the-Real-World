@@ -6,13 +6,16 @@ Usage:
     cfg = Config()                       # loads robot_config.json from project root
     cfg = Config(config_path="/my/path")  # explicit path
 
-Config format (dual-arm): top-level keys ``arms`` and ``shared``.
+Config format (dual-arm): top-level keys ``arms``, ``shared`` and
+``robot_models``.  ``robot_models`` contains the URDF/PyBullet structure
+descriptions that used to live in separate files under the ROS workspace.
 Backward-compat attributes (``robot_config``, ``default_traj_js``, link names)
 are synthesized from the ``left`` arm section for code that still reads them.
 """
 
 import json
 import os
+from copy import deepcopy
 
 # ---------------------------------------------------------------------------
 # Project root (the directory that contains robot_config.json)
@@ -25,6 +28,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOST = "127.0.0.1"
 ARM_PORT = 8010
 TWIN_PORT = 8020          # left arm twin IK service
+SIM_TWIN_PORT_LEFT = 8032   # sim-mode twin IK (avoids real twin on 8020/8021)
+SIM_TWIN_PORT_RIGHT = 8033
 
 # ---------------------------------------------------------------------------
 # Default model paths (relative to PROJECT_ROOT unless absolute)
@@ -70,6 +75,7 @@ class Config:
         # Internal state
         self._arms: dict = {}              # {"left": {...}, "right": {...}}
         self._shared: dict = {}
+        self._robot_models: dict = {}
 
         # Backward-compat attributes (populated in reload)
         self.robot_config: dict = {}
@@ -91,6 +97,7 @@ class Config:
 
         self._arms = raw["arms"]
         self._shared = raw.get("shared", {})
+        self._robot_models = raw.get("robot_models", {})
 
         # --- Build backward-compat views from the LEFT arm --------
         left = self._arms.get("left", {})
@@ -134,6 +141,40 @@ class Config:
                 f"Available: {list(self._arms.keys())}"
             )
         return self._arms[side]
+
+    def get_camera_intrinsics(self, side: str) -> dict:
+        """Return the single configured RGB camera intrinsics for *side*.
+
+        The same values are consumed by the AnyGrasp server, pixel projection
+        and depth back-projection.  Keeping this lookup here prevents a
+        caller from silently falling back to the other arm's calibration.
+        """
+        intrinsics = self.get_arm_config(side).get("camera_intrinsics")
+        if not isinstance(intrinsics, dict):
+            raise KeyError(f"camera_intrinsics missing for arm '{side}'")
+        required = ("fx", "fy", "cx", "cy")
+        missing = [key for key in required if key not in intrinsics]
+        if missing:
+            raise KeyError(f"camera_intrinsics for '{side}' missing: {missing}")
+        return intrinsics
+
+    def get_grasp_scoring(self, side: str) -> dict:
+        """Return grasp scoring and verification parameters for *side*."""
+        return self.get_arm_config(side).get("grasp_scoring", {})
+
+    def get_robot_model(self, name: str) -> dict:
+        """Return a copy of a URDF/PyBullet model description.
+
+        The model descriptions are intentionally kept separate from the
+        runtime ``arms`` section: runtime connection/pose settings and the
+        simulator's joint/link topology have different responsibilities.
+        """
+        if name not in self._robot_models:
+            raise KeyError(
+                f"Robot model '{name}' not found in config. "
+                f"Available: {list(self._robot_models.keys())}"
+            )
+        return deepcopy(self._robot_models[name])
 
     @property
     def shared(self) -> dict:

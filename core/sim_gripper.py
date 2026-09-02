@@ -14,6 +14,7 @@ class SimGripperClient:
         self.side = "left" if "left" in src else "right"
         self.sock = None
         self._pos = 1000  # internal state: 1000=open
+        self._grasping = False
 
     def connect(self):
         try:
@@ -21,6 +22,12 @@ class SimGripperClient:
             self.sock.connect((self.host, self.port))
             return True
         except Exception as e:  # noqa: BLE001
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
+            self.sock = None
             cprint(f"[SimGripperClient] connect failed: {e}", "red")
             return False
 
@@ -34,20 +41,27 @@ class SimGripperClient:
 
     def open(self, force=None, speed=None):
         self._pos = 1000
-        return self._send({"cmd": "gripper", "side": self.side,
-                           "action": "open", "value": 1000})
+        response = self._send({"cmd": "gripper", "side": self.side,
+                               "action": "open", "value": 1000})
+        self._grasping = False
+        return response
 
     def close(self, force=None, speed=None, soft=False):
         self._pos = 0
-        return self._send({"cmd": "gripper", "side": self.side,
-                           "action": "close", "value": 0})
+        response = self._send({"cmd": "gripper", "side": self.side,
+                               "action": "close", "value": 0})
+        self._grasping = bool(response.get("info", {}).get("object_detected", False))
+        return response
+
+    def set_suction_target(self, point_left):
+        return self._send({"cmd": "set_suction_target", "side": self.side,
+                           "point_left": [float(v) for v in point_left]})
 
     def get_state(self):
         return self._send({"cmd": "get_joint_state", "side": self.side})
 
-    def is_grasping(self):
-        # simplified: closed-ish counts as grasping (MVP; real contact detection is phase 2)
-        return self._pos < 500
+    def is_grasping(self, force=None):
+        return self._grasping
 
     def is_fully_open(self):
         return self._pos >= 950

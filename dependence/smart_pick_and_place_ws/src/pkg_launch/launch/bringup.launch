@@ -26,16 +26,32 @@
     <node pkg="rm_65_pkg" type="arm_75_bringup_right.py" name="arm_75_bringup_right" output="screen" />
     <node pkg="rm_65_pkg" type="mount_camera_right.py" name="mount_camera_erdaiji_grasp_right" output="screen" />
 
-    <!-- ==================== COMBINED DUAL-ARM VIZ (replaces separate left/right RViz) ==================== -->
+    <!-- ==================== COMBINED DUAL-ARM VIZ ====================
+         Disabled by default: the dual URDF republishes the same arm frames and
+         contains an uncalibrated fixed base_to_R_base relation. -->
     <param name="robot_description" textfile="$(find rm_description)/urdf/dual_arm.urdf" />
 
-    <node name="joint_state_relay" pkg="rm_description" type="joint_state_relay.py" output="screen">
-        <param name="rate" value="30.0" />
-    </node>
-
-    <node name="robot_state_publisher_dual" pkg="robot_state_publisher" type="robot_state_publisher">
-        <remap from="joint_states" to="dual_joint_states" />
-    </node>
+    <arg name="publish_dual_tf" default="false" />
+    <!-- The individual hardware robot_state_publishers start at base_link and
+         R_base_link. RViz uses the dual URDF with Fixed Frame=base, so provide
+         only the missing root links when the combined publisher is disabled.
+         This avoids publishing duplicate arm-link TF trees. -->
+    <group unless="$(arg publish_dual_tf)">
+        <node name="dual_root_to_left_base_tf" pkg="tf"
+              type="static_transform_publisher" output="screen"
+              args="0 0 0 0 0 0 base base_link 100" />
+        <node name="dual_root_to_right_base_tf" pkg="tf"
+              type="static_transform_publisher" output="screen"
+              args="0.35 -0.71 0 1.5708 0 0 base R_base_link 100" />
+    </group>
+    <group if="$(arg publish_dual_tf)">
+        <node name="joint_state_relay" pkg="rm_description" type="joint_state_relay.py" output="screen">
+            <param name="rate" value="30.0" />
+        </node>
+        <node name="robot_state_publisher_dual" pkg="robot_state_publisher" type="robot_state_publisher">
+            <remap from="joint_states" to="dual_joint_states" />
+        </node>
+    </group>
 
     <node name="rviz_dual" pkg="rviz" type="rviz" args="-d $(find rm_description)/config/dual_arm.rviz" />
 </launch>

@@ -27,7 +27,18 @@ class Hand_bringup():
     def __init__(self, config_path):
         super().__init__()
         rospy.init_node('hand_bringup', anonymous=True)
-        self.config = json.load(open(config_path))
+        with open(config_path) as config_file:
+            raw_config = json.load(config_file)
+        # This legacy node is retained for historical Inspire-hand setups.
+        # The active project configuration is now the root robot_config.json;
+        # fail explicitly if that file has no Inspire-hand model instead of
+        # silently treating the runtime arm configuration as hand metadata.
+        self.config = raw_config.get("robot_models", {}).get("inspire_hand")
+        if not self.config or "left_hand" not in self.config:
+            raise RuntimeError(
+                "The canonical robot_config.json has no inspire_hand model; "
+                "the current setup uses the gripper backend."
+            )
         self.publish_rate = 15
         self.hand_controller = HandController()
 
@@ -133,7 +144,8 @@ class Hand_bringup():
         rospy.spin()
 
 if __name__ == "__main__":
-    config_path = "robot_config.json"
-    urdf_dir  = os.path.join(os.path.dirname(__file__), '../../rm_description/urdf')
-    hand = Hand_bringup(config_path=os.path.join(urdf_dir, config_path))
+    config_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../../../../../robot_config.json")
+    )
+    hand = Hand_bringup(config_path=config_path)
     hand.publish_joint_state()

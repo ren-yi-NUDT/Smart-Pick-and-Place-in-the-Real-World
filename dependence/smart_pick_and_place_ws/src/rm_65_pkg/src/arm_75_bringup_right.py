@@ -133,10 +133,17 @@ class RM_ARM_bringup_right(RM_ARM):
             tag, joints = self.robot_arm.rm_get_joint_degree()
             if tag != 0 or len(joints) != 7:
                 if tag != 0:
-                    rospy.logwarn(f"Right arm rm_get_joint_degree failed: {tag}")
+                    rospy.logwarn_throttle(
+                        5.0,
+                        "Right arm joint state unavailable; publishing last commanded pose for TF"
+                    )
                 else:
                     rospy.logwarn(f"Right arm returned {len(joints)} joints (expected 7)")
-                joints = [0.0] * 7
+                joints = (
+                    list(self.last_commanded_joint)
+                    if self.last_commanded_joint is not None
+                    else [0.0] * 7
+                )
             joint_state_msg = JointState()
             joint_state_msg.header.stamp = rospy.Time.now()
             joint_state_msg.name = ["R_joint1", "R_joint2", "R_joint3", "R_joint4", "R_joint5", "R_joint6", "R_joint7", "R_finger_joint"]

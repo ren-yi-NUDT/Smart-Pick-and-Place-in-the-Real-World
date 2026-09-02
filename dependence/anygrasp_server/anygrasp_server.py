@@ -16,6 +16,7 @@ Protocol (binary, length-prefix framed):
         model          str    "rs_right" | "rs_left" | other
         depth_shape    [H, W]
         depth_dtype    "uint16"
+        depth_scale_m  optional metres per raw depth unit
         rgb_shape      [H, W, 3]
         rgb_dtype      "uint8"
 
@@ -55,11 +56,25 @@ DEFAULT_CHECKPOINT = os.path.join(
     PROJECT_ROOT, "dependence", "anygrasp_sdk", "checkpoint_detection.tar"
 )
 
-# Camera intrinsics -- must match dependence/anygrasp_sdk/grasp_detection/anygrasp_get_poses.py
-_INTRINSICS = {
-    "rs_right": (386.4509582519531, 385.8191223144531, 318.2220153808594, 238.8162841796875),
-    "rs_left": (392.26812744140625, 392.26812744140625, 325.4682312011719, 242.28213500976562),
-}
+# Camera intrinsics are loaded from robot_config.json so AnyGrasp uses the
+# same calibration as projection and depth back-projection in the client.
+def _load_camera_intrinsics():
+    try:
+        with open(os.path.join(PROJECT_ROOT, "robot_config.json"), "r") as f:
+            arms = json.load(f).get("arms", {})
+        result = {}
+        for side, data in arms.items():
+            intr = data.get("camera_intrinsics", {})
+            result[f"rs_{side}"] = tuple(
+                float(intr[key]) for key in ("fx", "fy", "cx", "cy")
+            )
+        return result
+    except Exception as exc:
+        cprint(f"[anygrasp_server] failed to load camera intrinsics: {exc}", "yellow")
+        return {}
+
+
+_INTRINSICS = _load_camera_intrinsics()
 _DEFAULT_INTRINSICS = (320.0, 320.0, 319.5, 239.5)
 
 _DTYPE_BY_NAME = {
@@ -93,8 +108,26 @@ class AnyGraspServer:
         class Cnfg: pass
         cnfg = Cnfg()
         cnfg.checkpoint_path = self.checkpoint_path
-        cnfg.max_gripper_width = 0.1
-        cnfg.gripper_height = 0.03
+        # AnyGrasp itself is configured with the widest configured gripper;
+        # arm-specific width/angle preferences are applied by the unified
+        # candidate scorer after inference.
+        try:
+            with open(os.path.join(PROJECT_ROOT, "robot_config.json"), "r") as f:
+                arms = json.load(f).get("arms", {})
+            widths = [
+                float(a.get("grasp_scoring", {}).get("max_width_m", 0.1))
+                for a in arms.values()
+            ]
+            max_width = max(widths or [0.1])
+            heights = [
+                float(a.get("grasp_scoring", {}).get("gripper_height_m", 0.03))
+                for a in arms.values()
+            ]
+            gripper_height = max(heights or [0.03])
+        except Exception:
+            max_width, gripper_height = 0.1, 0.03
+        cnfg.max_gripper_width = min(0.1, max_width)
+        cnfg.gripper_height = gripper_height
         cnfg.top_down_grasp = True
         cnfg.debug = False
 
@@ -106,7 +139,10 @@ class AnyGraspServer:
     # ------------------------------------------------------------------ #
     # Inference (mirrors anygrasp_get_poses.py minus the visualization)
     # ------------------------------------------------------------------ #
-    def _run_inference(self, rgb: np.ndarray, depth: np.ndarray, model: str):
+    def _run_inference(
+        self, rgb: np.ndarray, depth: np.ndarray, model: str,
+        request_intrinsics: dict = None, request_depth_scale: float = None,
+    ):
         if self.anygrasp is None:
             raise RuntimeError("AnyGrasp not loaded")
 
@@ -114,15 +150,37 @@ class AnyGraspServer:
         depths = np.asarray(depth)
 
         fx, fy, cx, cy = _INTRINSICS.get(model, _DEFAULT_INTRINSICS)
-        scale = 1000.0
+        if isinstance(request_intrinsics, dict):
+            try:
+                fx, fy, cx, cy = tuple(
+                    float(request_intrinsics[key])
+                    for key in ("fx", "fy", "cx", "cy")
+                )
+            except (KeyError, TypeError, ValueError):
+                pass
+        # RealSense normally reports 0.001 m/unit, but the actual scale is a
+        # device calibration value.  Preserve 1000 as a backward-compatible
+        # fallback for older clients and simulation frames.
+        depth_scale_m = 0.001
+        try:
+            requested_depth_scale = float(
+                request_depth_scale if request_depth_scale is not None else depth_scale_m
+            )
+            if np.isfinite(requested_depth_scale) and requested_depth_scale > 0.0:
+                depth_scale_m = requested_depth_scale
+        except (TypeError, ValueError):
+            pass
 
         xmin, xmax = -0.19, 0.15
-        ymin, ymax = -0.1, 0.15
+        # The simulated grasp3 view places the target at y≈0.154 m.  Keep a
+        # little margin beyond the real-camera crop so synthetic targets at
+        # the edge of the view are not discarded before inference.
+        ymin, ymax = -0.1, 0.30
         zmin, zmax = 0.0, 1.0
         lims = [xmin, xmax, ymin, ymax, zmin, zmax]
 
         xmap, ymap = np.meshgrid(np.arange(depths.shape[1]), np.arange(depths.shape[0]))
-        points_z = depths / scale
+        points_z = depths * depth_scale_m
         points_x = (xmap - cx) / fx * points_z
         points_y = (ymap - cy) / fy * points_z
 
@@ -135,7 +193,12 @@ class AnyGraspServer:
             apply_object_mask=True, dense_grasp=False, collision_detection=True,
         )
 
-        if len(gg) == 0:
+        # AnyGrasp may return None when the current observation has no valid
+        # grasp candidates (for example, while the arm is moving between
+        # recorded observation poses). Treat that as an empty result so the
+        # client can continue to the next camera pose instead of losing the
+        # long-lived socket connection.
+        if gg is None or len(gg) == 0:
             return []
 
         gg = gg.nms().sort_by_score()
@@ -147,6 +210,28 @@ class AnyGraspServer:
                 "score": float(g.score),
                 "rotation_matrix": g.rotation_matrix.tolist(),
             })
+            for attr in ("width", "gripper_width"):
+                if hasattr(g, attr):
+                    try:
+                        results[-1]["width"] = float(getattr(g, attr))
+                    except (TypeError, ValueError):
+                        pass
+                    break
+            for attr in ("height", "gripper_height"):
+                if hasattr(g, attr):
+                    try:
+                        results[-1]["height"] = float(getattr(g, attr))
+                    except (TypeError, ValueError):
+                        pass
+                    break
+            # ``depth`` is part of AnyGrasp's official gripper geometry
+            # (plot_gripper_pro_max).  Keep it in the wire response so the
+            # RGB logger can render the same finger reach as the SDK viewer.
+            if hasattr(g, "depth"):
+                try:
+                    results[-1]["depth"] = float(g.depth)
+                except (TypeError, ValueError):
+                    pass
         return results
 
     # ------------------------------------------------------------------ #
@@ -200,7 +285,10 @@ class AnyGraspServer:
                     model = header.get("model", "rs_right")
                     t0 = time.time()
                     with self._lock:
-                        poses = self._run_inference(rgb, depth, model)
+                        poses = self._run_inference(
+                            rgb, depth, model, header.get("intrinsics"),
+                            header.get("depth_scale_m")
+                        )
                     dt = time.time() - t0
                     cprint(
                         f"[anygrasp_server] inference: model={model} "
