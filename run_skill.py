@@ -5,6 +5,7 @@ Usage:
     echo '{"object":"orange","container":"bowl"}' | python3 run_skill.py pick_and_place
     echo '{"container":"pink plate"}' | python3 run_skill.py fetch_from_user
     python3 run_skill.py look_around
+    echo '{"speed":15}' | python3 run_skill.py right_give_to_user
     python3 run_skill.py list
 """
 import sys
@@ -54,6 +55,12 @@ def main():
 
     cprint(f"[run_skill] Executing: {args.skill} | kwargs={kwargs}", "cyan")
     result = skill.run(**kwargs)
+    from core.skill_runtime import SkillResult
+    if isinstance(result, SkillResult):
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2, default=str))
+        if not result.ok:
+            sys.exit(1)
+        return
     if result is False:
         print("Skill execution failed")
         sys.exit(1)

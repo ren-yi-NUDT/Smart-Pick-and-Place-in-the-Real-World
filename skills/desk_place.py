@@ -11,7 +11,6 @@ Usage (CLI):
 """
 
 import random
-import time
 from termcolor import cprint
 
 from skills.base import Skill, register_skill
@@ -31,52 +30,28 @@ class DeskPlaceSkill(Skill):
     def __init__(self, **kw):
         super().__init__(**kw)
 
-    def execute_desk_placement_js(self):
-        """Move to a random desk pose and release the object."""
-        selected_pose_key = random.choice(self.DESK_POSE_KEYS)
-        desk_pose = self.config.get_pose(selected_pose_key)
-
-        if desk_pose is None:
-            cprint(
-                f"Error: {selected_pose_key} not defined in robot_config.json",
-                "red",
-            )
-            return False
-
+    def execute_desk_placement_js(self, pose_name=None):
+        """Compatibility wrapper around the shared fixed-place pipeline."""
+        selected_pose_key = pose_name or random.choice(self.DESK_POSE_KEYS)
         cprint(
             f"=============== Moving to desk pose ({selected_pose_key}) =============",
             "cyan",
         )
-
-        self.control_arm(pose_type=selected_pose_key, speed=15)
-
-        cprint(
-            f"=============== Reached desk pose ({selected_pose_key}) =============",
-            "green",
+        return self.place_pipeline.place_at_named_pose(
+            selected_pose_key, side="left"
         )
-        time.sleep(0.5)
-        self.control_hand(cmd_type="open")
-        cprint(
-            "=============== Opened hand to place on desk =============",
-            "green",
-        )
-        time.sleep(1)
-        self.control_arm(pose_type="grasp1", speed=30)
-        cprint("=============== Returned to safe pose =============", "cyan")
-
-        return True
 
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
-    def run(self, **kwargs):
+    def execute(self, **kwargs):
         """
         Execute the desk placement skill.
 
         Returns:
             bool: True if successful, False otherwise.
         """
-        check = self.execute_desk_placement_js()
+        check = self.execute_desk_placement_js(kwargs.get("pose"))
         if check:
             cprint(
                 "D=================== Successfully completed the desk placement task ===================",

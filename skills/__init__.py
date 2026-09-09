@@ -7,7 +7,33 @@ from skills import (
     grasp,
     place,
     handover,
-    trash,
     desk_place,
     grasp_to_drawer,
+    dual_handover,
+    dual_vlm_sorting,
+    wipe_table,
+    receive_and_hold,
+    receive_user_trajectory,
+    right_give_to_user,
+)
+
+# Importing these modules registers their Skills; expose the same names so
+# static analyzers do not mistake the registration imports for dead code.
+__all__ = (
+    "pick_and_place",
+    "fetch_from_user",
+    "look_around",
+    "capture_at_handover",
+    "pose_execute",
+    "grasp",
+    "place",
+    "handover",
+    "desk_place",
+    "grasp_to_drawer",
+    "dual_handover",
+    "dual_vlm_sorting",
+    "wipe_table",
+    "receive_and_hold",
+    "receive_user_trajectory",
+    "right_give_to_user",
 )

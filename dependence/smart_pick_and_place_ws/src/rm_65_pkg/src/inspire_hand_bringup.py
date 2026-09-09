@@ -2,7 +2,6 @@
 import rospy
 import json
 import os
-import sys, struct
 import socket
 import threading
 from sensor_msgs.msg import JointState

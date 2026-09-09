@@ -2,14 +2,36 @@
 set -e
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# 清理上次残留的仿真进程
-for pattern in 'roscore' 'rosmaster' 'sim_server.py' 'twin.py' 'anygrasp_server.py'; do
-    PIDS=$(pgrep -f "$pattern" || true)
-    if [ -n "$PIDS" ]; then
-        echo "  Killing stale processes matching '$pattern': $PIDS"
-        kill $PIDS 2>/dev/null || true
-    fi
+# 清理上次残留的仿真进程。
+# Python 服务按 cwd 限定到本项目，避免 start_sim 抢占别的项目实例；
+# roscore/rosmaster 使用精确进程名，保留仿真启动脚本原有的抢占能力。
+kill_stale_script() {
+    local script_name="$1"
+    local work_dir="$2"
+    local pid cwd
+
+    while read -r pid; do
+        [ -z "$pid" ] && continue
+        [ "$pid" = "$$" ] && continue
+        cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)
+        if [ "$cwd" = "$work_dir" ]; then
+            echo "  Killing stale $script_name (pid $pid, cwd $cwd)"
+            kill "$pid" 2>/dev/null || true
+        fi
+    done < <(pgrep -f "$script_name" || true)
+}
+
+for process_name in roscore rosmaster; do
+    while read -r pid; do
+        [ -z "$pid" ] && continue
+        [ "$pid" = "$$" ] && continue
+        echo "  Killing stale $process_name (pid $pid)"
+        kill "$pid" 2>/dev/null || true
+    done < <(pgrep -x "$process_name" || true)
 done
+kill_stale_script 'sim_server.py' "$PROJECT_ROOT/dependence/twin_inference"
+kill_stale_script 'twin.py' "$PROJECT_ROOT/dependence/twin_inference"
+kill_stale_script 'anygrasp_server.py' "$PROJECT_ROOT/dependence/anygrasp_server"
 sleep 1
 
 # 检查 xfce4-terminal

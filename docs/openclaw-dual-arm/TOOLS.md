@@ -1,4 +1,4 @@
-# TOOLS.md - Local Notes
+# TOOLS.md - Local Notes（历史模板，源信息以项目根目录 README/COMMANDS 为准）
 
 Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
 
@@ -13,7 +13,7 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 - **端口**: 8010 (Socket 服务)
 - **文档**: https://develop.realman-robotics.com/robot/robotParameter/RM75OntologyParameters/
 - **控制方式**: Socket (4 字节大端长度头 + JSON)
-- **末端**: Inspire 灵巧手（见下）
+- **末端**: Robotiq 夹爪（:8002）
 - **速度限制**: 常规 `speed ≤ 5`，自学 `speed ≤ 10`
 
 ### 副手 = 右臂 (支撑 / 固定 / 接收)
@@ -29,16 +29,14 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 
 ---
 
-## 灵巧手（主手末端）
+## Robotiq 夹爪
 
-### Inspire Hand (因时)
+### Robotiq 85
 
-- **型号**: Inspire Hand
-- **IP**: 192.168.11.209 (Modbus 硬件)
-- **端口**: 8000 (Socket 服务)
-- **控制方式**: Socket (纯 JSON)
-- **自由度**: 6 (5 指 + 大拇指外展)
-- **手势预设**: open / close / peace / rock / pointing / thumbs_up / ok / grab（详见 `skills/robot-pose/SKILL.md`）
+- **型号**: Robotiq 85
+- **连接**: 本机串口（Modbus）
+- **端口**: 左臂 :8002，右臂 :8001
+- **控制方式**: Socket（4 字节大端长度头 + JSON）
 
 ---
 
@@ -67,13 +65,12 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 
 | 端口 | 服务 | 协议 |
 |---|---|---|
-| 8000 | 灵巧手 (Inspire) | 纯 JSON |
-| 8010 | 左臂 / 主手 (RM75-B) | 4 字节头 + JSON |
-| 8011 | 右臂 / 副手 (RM75-B + 夹爪) | 4 字节头 + JSON |
-| 8020 | 孪生推理 | 4 字节头 + JSON（响应） |
+| 8001/8002 | Robotiq 夹爪 | 4 字节头 + JSON |
+| 8010/8011 | 机械臂桥接 | 4 字节头 + JSON |
+| 8020/8021 | Twin IK | 4 字节头 + JSON |
 | 8030 | AnyGrasp | 二进制（4 字节头 + JSON + depth + rgb） |
 
-**启动检查**：`lsof -ti:8000,8010,8011,8020` 应返回 **4 个 PID**（8030 由 AnyGrasp 按需启动）。
+**启动检查**：`lsof -ti:8001,8002,8010,8011,8020,8021,8030` 应返回已启动服务的 PID。
 
 ---
 

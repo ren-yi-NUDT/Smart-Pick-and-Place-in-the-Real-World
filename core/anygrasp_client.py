@@ -17,11 +17,12 @@ Usage:
 
 import json
 import socket
-import struct
 from typing import List
 
 import numpy as np
 from termcolor import cprint
+
+from core.tcp_protocol import recv_frame, send_frame
 
 
 class AnyGraspClient:
@@ -67,18 +68,6 @@ class AnyGraspClient:
             except Exception:
                 pass
             self.sock = None
-
-    # ------------------------------------------------------------------
-    # Protocol helpers
-    # ------------------------------------------------------------------
-    def _recv_exactly(self, n):
-        buf = b""
-        while len(buf) < n:
-            chunk = self.sock.recv(min(65536, n - len(buf)))
-            if not chunk:
-                raise ConnectionError("server closed connection mid-message")
-            buf += chunk
-        return buf
 
     # ------------------------------------------------------------------
     # High-level API
@@ -133,11 +122,8 @@ class AnyGraspClient:
         header_bytes = json.dumps(header).encode("utf-8")
         payload = header_bytes + b"\n" + depth.tobytes() + rgb.tobytes()
 
-        self.sock.sendall(struct.pack(">I", len(payload)))
-        self.sock.sendall(payload)
-
-        (resp_len,) = struct.unpack(">I", self._recv_exactly(4))
-        resp = json.loads(self._recv_exactly(resp_len).decode("utf-8"))
+        send_frame(self.sock, payload)
+        resp = json.loads(recv_frame(self.sock).decode("utf-8"))
         if resp.get("error"):
             raise RuntimeError(f"AnyGrasp server error: {resp['error']}")
         return resp.get("poses", [])

@@ -17,7 +17,7 @@
   - 轨迹保存在 recorded_trajectories/{left,right}/<name>.json
 
 机械臂映射:
-    left  → 192.168.1.19 (灵巧手)
+    left  → 192.168.1.19 (左臂)
     right → 192.168.1.18 (夹爪)
 
 使用方式:
@@ -49,6 +49,12 @@ import threading
 from datetime import datetime
 from termcolor import cprint
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from core.tcp_protocol import recv_json_compat, send_json_frame
+
 # 机械臂接口 -- 直接连接硬件以读取当前关节状态
 from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
 
@@ -57,7 +63,6 @@ from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
 # 常量
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POSE_DIR = os.path.join(PROJECT_ROOT, "recorded_poses")
 TRAJ_DIR = os.path.join(PROJECT_ROOT, "recorded_trajectories")
 
@@ -72,7 +77,7 @@ TRAJ_DIRS = {
 }
 
 ARM_CONFIGS = {
-    "left": {"ip": "192.168.1.19", "label": "左臂（灵巧手）"},
+    "left": {"ip": "192.168.1.19", "label": "左臂（Robotiq 85）"},
     "right": {"ip": "192.168.1.18", "label": "右臂（夹爪）"},
 }
 ARM_PORT = 8080
@@ -814,8 +819,8 @@ def _execute_post_actions(traj_data):
             with socket.create_connection(
                 ("127.0.0.1", GRIPPER_PORTS[side]), timeout=3.0
             ) as sock:
-                sock.sendall(json.dumps(request).encode("utf-8"))
-                response = json.loads(sock.recv(1024).decode("utf-8"))
+                send_json_frame(sock, request)
+                response = recv_json_compat(sock)
             if response.get("value") is False:
                 cprint(f"[traj] 夹爪后置动作失败: {response}", "red")
                 return False
@@ -1207,7 +1212,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 机械臂映射:
-  left  → 192.168.1.19 (灵巧手)
+  left  → 192.168.1.19 (左臂)
   right → 192.168.1.18 (夹爪)
 
 位姿录制:

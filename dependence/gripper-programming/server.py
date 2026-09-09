@@ -3,7 +3,9 @@
 Socket server bridging core/gripper.py (TCP client, port 8001/8002) to the Robotiq 85
 hardware via Modbus RTU. Started standalone — no ROS dependency.
 
-Protocol (raw JSON, no length prefix — same as inspire_hand_bringup):
+Protocol: 4-byte big-endian length prefix + JSON payload.
+The server also accepts the historical raw-JSON stream and replies in the
+same mode, allowing old clients to remain online during migration.
   REQUEST:  {"src": "/right_gripper/movement_control",
              "type": "set" | "get",
              "cmd": [v, v]}      # set only; v in 0..1000
@@ -24,13 +26,17 @@ passing --port, --src and --serial/--slave appropriately.
 """
 
 import argparse
-import json
+import os
 import socket
 import sys
 import threading
-import time
 
 from robotiq_driver import Robotiq85, describe_status
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+from core.tcp_protocol import JsonStreamReader, send_json_compat
 
 DEFAULT_SRC = "/right_gripper/movement_control"
 
@@ -86,28 +92,17 @@ class GripperServer:
 
     def _handle_client(self, conn, addr):
         with conn:
-            buf = ""
+            reader = JsonStreamReader(conn)
             while True:
                 try:
-                    data = conn.recv(1024).decode("utf-8", errors="replace")
+                    obj = reader.read()
+                except (ConnectionError, OSError, ValueError):
+                    break
+                response = self._process(obj)
+                try:
+                    send_json_compat(conn, response, reader.mode)
                 except (ConnectionError, OSError):
-                    break
-                if not data:
-                    break
-                buf += data
-                # One JSON object per recv is the typical pattern from core/gripper.py,
-                # but be tolerant: try to parse complete objects out of the buffer.
-                while True:
-                    try:
-                        obj, end = json.JSONDecoder().raw_decode(buf)
-                    except json.JSONDecodeError:
-                        break  # incomplete — wait for more bytes
-                    buf = buf[end:].lstrip()
-                    response = self._process(obj)
-                    try:
-                        conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
-                    except (ConnectionError, OSError):
-                        return
+                    return
             print(f"[server] client {addr} disconnected", flush=True)
 
     # ------------------------------------------------------------------ #

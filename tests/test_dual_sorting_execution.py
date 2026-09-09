@@ -163,12 +163,14 @@ def test_grasp_retry_uses_next_candidate_and_paired_place_trajectory():
     class FakeConfig:
         sim_mode = False
 
-    class FakeHelper:
-        config = FakeConfig()
-
+    class FakePipeline:
         def _execute_scored_grasp(self, candidate, side, obs_pose, hold_after_grasp):
             attempts.append((candidate["index"], side, hold_after_grasp))
             return len(attempts) == 2
+
+    class FakeHelper:
+        config = FakeConfig()
+        grasp_pipeline = FakePipeline()
 
     class FakeSorter:
         helper = FakeHelper()

@@ -36,7 +36,7 @@ SIM_TWIN_PORT_RIGHT = 8033
 # ---------------------------------------------------------------------------
 DEFAULT_YOLO_MODEL = os.path.join(
     PROJECT_ROOT,
-    "dependence", "yolo_world", "yolov8x-worldv2.pt",
+    "dependence", "yolo_world", "yoloe-26s-seg.pt",
 )
 DEFAULT_ANYGRASP_CHECKPOINT = os.path.join(
     PROJECT_ROOT,

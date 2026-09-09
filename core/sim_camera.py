@@ -1,17 +1,15 @@
 """RGB-D camera backed by the PyBullet SimServer's get_rgbd."""
 import base64
 import io
-import json
 import os
 import socket
-import struct
 from datetime import datetime
 
 import numpy as np
 from PIL import Image
 from termcolor import cprint
 
-from core.sim_utils import recv_exact
+from core.tcp_protocol import recv_json_compat, send_json_frame
 
 
 class SimCamera:
@@ -44,10 +42,8 @@ class SimCamera:
             return False
 
     def get_rgbd(self):
-        self.sock.sendall(json.dumps({"cmd": "get_rgbd", "side": self.side}).encode("utf-8"))
-        n = struct.unpack(">I", recv_exact(self.sock, 4))[0]
-        body = recv_exact(self.sock, n)
-        info = json.loads(body.decode("utf-8"))["info"]
+        send_json_frame(self.sock, {"cmd": "get_rgbd", "side": self.side})
+        info = recv_json_compat(self.sock)["info"]
         rgb = np.asarray(Image.open(io.BytesIO(base64.b64decode(info["rgb_b64"])))).copy()
         depth = np.frombuffer(base64.b64decode(info["depth_b64"]), dtype=np.uint16)
         depth = depth.reshape(info["height"], info["width"])

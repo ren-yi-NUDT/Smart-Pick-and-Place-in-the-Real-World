@@ -1,11 +1,11 @@
 """
-Perception wrappers for YOLO-World object detection and AnyGrasp grasp
+Perception wrappers for YOLOE open-vocabulary detection and AnyGrasp grasp
 detection.
 
 Usage:
     from core.perception import Perception
     perc = Perception(
-        yolo_model_path="/path/to/yolov8x-worldv2.pt",
+        yolo_model_path="/path/to/yoloe-26s-seg.pt",
         anygrasp_checkpoint="/path/to/checkpoint_detection.tar",
     )
     detections = perc.detect_objects(rgb, class_names=["orange"])
@@ -20,19 +20,13 @@ import numpy as np
 from datetime import datetime
 from PIL import Image
 from termcolor import cprint
-from ultralytics import YOLOWorld
+from ultralytics import YOLOE
 
 from core.transforms import graspcam2pixel
 
 
-def _import_anygrasp():
-    """Lazy import -- anygrasp may not be installed in every environment."""
-    from anygrasp_sdk.grasp_detection.anygrasp_get_poses import anygrasp_get_poses
-    return anygrasp_get_poses
-
-
 class Perception:
-    """Unified perception front-end combining YOLO-World and AnyGrasp."""
+    """Unified perception front-end combining YOLOE and AnyGrasp."""
 
     def __init__(
         self,
@@ -49,9 +43,10 @@ class Perception:
         self.anygrasp_port = anygrasp_port
         self.camera_intrinsics = dict(camera_intrinsics or {})
 
-        # Load YOLO-World
+        # Load YOLOE-26.  The segmentation checkpoint also exposes boxes,
+        # which keeps the existing AnyGrasp filtering path unchanged.
         if yolo_model_path:
-            self.yolo_model = YOLOWorld(yolo_model_path)
+            self.yolo_model = YOLOE(yolo_model_path)
         else:
             self.yolo_model = None
 
@@ -59,10 +54,10 @@ class Perception:
         self._anygrasp_client = None
 
     # ------------------------------------------------------------------
-    # YOLO-World
+    # YOLOE open-vocabulary detection
     # ------------------------------------------------------------------
     def detect_objects(self, image, class_names, conf=0.2):
-        """Run YOLO-World on *image* for the given *class_names*.
+        """Run YOLOE on *image* for the given *class_names*.
 
         Parameters
         ----------
@@ -146,11 +141,11 @@ class Perception:
         intrinsics: dict = None,
         target_box: list = None,
     ):
-        """Filter grasp candidates by YOLO-World detection bounding boxes.
+        """Filter grasp candidates by YOLOE detection bounding boxes.
 
         Only grasps whose projected pixel lies strictly inside a detection
         box are kept; the detection box is not expanded.  ``target_box``
-        (VLM-grounded) is used only when YOLO-World returns no detection.
+        (VLM-grounded) is used only when YOLOE returns no detection.
 
         Parameters
         ----------
@@ -159,7 +154,7 @@ class Perception:
         image : np.ndarray
             RGB image (used for projection and optional visualisation).
         class_name : str or list[str]
-            Comma-separated class names or a list of YOLO-World prompts.
+            Comma-separated class names or a list of YOLOE prompts.
         return_label : bool
             If ``True``, attach ``"label"`` to each returned grasp dict.
         vis : bool
@@ -175,7 +170,7 @@ class Perception:
         else:
             class_name_list = [str(cls).strip() for cls in class_name if str(cls).strip()]
 
-        # YOLO-World first; the VLM box is only a fallback when YOLO finds
+        # YOLOE first; the VLM box is only a fallback when YOLOE finds
         # nothing (e.g. YOLO misses the object but the VLM grounded it).
         detections = self.detect_objects(image, class_name_list, conf=0.2)
         vlm_box = None
@@ -244,80 +239,6 @@ class Perception:
 
         return final_grasps if ans else []
 
-    # ------------------------------------------------------------------
-    # Placement detection  (from Planner.get_placing_position)
-    # ------------------------------------------------------------------
-    def detect_placement_position(
-        self,
-        class_name: str,
-        image,
-        depth,
-        cam_type: str = "right",
-        vis: bool = False,
-    ):
-        """Detect the 3-D world-frame position of a container for placement.
-
-        Parameters
-        ----------
-        class_name : str
-            Container class name for YOLO-World.
-        image : np.ndarray
-            RGB image.
-        depth : np.ndarray
-            Depth image (uint16, mm).
-        cam_type : str
-            ``"right"`` or ``"left"``.
-
-        Returns
-        -------
-        list  or  np.ndarray (4, 4)
-            Placement pose in world frame, or ``[]`` on failure.
-        """
-        from core.transforms import pixel_to_camera_point2
-
-        detections = self.detect_objects(image, [class_name], conf=0.25)
-
-        try:
-            if len(detections):
-                det = detections[0][:4]
-                if det[1] >= 400 and det[3] <= 480 and len(detections) > 1:
-                    det = detections[1][:4]
-                x1, y1, x2, y2 = [int(coord) for coord in det]
-
-                H, W = depth.shape
-                x1 = max(0, x1)
-                y1 = max(0, y1)
-                x2 = min(W, x2)
-                y2 = min(H, y2)
-
-                depth_sub_image_mm = depth[y1:y2, x1:x2]
-                valid_depths_mm = depth_sub_image_mm[depth_sub_image_mm > 0]
-
-                if len(valid_depths_mm) > 0:
-                    mean_depth_mm = np.median(valid_depths_mm)
-                else:
-                    print("Warning: No valid depth values found in the bounding box.")
-                    return []
-
-                mean_depth_m = mean_depth_mm * 1e-3
-
-                center_x = (x1 + x2) / 2
-                center_y = (y1 + y2) / 2
-                center_cam_point = pixel_to_camera_point2(
-                    np.array([center_x, center_y]).reshape(-1, 2),
-                    mean_depth_m,
-                    cam_type=cam_type,
-                    intrinsics=self.camera_intrinsics.get(cam_type),
-                )
-                center_cam_point = center_cam_point.flatten()
-
-                # Return raw camera-frame point; caller transforms to world
-                return center_cam_point
-
-        except Exception as e:
-            cprint(f"[Perception] Placement detection failed: {e}", "red")
-
-        return []
 
     # ------------------------------------------------------------------
     # Private helpers

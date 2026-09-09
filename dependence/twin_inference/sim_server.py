@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """PyBullet execution+camera server for the virtual-simulation backend.
 
-Serves on 127.0.0.1:8031. Protocol (mirrors twin.py):
-  RECV: raw JSON (no length prefix)
-  SEND: 4-byte big-endian length prefix + JSON
+Serves on 127.0.0.1:8031. Protocol: 4-byte big-endian length prefix + JSON
+payload in both directions. The server accepts legacy raw JSON and replies in
+the same mode for rolling upgrades.
 
 Loads both arms (left + right) as independent ``ErdaijiRobot`` bodies. Every
 command carries a ``side`` field ("left"/"right") routing it to the matching arm.
@@ -19,9 +19,7 @@ import argparse
 import base64
 import copy
 import io
-import json
 import socket
-import struct
 import threading
 from datetime import datetime
 
@@ -38,15 +36,15 @@ from core.sim_utils import (  # noqa: E402
     deg2rad_list, rad2deg_list, projection_bounds,
     depth_buffer_to_mm, map_gripper_value, parse_mimic_joints,
 )
+from core.tcp_protocol import JsonStreamReader, send_json_frame  # noqa: E402
 
 SIM_STEP_DELAY = 1.0 / 240.0
 SIM_PORT = 8031
 ARM_MAX_VEL = 1.2  # rad/s; caps arm joint velocity so motion is smooth, not teleport
 
-# 双臂相对位姿：恢复修改前的布局。
-# 左臂基座在原点，右臂基座位于 (0.35, -0.71, 0)，绕 Z 轴旋转 90°。
-# 真机标定保持不变；仿真任务通过 task 配置提供对应的仿真标定。
-_RIGHT_BASE_POS = (0.35, -0.71, 0.0)
+# 双臂相对位姿，取自 dual_arm.urdf 的 base_to_R_base（右臂基座相对左臂）。
+# 左臂基座在原点，右臂基座位于 (0.99, -0.72, 0)，绕 Z 轴旋转 90°。
+_RIGHT_BASE_POS = (0.99, -0.72, 0.0)
 _RIGHT_BASE_ORI = (0.0, 0.0, 1.5708)
 
 # 相机安装位姿（Link7 -> cam_link_grasp），取自 mount_camera.py 的静态 TF。
@@ -201,7 +199,7 @@ class SimServer:
         return body
 
     def _spawn_apple(self, position, radius=0.04):
-        """Red sphere + brown stem + green leaf, so YOLO-World recognises ``apple``.
+        """Red sphere + brown stem + green leaf, so YOLOE-26 recognises ``apple``.
 
         A bare flat-shaded sphere reads as ~0.07 confidence (below the 0.2
         detection threshold); adding a stem + leaf pushes it to ~0.44, above the
@@ -299,7 +297,7 @@ class SimServer:
             )
 
     def _spawn_fruit(self, position, color, radius=0.04, stem_color=None):
-        """Sphere + stem + leaf so YOLO-World recognises the fruit class.
+        """Sphere + stem + leaf so YOLOE-26 recognises the fruit class.
 
         Same trick as ``_spawn_apple``: a bare flat-shaded sphere reads as a
         low-confidence blob, while the stem/leaf detail lifts it above the
@@ -615,15 +613,16 @@ class SimServer:
 
     def _handle(self, conn):
         with conn:
+            reader = JsonStreamReader(conn)
             while not rospy.is_shutdown():
                 try:
-                    data = conn.recv(65536)
-                    if not data:
-                        break
-                    resp = self.dispatch(json.loads(data.decode("utf-8")))
-                    payload = json.dumps(resp).encode("utf-8")
-                    conn.sendall(struct.pack(">I", len(payload)))
-                    conn.sendall(payload)
+                    resp = self.dispatch(reader.read())
+                    # The old Sim clients used raw JSON requests but already
+                    # consumed length-prefixed responses; keep responses
+                    # framed while new clients use framed requests too.
+                    send_json_frame(conn, resp)
+                except (ConnectionError, OSError):
+                    break
                 except Exception as e:  # noqa: BLE001
                     cprint(f"[SimServer] client error: {e}", "red")
                     break
@@ -636,6 +635,8 @@ class SimServer:
             return self._get_joint_state(req)
         if cmd == "execute_trajectory":
             return self._execute_trajectory(req)
+        if cmd == "execute_dual_trajectory":
+            return self._execute_dual_trajectory(req)
         if cmd == "move_to_pose":
             return self._move_to_pose(req)
         if cmd == "gripper":
@@ -681,7 +682,7 @@ class SimServer:
             js_rad = self._arm_struct(side).get_joint_pose()  # radians, 7-list
         return {"value": True, "info": {"js_deg": rad2deg_list(js_rad)}}
 
-    def _move_joints_smooth(self, side, target_js_rad):
+    def _move_joints_smooth(self, side, target_js_rad, speed=20):
         """Drive the arm to `target_js_rad` (radians) at bounded velocity.
 
         The old code teleported via ``reset_by_joint_states`` (``p.resetJointState``)
@@ -689,12 +690,14 @@ class SimServer:
         control with a capped ``maxVelocity`` + enough steps makes it sweep smoothly.
         """
         arm = self._arm_struct(side)
+        controller_speed = max(1.0, min(100.0, float(speed)))
+        max_velocity = ARM_MAX_VEL * controller_speed / 20.0
         start = np.asarray(arm.get_joint_pose(), dtype=float)
         target = np.asarray(target_js_rad, dtype=float)
         max_delta = float(np.max(np.abs(target - start)))
-        arm.maxvel = ARM_MAX_VEL
+        arm.maxvel = max_velocity
         arm.move_joint(target)
-        n_steps = max(int(max_delta / (ARM_MAX_VEL * SIM_STEP_DELAY)) + 1, 4)
+        n_steps = max(int(max_delta / (max_velocity * SIM_STEP_DELAY)) + 1, 4)
         for _ in range(n_steps):
             self._step(1)
 
@@ -703,18 +706,60 @@ class SimServer:
         trajectory = req.get("trajectory", [])
         if not trajectory:
             return {"value": False, "info": {"error": "empty trajectory"}}
+        speed = req.get("speed", 20)
         with self._lock:
             for wp in trajectory:
-                self._move_joints_smooth(side, deg2rad_list(list(wp)))
-        return {"value": True, "info": {"n_waypoints": len(trajectory)}}
+                self._move_joints_smooth(
+                    side, deg2rad_list(list(wp)), speed=speed
+                )
+        return {"value": True, "info": {
+            "n_waypoints": len(trajectory), "speed": speed,
+        }}
+
+    def _move_joints_smooth_dual(self, l_target, r_target, speed=20):
+        """Drive both arms toward their targets in the same physics loop."""
+        controller_speed = max(1.0, min(100.0, float(speed)))
+        max_velocity = ARM_MAX_VEL * controller_speed / 20.0
+        max_delta = 0.0
+        for side, target in (("left", l_target), ("right", r_target)):
+            arm = self._arm_struct(side)
+            start = np.asarray(arm.get_joint_pose(), dtype=float)
+            target = np.asarray(target, dtype=float)
+            max_delta = max(max_delta, float(np.max(np.abs(target - start))))
+            arm.maxvel = max_velocity
+            arm.move_joint(target)
+        n_steps = max(int(max_delta / (max_velocity * SIM_STEP_DELAY)) + 1, 4)
+        for _ in range(n_steps):
+            self._step(1)
+
+    def _execute_dual_trajectory(self, req):
+        left = req.get("left", [])
+        right = req.get("right", [])
+        if not left or not right or len(left) != len(right):
+            return {"value": False,
+                    "info": {"error": "left/right must be non-empty and equal length"}}
+        speed = req.get("speed", 20)
+        with self._lock:
+            for l_wp, r_wp in zip(left, right):
+                self._move_joints_smooth_dual(
+                    deg2rad_list(list(l_wp)), deg2rad_list(list(r_wp)),
+                    speed=speed,
+                )
+        return {"value": True, "info": {
+            "n_waypoints": len(left), "speed": speed,
+        }}
 
     def _move_to_pose(self, req):
         side = req.get("side", "left")
         pose = req.get("pose", {})
         js_deg = [pose.get(f"J{i}", 0.0) for i in range(1, 8)]
         with self._lock:
-            self._move_joints_smooth(side, deg2rad_list(js_deg))
-        return {"value": True, "info": {"js_deg": js_deg}}
+            self._move_joints_smooth(
+                side, deg2rad_list(js_deg), speed=req.get("speed", 30)
+            )
+        return {"value": True, "info": {
+            "js_deg": js_deg, "speed": req.get("speed", 30),
+        }}
 
     def _gripper(self, req):
         side = req.get("side", "left")

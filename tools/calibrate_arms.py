@@ -26,7 +26,6 @@
 """
 
 import os
-import sys
 import json
 import argparse
 import time
@@ -196,26 +195,6 @@ def get_camera_intrinsics(serial):
     raise RuntimeError(f"未找到序列号为 {serial} 的相机")
 
 
-def capture_images(serial, n=FRAMES_PER_POSE):
-    """连续采集 n 帧 BGR 图像"""
-    import pyrealsense2 as rs
-    pipeline = rs.pipeline()
-    config = rs.config()
-    config.enable_device(serial)
-    config.enable_stream(rs.stream.color, CAMERA_W, CAMERA_H, rs.format.bgr8, 30)
-    pipeline.start(config)
-    for _ in range(5):
-        pipeline.wait_for_frames()
-
-    images = []
-    for _ in range(n):
-        frames = pipeline.wait_for_frames()
-        images.append(np.asanyarray(frames.get_color_frame().get_data()))
-
-    pipeline.stop()
-    return images
-
-
 def capture_images_paired(left_serial, right_serial, n=FRAMES_PER_POSE):
     """同时从两台相机采集 n 帧对（交替 wait_for_frames 保证同步）。"""
     import pyrealsense2 as rs
@@ -290,12 +269,6 @@ class LivePreview:
         if self._thread is not None:
             self._thread.join(timeout=2)
         cv2.destroyAllWindows()
-
-    def has_left(self):
-        return self._lp is not None
-
-    def has_right(self):
-        return self._rp is not None
 
     def capture_paired_frames(self, n=FRAMES_PER_POSE):
         """采集 n 对唯一的 (left, right) 帧，保证帧不重复且左右同步。

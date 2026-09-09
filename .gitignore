@@ -8,6 +8,12 @@ smart_pick_and_place_ws/devel/
 smart_pick_and_place_ws/*/CMakeLists.txt
 log/
 
+# Downloaded inference artifacts and local runtime output
+dependence/yolo_world/*.pt
+mobileclip2_b.ts
+sim_log/
+recorded_trajectories/*/.backup/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

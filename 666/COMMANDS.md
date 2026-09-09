@@ -10,7 +10,7 @@
 conda activate anygrasp
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib
-./start.bash  # 启动 ROS + Twin IK 服务（4 端口：8000/8010/8011/8020）
+./start.bash  # 一键启动真机服务（夹爪 8001/8002、桥接 8010/8011、Twin 8020/8021、AnyGrasp 8030）
 ```
 
 JSON 通过 stdin 传入；架构 / 协议 / 硬件说明见 `CLAUDE.md`。
@@ -35,6 +35,9 @@ echo '{"object":"orange","container":"green bowl"}' | python run_skill.py pick_a
 # 递瓶子给用户（人机递物）
 echo '{"object":"bottle","container":"person"}' | python run_skill.py pick_and_place
 
+# 右臂直接递给用户（不经过左臂）
+echo '{"speed":15}' | python run_skill.py right_give_to_user
+
 # 扔瓶子进垃圾桶
 echo '{"object":"bottle","container":"trash"}' | python run_skill.py pick_and_place
 
@@ -45,7 +48,7 @@ echo '{"object":"cup","container":"desk"}' | python run_skill.py pick_and_place
 echo '{"object":"apple,orange,fruit","container":"red plate"}' | python run_skill.py pick_and_place
 ```
 
-> ⚠️ **`object` 字段必须用英文类名**。YOLO-World（yolov8x-worldv2.pt）只识别英文开放词汇，
+> ⚠️ **`object` 字段建议使用英文类名**。YOLOE-26（yoloe-26s-seg.pt）使用英文开放词汇提示效果最好，
 > 中文（如 `"桃子"`、`"瓶子"`）会得到 `no detections`。
 > 把口语映射成英文：桃子→`peach`、橘子→`orange`、瓶子→`bottle`、苹果→`apple`、杯子→`cup`。
 > `container` 名字同理（`"green bowl"` 不要写 `"绿碗"`）。
@@ -62,7 +65,7 @@ echo '{"object":"bottle","container":"trash","side":"right"}' | python run_skill
 | 值 | 模式 | 行为 |
 |---|---|---|
 | 容器名（`"green bowl"`, `"pink plate"` 等） | 桌面放置 | YOLO 检测容器位置 → 放进去 |
-| `"person"` | 人机递物 | 经中间路径点运动到 handover 位 → 张手 |
+| `"person"` | 人机递物 | 默认左臂递交；指定 `side:"right"` 时走右臂 `handover_pose`，直接张爪 |
 | `"trash"` / `"垃圾桶"` / `"garbage"` / `"bin"` | 扔垃圾 | 运动到扔垃圾位 → 张手 |
 | `"desk"` / `"桌子"` / `"table"` | 放桌面 | 从 `desk_pose_1/2/3` 中随机选 → 张手 |
 
@@ -79,7 +82,15 @@ echo '{"container":"trash"}' | python run_skill.py fetch_from_user
 echo '{"container":"desk"}' | python run_skill.py fetch_from_user
 ```
 
-仅需 `container`，物品由用户递给机械臂。流程：移到 handover → 张手等待 → 用户放入 → 闭合 → 放置。
+仅需 `container`，物品由用户递给机械臂。流程：移到 handover → 张手等待 → 用户放入 → 闭合 → 放置。它是“从用户处取物”，不要与右臂递给用户混用。
+
+### `right_give_to_user` — 右臂直接递给用户
+
+```bash
+echo '{"speed":15}' | python run_skill.py right_give_to_user
+```
+
+默认执行右臂 `handover_pose`，到位后张爪，停留 2 秒回 home；不经过左臂。`dual_handover` 仍然只表示左右臂之间的交接。
 
 ### `grasp_to_drawer` — 双臂交接放入抽屉 ⭐ 已实现
 
@@ -157,12 +168,14 @@ echo '{"command":"play","parallel":[
 
 #### 直接调用抽屉命令（右臂硬编码）
 
+`open_drawer` 和 `close_drawer` 默认均以 `0.5x` 回放；也可在 `pose_execute` 输入中显式传入 `speed` 覆盖。
+
 ```bash
 echo '{"command":"open_drawer"}'  | python run_skill.py pose_execute
 echo '{"command":"close_drawer"}' | python run_skill.py pose_execute
 ```
 
-> `open_drawer` / `close_drawer` 只能由右臂执行（硬编码 192.168.1.18）。
+> `open_drawer` / `close_drawer` 只能由右臂执行（硬编码 192.168.1.18），默认轨迹速度为 `0.5x`。
 
 #### 播放灵巧手手势
 
@@ -199,7 +212,7 @@ echo '{"command":"play","hand":"peace"}' | python run_skill.py pose_execute
 |---|---|---|
 | `grasp` | 视觉抓取（YOLO + AnyGrasp + Twin 轨迹） | `{"object":"X"}` |
 | `place` | 视觉放置 | `{"object":"X","container":"Y"}` |
-| `handover` | 经中间点插值运动到 handover 位 + 张手 | 无 |
+| `handover` | 默认左臂递交；`side:"right"` 时右臂直接递交（命名位姿，语义与左臂一致） | `side`, `speed`, `release_wait` |
 | `trash` | 移动到垃圾桶位 + 张手 | 无 |
 | `desk_place` | 从 `desk_pose_1/2/3` 中随机选 + 张手 | 无 |
 
@@ -235,6 +248,6 @@ cat recorded_sequences/<name>.json | python run_skill.py pose_execute
 | 用户说 | container |
 |---|---|
 | "放桌上" / "放桌子上" / "放桌子" | `"desk"` |
-| "给我" / "递给我" / "我要" | `"person"` |
+| "给我" / "递给我" / "我要" | `"person"`；明确指定右臂时优先 `right_give_to_user` |
 | "扔掉" / "扔垃圾桶" / "丢掉" | `"trash"` |
 | "放抽屉里" / "放进抽屉" | `"drawer1"` + `grasp_to_drawer` skill |

@@ -40,13 +40,24 @@ class SimArmClient:
         return send_json(self.sock, data)
 
     def move_to_named_pose(self, pose_dict, speed=30):
-        self._send({"cmd": "move_to_pose", "side": self.side,
-                    "pose": {k: float(v) for k, v in pose_dict.items()},
-                    "speed": speed})
-        return True
+        response = self._send({"cmd": "move_to_pose", "side": self.side,
+                               "pose": {k: float(v) for k, v in pose_dict.items()},
+                               "speed": speed})
+        return bool(response.get("value", False))
 
     def execute_trajectory(self, trajectory, speed=20):
         traj = [[float(x) for x in wp] for wp in trajectory]
-        self._send({"cmd": "execute_trajectory", "side": self.side,
-                    "trajectory": traj, "speed": speed})
-        return True
+        response = self._send({"cmd": "execute_trajectory", "side": self.side,
+                               "trajectory": traj, "speed": speed})
+        return bool(response.get("value", False))
+
+    def execute_dual_trajectory(self, left, right, speed=20):
+        """Simultaneously replay paired left/right waypoints (degrees)."""
+        left_trajectory = [[float(x) for x in wp] for wp in left]
+        right_trajectory = [[float(x) for x in wp] for wp in right]
+        response = self._send({
+            "cmd": "execute_dual_trajectory",
+            "left": left_trajectory, "right": right_trajectory,
+            "speed": speed,
+        })
+        return bool(response.get("value", False))

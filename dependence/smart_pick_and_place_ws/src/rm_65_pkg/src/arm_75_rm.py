@@ -3,6 +3,8 @@ from Robotic_Arm.rm_robot_interface import *
 import copy
 import numpy as np
 import rospy
+import threading
+import time
 
 def generate_consecutive_arrays(a1, an_plus_1, n):
     # Calculate the total difference between a(n+1) and a1
@@ -49,6 +51,10 @@ class RM_ARM():
         # the next state read is retried.
         self.last_commanded_joint = None
         self.arm_joint_state = {"joint": [0.0] * 7}
+        # The vendor SDK uses one TCP connection per RoboticArm instance and
+        # does not support concurrent requests on that connection.  Protect
+        # state reads and motion commands with one re-entrant lock.
+        self.sdk_lock = threading.RLock()
 
 
     def arm_connet(self, mode=None):  #connet to the arm
@@ -130,7 +136,8 @@ class RM_ARM():
 
     def read_joint_state(self):
         #tag, arm_states = self.robot_arm.rm_get_arm_all_state()
-        tag, arm_states = self.robot_arm.rm_get_current_arm_state()
+        with self.sdk_lock:
+            tag, arm_states = self.robot_arm.rm_get_current_arm_state()
         if tag == 0:
             print("Succeed to get current joint state and the end pose!")
             joint_current_state = arm_states["joint"]
@@ -142,7 +149,8 @@ class RM_ARM():
 
     def move_joint_trajectory(self, end_joint, connect_tag, movejoint_speed, move_joint_block):
         # print(end_joint)
-        tag = self.robot_arm.rm_movej(joint=end_joint, v=movejoint_speed, r=self.movejoint_r, connect=connect_tag, block=move_joint_block)
+        with self.sdk_lock:
+            tag = self.robot_arm.rm_movej(joint=end_joint, v=movejoint_speed, r=self.movejoint_r, connect=connect_tag, block=move_joint_block)
         if tag == 0:
             self.last_commanded_joint = list(end_joint)
             log = "Succeed to move joint to end_joint!"
@@ -153,7 +161,8 @@ class RM_ARM():
         return log
 
     def move_pose_trajectory(self, end_pose, connect_tag, movepose_speed, movepose_block):
-        tag = self.robot_arm.rm_movel(pose=end_pose, v=movepose_speed, r=self.movejoint_r, connect=connect_tag, block=movepose_block)
+        with self.sdk_lock:
+            tag = self.robot_arm.rm_movel(pose=end_pose, v=movepose_speed, r=self.movejoint_r, connect=connect_tag, block=movepose_block)
         if tag == 0:
             log = "Succeed to move joint to end_pose!"
             print("Succeed to move joint to end_pose!")
@@ -174,7 +183,14 @@ class RM_ARM():
             #     delta_threshold *= 1.3
             target_js = np.array(js)
             delta_js = target_js - start_js
-            num_point = int(np.linalg.norm(delta_js)/delta_threshold)
+            # Never drop a waypoint entirely: int(norm/1.0) truncates sub-1
+            # degree deltas to 0 rows, which removes the waypoint from the
+            # CAN-FD stream. Trajectories that end in a near-stationary dwell
+            # (e.g. recorded handover poses) then finish short of their final
+            # waypoint, and the end-pose verification waits for a target that
+            # was never sent. Emitting at least one point also keeps the
+            # stream's final target == trajectory[-1].
+            num_point = max(1, int(np.linalg.norm(delta_js)/delta_threshold))
             
             # if i < 1:
             #     static_num = 100
@@ -232,11 +248,18 @@ class RM_ARM():
 
     def move_joint_follow(self, trajectory, current_js, interval_time = 0.013, mb = 0):
         joint_follow_traj = self.generate_joint_follow_trajectory(trajectory, current_js, mb = mb)
-        interval_time = max(0.01, interval_time)
+        # The CAN-FD API is streamed by the bridge, so the caller's joint
+        # speed is represented by this pacing interval.  Keep a conservative
+        # lower bound to avoid overwhelming the controller.
+        interval_time = max(0.005, interval_time)
         
-        for j in range(joint_follow_traj.shape[0]):
-            tag = self.robot_arm.rm_movej_canfd(joint= list(joint_follow_traj[j,:]), follow=True, expand=0)
-            rospy.sleep(interval_time)
+        tag = -1
+        # Keep the state publisher from interleaving rm_get_joint_degree calls
+        # with CAN-FD packets on the same vendor SDK connection.
+        with self.sdk_lock:
+            for j in range(joint_follow_traj.shape[0]):
+                tag = self.robot_arm.rm_movej_canfd(joint= list(joint_follow_traj[j,:]), follow=True, expand=0)
+                rospy.sleep(interval_time)
         
         if tag == 0:
             if len(trajectory) > 0:
@@ -246,6 +269,41 @@ class RM_ARM():
             print(f"Faild to move end effector to end pose!\nthe rm_movel tag is {tag}")
         
         return tag
+
+    def read_joint_degrees(self):
+        """Read joints without concurrent access to the vendor SDK socket."""
+        with self.sdk_lock:
+            return self.robot_arm.rm_get_joint_degree()
+
+    def wait_for_joint_position(self, target_joint, tolerance=0.5,
+                                timeout=30.0, poll_interval=0.1):
+        """Wait for a target pose, but never block forever on a bad state read."""
+        target = np.asarray(target_joint, dtype=float)
+        deadline = time.monotonic() + float(timeout)
+        while not rospy.is_shutdown() and time.monotonic() < deadline:
+            tag, joints = self.read_joint_degrees()
+            if tag == 0 and len(joints) == len(target):
+                if np.max(np.abs(np.asarray(joints, dtype=float) - target)) < tolerance:
+                    return True
+            rospy.sleep(poll_interval)
+        return False
+
+    @staticmethod
+    def follow_interval_for_speed(speed, nominal_speed=20, nominal_interval=0.013):
+        """Convert the bridge joint speed (percent) to a CAN-FD interval.
+
+        Multi-waypoint playback uses ``rm_movej_canfd`` and therefore does
+        not consume the per-command ``rm_movej(v=...)`` speed directly.  The
+        bridge must pace the stream explicitly: speed 10 is half the nominal
+        speed 20, so its interval is doubled.
+        """
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            speed = float(nominal_speed)
+        if speed <= 0:
+            speed = float(nominal_speed)
+        return max(0.005, float(nominal_interval) * float(nominal_speed) / speed)
 
 
 if __name__ == "__main__":

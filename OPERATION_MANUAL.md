@@ -57,8 +57,8 @@ command -v xfce4-terminal || echo "需要安装：sudo apt install xfce4-termina
 |------|------|------|----------|
 | 左臂 | RM 系列 7-DOF | 192.168.1.19 | 机械臂 8010 |
 | 右臂 | RM 系列 7-DOF | 192.168.1.18 | 机械臂 8011 |
-| 右臂夹爪 | Robotiq 85 | /dev/ttyUSB0, slave=9 | 8001 |
-| 左臂夹爪 | Robotiq 85 | /dev/ttyUSB1, slave=1 | 8002 |
+| 右臂夹爪 | Robotiq 85 | `/dev/serial/by-id/...DU0E613N...`, slave=9 | 8001 |
+| 左臂夹爪 | Robotiq 85 | `/dev/serial/by-id/...BG00T5A5...`, slave=1 | 8002 |
 | 孪生推理（左） | Twin IK | 本地 | 8020 |
 | 孪生推理（右） | Twin IK | 本地 | 8021 |
 | AnyGrasp | 抓取检测 | 本地 | 8030 |
@@ -70,15 +70,38 @@ cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World
 bash start.bash
 ```
 
-脚本会弹出 1 个 xfce4-terminal 窗口，含 6 个标签页：
+`start.bash` 会自动打开左右机械臂 TCP 桥接标签页。桥接脚本会等待 ROS Master 就绪，并检查 8010/8011 是否已被占用。请确认机械臂静止后再执行：
+
+```bash
+cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World/dependence/smart_pick_and_place_ws/src/rm_65_pkg/src
+source /opt/ros/noetic/setup.bash
+/home/zz/anaconda3/envs/anygrasp/bin/python3 arm_75_bringup.py          # 左臂 :8010
+```
+
+```bash
+cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World/dependence/smart_pick_and_place_ws/src/rm_65_pkg/src
+source /opt/ros/noetic/setup.bash
+/home/zz/anaconda3/envs/anygrasp/bin/python3 arm_75_bringup_right.py   # 右臂 :8011
+```
+
+如果只需要单独启动某一侧，也可以使用带 ROS Master 等待和端口重复检查的启动器：
+
+```bash
+tools/start_arm_bridge.sh left
+tools/start_arm_bridge.sh right
+```
+
+`start.bash` 会弹出 1 个 xfce4-terminal 窗口，含 8 个标签页：
 
 | 标签 | 服务 | 说明 |
 |------|------|------|
-| ROS Bringup | `bringup.launch` | 双臂驱动、双相机（左臂 8010、右臂 8011） |
+| ROS Bringup | `bringup.launch` | 双臂可视化、双相机 |
+| Arm bridge (left) | `arm_75_bringup.py` | 自动启动，左臂 TCP :8010 |
+| Arm bridge (right) | `arm_75_bringup_right.py` | 自动启动，右臂 TCP :8011 |
 | Twin IK (left) | `twin.py --side left` | 左臂孪生推理 :8020 |
 | Twin IK (right) | `twin.py --side right` | 右臂孪生推理 :8021 |
-| Gripper R | `server.py --port 8001` | 右臂夹爪（/dev/ttyUSB0, slave 9） |
-| Gripper L | `server.py --port 8002` | 左臂夹爪（/dev/ttyUSB1, slave 1） |
+| Gripper R | `server.py --port 8001` | 右臂夹爪（稳定 by-id 路径，slave 9） |
+| Gripper L | `server.py --port 8002` | 左臂夹爪（稳定 by-id 路径，slave 1） |
 | AnyGrasp Server | `anygrasp_server.py` | 抓取检测 :8030 |
 
 ### 3.3 运行技能
@@ -99,6 +122,12 @@ echo '{"object":"cup","container":"desk"}' | python run_skill.py pick_and_place
 
 # 从用户手中接收物品
 echo '{"container":"pink plate"}' | python run_skill.py fetch_from_user
+
+# 回放右臂预录制取物轨迹（包含闭爪和回 home）
+echo '{}' | python run_skill.py receive_user_trajectory
+
+# 右臂直接递给用户（包含开爪和回 home）
+echo '{"speed":15}' | python run_skill.py right_give_to_user
 ```
 
 完整命令速查见 [COMMANDS.md](COMMANDS.md)。
@@ -119,7 +148,7 @@ echo '{"container":"pink plate"}' | python run_skill.py fetch_from_user
 
 SimServer 加载**双臂** URDF（左臂 + 右臂），所有命令带 `side` 字段路由到对应机械臂。
 
-> 注意：**感知（YOLO-World / AnyGrasp）与孪生 IK 暂未路由到仿真**，因此依赖视觉检测/逆解轨迹的技能（pick_and_place、grasp、place、fetch_from_user、grasp_to_drawer）目前仍需真机服务，属 Phase 2 范围。
+> 注意：**感知（YOLOE-26 / AnyGrasp）与孪生 IK 暂未路由到仿真**，因此依赖视觉检测/逆解轨迹的技能（pick_and_place、grasp、place、fetch_from_user、grasp_to_drawer）目前仍需真机服务，属 Phase 2 范围。
 
 ### 4.2 启动仿真
 
@@ -149,14 +178,14 @@ python3 sim_server.py --novis --port 8031
 在命令前加 `SIM_MODE=1`：
 
 ```bash
-# 扔垃圾
-SIM_MODE=1 python run_skill.py trash
-
 # 递交给用户
 SIM_MODE=1 python run_skill.py handover
 
 # 放桌面
 SIM_MODE=1 python run_skill.py desk_place
+
+# 擦桌子轨迹 + 右臂回 home
+SIM_MODE=1 python run_skill.py wipe_table
 
 # 位姿回放（左臂 home）
 echo '{"command":"play","name":"home","arm":"left"}' | SIM_MODE=1 python run_skill.py pose_execute
@@ -172,19 +201,22 @@ echo '{"command":"close_drawer"}' | SIM_MODE=1 python run_skill.py pose_execute
 
 | Skill | 说明 |
 |-------|------|
-| `trash` | 移动到垃圾桶位姿松手 |
-| `handover` | 移动到 handover 位姿 |
+| `handover` | 默认左臂递交；`side:"right"` 时使用右臂直接递交轨迹 |
 | `desk_place` | 随机选桌面位姿 |
 | `pose_execute` | 位姿回放 + 开关抽屉（右臂轨迹） |
+| `wipe_table` | 回放擦桌子轨迹，成功后右臂回 home |
 
 **⏳ 待 Phase 2（视觉/逆解类，依赖真机感知或孪生 IK）**
 
 | Skill | 依赖 |
 |-------|------|
-| `pick_and_place` | YOLO-World + AnyGrasp + Twin IK |
-| `grasp` | YOLO-World + AnyGrasp + Twin IK |
-| `place` | YOLO-World + Twin IK |
+| `pick_and_place` | YOLOE-26 + AnyGrasp + Twin IK |
+| `grasp` | YOLOE-26 + AnyGrasp + Twin IK |
+| `place` | YOLOE-26 + Twin IK |
 | `fetch_from_user` | Twin IK |
+| `receive_and_hold` | Twin IK |
+| `receive_user_trajectory` | 右臂预录制轨迹 |
+| `right_give_to_user` | 右臂执行 `handover_pose`，到位后张爪，停留 2 秒回 home |
 | `grasp_to_drawer` | 视觉抓取 + 右臂 SDK |
 | `look_around` / `capture_at_handover` | VLM（云 API，待验证） |
 
@@ -208,6 +240,9 @@ echo '{"object":"orange","container":"green bowl"}' | python run_skill.py pick_a
 echo '{"object":"bottle","container":"person"}' | python run_skill.py pick_and_place
 echo '{"object":"wrapper","container":"trash"}' | python run_skill.py pick_and_place
 echo '{"object":"cup","container":"desk"}' | python run_skill.py pick_and_place
+
+# 右臂直接递给用户（已夹持物品，不经过左臂）
+echo '{"speed":15}' | python run_skill.py right_give_to_user
 
 # 多类别 OR 检测
 echo '{"object":"apple,orange,fruit","container":"red plate"}' | python run_skill.py pick_and_place
@@ -238,10 +273,10 @@ echo '{"command":"play","parallel":[{"arm":"left","name":"wave"},{"arm":"right",
 
 ### 5.4 抽屉操作（右臂轨迹回放）
 
-`open_drawer` / `close_drawer` 是预录制的完整轨迹回放（不是简单位姿移动），强制右臂执行：
+`open_drawer` / `close_drawer` 是预录制的完整轨迹回放（默认 `0.5x`，不是简单位姿移动），强制右臂执行：
 
 ```bash
-# 真机（SDK 直驱右臂 192.168.1.18:8080）
+# 真机（右臂本地桥接 :8011；轨迹执行器统一走此接口）
 echo '{"command":"open_drawer"}' | python run_skill.py pose_execute
 echo '{"command":"close_drawer"}' | python run_skill.py pose_execute
 
@@ -261,7 +296,6 @@ echo '{"command":"close_drawer"}' | SIM_MODE=1 python run_skill.py pose_execute
 echo '{"object":"orange"}' | python run_skill.py grasp
 echo '{"object":"orange","container":"green bowl"}' | python run_skill.py place
 python run_skill.py handover
-python run_skill.py trash
 python run_skill.py desk_place
 ```
 
@@ -271,7 +305,7 @@ python run_skill.py desk_place
 
 | 维度 | 真机模式 | 仿真模式 |
 |------|----------|----------|
-| 启动脚本 | `bash start.bash`（6 标签） | `bash start_sim.bash`（2 标签） |
+| 启动脚本 | `bash start.bash`（8 标签） | `bash start_sim.bash`（2 标签） |
 | 运行前缀 | 无 | `SIM_MODE=1` |
 | 后端 | 真实机械臂 + Twin IK | PyBullet SimServer :8031 |
 | 视觉/逆解 | 完整支持 | Phase 2（未路由） |
@@ -297,14 +331,14 @@ kill <PID>                    # 或：bash start_sim.bash 会自动清理
 ### 7.2 真机夹爪启动失败
 
 ```bash
-ls /dev/ttyUSB*    # 检查串口装置号
-# 右臂夹爪应为 /dev/ttyUSB0 (slave 9)，左臂为 /dev/ttyUSB1 (slave 1)
+ls -l /dev/serial/by-id/    # 检查稳定串口路径
+# 右臂使用 ...DU0E613N... (slave 9)，左臂使用 ...BG00T5A5... (slave 1)
 # 若装置号漂移，建议写 udev 规则按序列号锁定
 ```
 
-### 7.3 YOLO-World 检测不到中文物体
+### 7.3 YOLOE-26 检测不到中文物体
 
-YOLO-World 仅支持英文类名。中文名需先翻译（如 桃子→`peach`、瓶子→`bottle`、杯子→`cup`）。
+YOLOE-26 文本提示建议使用英文类名。中文名需先翻译（如 桃子→`peach`、瓶子→`bottle`、杯子→`cup`）。
 
 ### 7.4 AnyGrasp 导入失败
 

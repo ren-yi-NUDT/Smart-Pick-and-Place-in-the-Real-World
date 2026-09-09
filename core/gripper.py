@@ -2,16 +2,18 @@
 Gripper controller -- TCP client to the gripper movement service.
 
 Protocol:
-  SEND:   raw JSON (no length prefix)
-  RECV:   raw JSON (no length prefix)
+  SEND/RECV: 4-byte big-endian length prefix + JSON payload
+
+The server remains able to answer legacy raw-JSON clients during migration.
 """
 
-import json
 import socket
 import time
 
 import numpy as np
 from termcolor import cprint
+
+from core.tcp_protocol import recv_json_compat, send_json_frame
 
 SERVICE_SRC = "/right_gripper/movement_control"
 
@@ -84,9 +86,8 @@ class GripperClient:
         if self._mock:
             cprint(f"[GripperClient/Mock] {data}", "yellow")
             return {"value": True, "info": "mock success"}
-        msg = json.dumps(data).encode("utf-8")
-        self.sock.sendall(msg)
-        resp = json.loads(self.sock.recv(1024).decode("utf-8"))
+        send_json_frame(self.sock, data)
+        resp = recv_json_compat(self.sock)
         cprint(f"Control gripper response: {resp}", "red")
         return resp
 

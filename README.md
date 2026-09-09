@@ -1,6 +1,6 @@
 # Smart Pick and Place in the Real World
 
-基于虚实结合双重推理架构的桌面级智能机械臂 Pick-and-Place 系统。采用 **Skill-DB 架构**，通过统一 CLI 调用封装好的机器人技能，集成 YOLO-World 开放词汇检测、AnyGrasp 抓取姿态生成、PyBullet 仿真轨迹规划，实现真实环境下的智能抓取与放置。
+基于虚实结合双重推理架构的桌面级智能机械臂 Pick-and-Place 系统。采用 **Skill-DB 架构**，通过统一 CLI 调用封装好的机器人技能，集成 YOLOE-26 开放词汇检测、AnyGrasp 抓取姿态生成、PyBullet 仿真轨迹规划，实现真实环境下的智能抓取与放置。
 
 ## 系统架构
 
@@ -19,7 +19,7 @@
 │  └──────┬──────┘  └─────────────┘  └───────────┘  └───────────┘ │
 │         │ 独立CLI调用（高级skill已内联等效逻辑）                     │
 │  ┌──────┴──────────────────────────────────────────┐             │
-│  │  grasp │ place │ handover │ trash │ desk_place  │ (独立skill) │
+│  │  grasp │ place │ handover │ right_give │ desk_place │ (独立skill) │
 │  └───────┴───────┴─────────┴───────┴──────────────┘             │
 │  ┌─────────────┐                                                  │
 │  │pose_execute │  (位姿/动作序列执行)                               │
@@ -34,13 +34,13 @@
 └──────────┬──────────────┬────────────────────────────────────────┘
            │              │
      Socket Clients   Socket Servers
-     (8010/8000/8020)  (ROS Nodes + Twin Server)
+     (8001/8002/8010/8011/8020/8021/8030)  (ROS + Bridge + Twin + AnyGrasp)
 ```
 
-**三进程分布式架构：**
-- **进程1 (start1.bash)**: ROS系统启动 — 机械臂驱动、相机节点、灵巧手节点
-- **进程2 (start2.bash)**: 数字孪生推理服务器 — PyBullet物理仿真，IK求解与碰撞检测
-- **主进程 (run_skill.py)**: 通过 CLI 调用技能
+**服务分布式架构：**
+- **`start.bash`**: 一键启动 ROS bringup、左右臂桥接、左右 Twin、左右夹爪和 AnyGrasp；只抢占本项目残留进程，外部端口占用会报错退出
+- **`start_sim.bash`**: 启动 PyBullet SimServer、双臂 Twin 和 AnyGrasp 仿真服务
+- **主进程 (`run_skill.py`)**: 通过统一 CLI 调用技能
 
 ## 快速开始
 
@@ -49,7 +49,7 @@
 - ROS Noetic
 - Conda 环境 `anygrasp` (Python 3.9)
 - Intel RealSense D455 相机
-- RM75-B 7-DOF 机械臂 + Inspire 灵巧手
+- 双 RM75-B 7-DOF 机械臂 + Robotiq 85 夹爪
 - CUDA / cuDNN
 
 ### 启动流程 A：面向 OpenClaw（AI Agent 模式）
@@ -59,11 +59,8 @@
 **前置：** OpenClaw 已安装（`openclaw --version`），`openclaw-configs` 分支已 checkout 到工作目录。
 
 ```bash
-# ── 终端 1：ROS 硬件服务 ──
-bash start1.bash    # 灵巧手 :8000, 机械臂 :8010
-
-# ── 终端 2：数字孪生 IK 服务 ──
-bash start2.bash    # Twin IK :8020
+# ── 终端 1：一键启动全部服务（会抢占本项目残留实例） ──
+bash start.bash
 
 # ── 终端 3：启动 OpenClaw Agent ──
 openclaw             # 加载 workspace/ (IDENTITY, SOUL, skills/) 启动 CMLLR
@@ -93,12 +90,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 export GLM_API_TOKEN="你的智谱 API Token"
 
 # 1. 确保硬件连接
-ping 192.168.1.19     # 机械臂
-ping 192.168.11.209   # 灵巧手
-
-# 2. 启动硬件服务（在 2 个终端中分别启动）
-bash start1.bash   # ROS (灵巧手 8000, 机械臂 8010)
-bash start2.bash   # Twin IK 服务 (8020)
+# 2. 启动硬件、夹爪、Twin 和 AnyGrasp 服务
+bash start.bash
 
 # 3. 调用技能
 cd /home/zz/Code/Smart-Pick-and-Place-in-the-Real-World
@@ -111,6 +104,9 @@ echo '{"object":"orange","container":"green bowl"}' | python run_skill.py pick_a
 
 # 把物品递给用户
 echo '{"object":"bottle","container":"person"}' | python run_skill.py pick_and_place
+
+# 右臂直接把已夹持物品递给用户
+echo '{"speed":15}' | python run_skill.py right_give_to_user
 
 # 扔垃圾
 echo '{"object":"wrapper","container":"trash"}' | python run_skill.py pick_and_place
@@ -130,7 +126,7 @@ echo '{"sequence":[{"arm":"home","hand":"open","delay":0.5}]}' | python run_skil
 
 **快速验证服务是否就绪：**
 ```bash
-lsof -ti:8000,8010,8020  # 应返回 3 个 PID
+lsof -ti:8001,8002,8010,8011,8020,8021,8030  # 应返回已启动服务的 PID
 ```
 
 ## Skill 一览
@@ -141,6 +137,9 @@ lsof -ti:8000,8010,8020  # 应返回 3 个 PID
 |-------|------|------|
 | `pick_and_place` | 检测→抓取→放置完整流程 | `object` + `container` |
 | `fetch_from_user` | 从用户手中接收→放置 | `container` |
+| `receive_and_hold` | 从用户手中接收并夹持回 home | `side`, `speed` |
+| `receive_user_trajectory` | 以默认 `0.5x` 回放右臂预录制取物轨迹，到交接位停留 5 秒后闭爪并回 home | `speed`, `gripper_enabled`, `gripper_event_wait` |
+| `right_give_to_user` | 右臂执行 `handover_pose`，到位后张爪，停留 2 秒回 home | `pose_name`, `speed`, `release_wait`, `home_speed` |
 | `look_around` | 移动到观测位姿拍照，VLM 分析场景 | 无 |
 | `capture_at_handover` | 移动到 handover 位拍照，VLM 识别物品 | 无 |
 | `pose_execute` | 执行位姿/动作序列（支持手势） | `sequence` 或 `command` |
@@ -151,10 +150,10 @@ lsof -ti:8000,8010,8020  # 应返回 3 个 PID
 
 | Skill | 说明 |
 |-------|------|
-| `grasp` | 视觉抓取（VLM 目标词扩展 + YOLO-World + AnyGrasp + Twin 轨迹） |
+| `grasp` | 视觉抓取（VLM 目标词扩展 + YOLOE-26 + AnyGrasp + Twin 轨迹） |
 | `place` | 视觉放置（检测容器位置 → 生成放置轨迹） |
-| `handover` | 递交给人（插值轨迹经中间点到 handover 位姿） |
-| `trash` | 扔垃圾（移动到垃圾桶位姿松手） |
+| `handover` | 左臂递交；`side:"right"` 时使用右臂直接递交轨迹 |
+| `trash` | 通过 `pick_and_place` / `fetch_from_user` 路由扔垃圾；无独立 `trash.py` |
 | `desk_place` | 放桌面（随机选择预设位姿） |
 
 ### container 参数
@@ -162,7 +161,7 @@ lsof -ti:8000,8010,8020  # 应返回 3 个 PID
 | container 值 | 模式 | 行为 |
 |---|---|---|
 | 容器名称 (如 `"green bowl"`) | 桌面放置 | YOLO 检测容器位置，生成放置轨迹 |
-| `"person"` | 人机递物 | 平滑轨迹到 handover 位姿，松手 |
+| `"person"` | 人机递物 | 默认左臂递交；`side:"right"` 时右臂直接递交，不经过左臂 |
 | `"trash"` | 扔垃圾 | 移动到垃圾桶位姿，松手 |
 | `"desk"` | 放桌面 | 随机选择3个预设位姿之一 |
 
@@ -189,7 +188,7 @@ lsof -ti:8000,8010,8020  # 应返回 3 个 PID
 
 ## 开发原则
 
-- **流水线执行中禁止跨 Skill 实例化**：高级 skill（如 `pick_and_place`、`fetch_from_user`）需要执行子任务（递送、扔垃圾、放桌面）时，必须使用 `self.control_arm` / `self.control_hand` 内联逻辑，而非 `new Skill()` 创建新实例。新实例会建立额外的 TCP 连接（arm 8010、hand 8000），引入延迟和连接冲突，破坏阶段间的无缝衔接。
+- **流水线执行中禁止跨 Skill 实例化**：高级 skill（如 `pick_and_place`、`fetch_from_user`）需要执行子任务（递送、扔垃圾、放桌面）时，必须使用已有的 context/client 或共享 pipeline，而非 `new Skill()` 创建新实例。新实例会建立额外 TCP 连接，引入延迟和连接冲突，破坏阶段间的无缝衔接。
 - **Skill 的 `run()` 方法必须先检查 `kwargs`**：`run_skill.py` 从 stdin 读取 JSON 后以 `kwargs` 传入。Skill 应先检查 `kwargs`（`if kwargs.get("field"): data = kwargs`），仅在 `kwargs` 为空时才回退到 `self.json_parser.get_command()`，否则 stdin 已被消费，parser 读不到数据。
 
 ## 项目结构
@@ -211,17 +210,19 @@ Smart-Pick-and-Place-in-the-Real-World/
 │   ├── grasp.py              # 原子：视觉抓取
 │   ├── place.py              # 原子：视觉放置
 │   ├── handover.py           # 原子：递交给用户
-│   ├── trash.py              # 原子：扔垃圾
+│   ├── right_give_to_user.py # 右臂命名位姿递给用户
+│   ├── receive_user_trajectory.py # 右臂从用户处取物
+│   ├── wipe_table.py         # 擦桌子轨迹 + 回 home
 │   └── desk_place.py         # 原子：放桌面
 │
 ├── core/                     # 共享基础设施
 │   ├── config.py             # 集中配置管理
-│   ├── arm.py                # 机械臂 Socket 客户端 (:8010)
-│   ├── hand.py               # 灵巧手 Socket 客户端 (:8000)
+│   ├── arm.py                # 机械臂 Socket 客户端 (:8010/:8011)
+│   ├── gripper.py            # Robotiq 夹爪 Socket 客户端 (:8001/:8002)
 │   ├── camera.py             # RealSense RGB-D 采集
 │   ├── twin_client.py        # 数字孪生客户端 (:8020)
 │   ├── transforms.py         # ROS TF 坐标变换
-│   ├── perception.py         # YOLO-World + AnyGrasp 封装
+│   ├── perception.py         # YOLOE-26 + AnyGrasp 封装
 │   ├── vlm.py                # GLM-4.5V 视觉语言模型客户端
 │   └── json_input.py         # JSON stdin 解析
 │
@@ -232,12 +233,11 @@ Smart-Pick-and-Place-in-the-Real-World/
 ├── dependence/               # 第三方依赖
 │   ├── twin_inference/       # 数字孪生推理（独立进程）
 │   ├── anygrasp_sdk/         # AnyGrasp 抓取检测 SDK
-│   ├── yolo_world/           # YOLO-World 模型
+│   ├── yolo_world/           # YOLOE-26 模型
 │   └── smart_pick_and_place_ws/ # ROS catkin 工作空间
 │
-├── start1.bash               # 启动 ROS 服务
-├── start2.bash               # 启动 Twin IK 服务
-└── start.bash                # 一键启动全部
+├── start_sim.bash             # 一键启动仿真服务
+└── start.bash                 # 一键启动真机服务
 ```
 
 ## Skill 基类
@@ -267,9 +267,10 @@ class MySkill(Skill):
 
 | 端口 | 服务 | 发送协议 | 接收协议 |
 |------|------|----------|----------|
-| 8000 | 灵巧手 | 纯 JSON | 纯 JSON |
-| 8010 | 机械臂 | 4字节大端长度头 + JSON | 纯 JSON |
-| 8020 | Twin IK | 纯 JSON | 4字节大端长度头 + JSON |
+| 8001/8002 | Robotiq 夹爪 | 4字节大端长度头 + JSON | 兼容旧原始 JSON 响应 |
+| 8010/8011 | 机械臂桥接 | 4字节大端长度头 + JSON | 兼容旧原始 JSON 响应 |
+| 8020/8021 | Twin IK | 4字节大端长度头 + JSON | 兼容旧原始 JSON 响应 |
+| 8030 | AnyGrasp | 4字节大端长度头 + 二进制图像帧 | 4字节大端长度头 |
 
 **灵巧手指令：** `{"src": "/left_hand/movement_control", "type": "set", "cmd": [a0,a1,a2,a3,a4,a5]}`
 - `[小指, 无名指, 中指, 食指, 拇指, 拇指外展]`，0=弯曲，1000=张开
@@ -305,18 +306,21 @@ python tools/get_current_pose.py
 | 设备 | 型号 | 连接 |
 |------|------|------|
 | 机械臂 | RM75-B (7DOF) | 192.168.1.19:8010 |
-| 灵巧手 | Inspire Hand | 192.168.11.209:8000 (Modbus) |
+| 右臂夹爪 | Robotiq 85 | 本机串口 → :8001 |
+| 左臂夹爪 | Robotiq 85 | 本机串口 → :8002 |
 | 相机 | RealSense D455 | USB, 640x480@30fps |
 
 ## 依赖
 
 - **ROS Noetic** — 机器人控制和坐标变换
 - **PyBullet** — 物理仿真和逆运动学
-- **YOLO-World (Ultralytics)** — 开放词汇目标检测
+- **YOLOE-26 (Ultralytics)** — 开放词汇目标检测与分割
 - **AnyGrasp SDK** — 抓取姿态生成
 - **pyrealsense2** — RealSense D455 驱动
 - **CUDA / cuDNN** — GPU 加速
 - scipy, numpy, open3d, PIL, termcolor
+
+YOLOE-26 首次使用文本提示时会下载约 242 MB 的 `mobileclip2_b.ts` 文本编码器；离线运行时请将它保留在项目启动目录。
 
 ## License
 

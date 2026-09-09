@@ -10,9 +10,8 @@ Pipeline:
   4. Right arm retreats to home (clears the drawer interior)
   5. Right arm closes the drawer (trajectory replay)
 
-Drawer open/close is driven by ``pose_execute.play_open_drawer`` /
-``play_close_drawer`` — these replay pre-recorded SDK trajectories
-(``recorded_trajectories/right/{open,close}_drawer.json``) and are the
+Drawer open/close replays pre-recorded SDK trajectories
+(``recorded_trajectories/right/{open,close}_drawer.json``) — the
 authoritative way to operate the drawer.
 
 Usage (CLI):
@@ -26,25 +25,31 @@ Usage (CLI):
 """
 
 import threading
-import time
 from termcolor import cprint
 
-from skills.base import register_skill
-from skills.pick_and_place import PickAndPlaceSkill
+from skills.base import Skill, register_skill
+from core.drawer_executor import DRAWER_TRAJECTORY_SPEED as DEFAULT_DRAWER_TRAJECTORY_SPEED
 
 
 @register_skill("grasp_to_drawer")
-class GraspToDrawer(PickAndPlaceSkill):
-    """Left-arm grasp + right-arm drawer open/close with dual-arm handover."""
+class GraspToDrawer(Skill):
+    """Left-arm grasp + right-arm drawer open/close with dual-arm handover.
 
-    # ------------------------------------------------------------------
-    # Main entry point
-    # ------------------------------------------------------------------
-    def run(self, **kwargs):
+    Composed of: base visual grasp + core dual-handover replay + drawer
+    trajectory replay. No inheritance from PickAndPlaceSkill.
+    """
+
+    DRAWER_TRAJECTORY_SPEED = DEFAULT_DRAWER_TRAJECTORY_SPEED
+
+    def execute(self, **kwargs):
         data = kwargs if kwargs.get("object") else self.json_parser.get_command()
         obj = data.get("object", "orange")
+        # Detection mode pass-through: YOLO-direct (False) avoids VLM
+        # misgrounding when the target is unambiguous at the observation
+        # poses; VLM grounding (default True) stays opt-in for disambiguation.
+        use_vlm = bool(data.get("use_vlm_grounding", True))
 
-        cprint(f"[grasp_to_drawer] 目标物体: {obj}", "cyan")
+        cprint(f"[grasp_to_drawer] 目标物体: {obj} (use_vlm_grounding={use_vlm})", "cyan")
 
         # ── Phase 1: 左臂抓取 & 右臂同时打开抽屉（并行）──
         cprint("[grasp_to_drawer] 阶段1: 左臂抓取 & 右臂开抽屉（并行）", "yellow")
@@ -52,20 +57,16 @@ class GraspToDrawer(PickAndPlaceSkill):
 
         def _open_drawer_thread():
             try:
-                from skills.pose_execute import PoseExecuteSkill
-                pe = PoseExecuteSkill(
-                    config_path=self.config_path, save_path=self.save_path
+                drawer_result["ok"] = self.drawer_pipeline.open(
+                    speed=self.DRAWER_TRAJECTORY_SPEED
                 )
-                drawer_result["ok"] = pe.play_open_drawer(speed=1.5)
             except Exception as e:
                 cprint(f"[grasp_to_drawer] 开抽屉异常: {e}", "red")
-                drawer_result["ok"] = False
 
         t_drawer = threading.Thread(target=_open_drawer_thread)
         t_drawer.start()
 
-        # 左臂抓取（复用生产级流水线）
-        grasp_ok = self._visual_grasp_phase(obj, side="left")
+        grasp_ok = self.visual_grasp(obj, side="left", use_vlm_grounding=use_vlm)
         t_drawer.join()
 
         if not grasp_ok:
@@ -75,48 +76,31 @@ class GraspToDrawer(PickAndPlaceSkill):
             cprint("[grasp_to_drawer] 右臂开抽屉失败", "red")
             return False
 
-        # ── Phase 2: 两臂交接（左→右，复用验证过的 4 步序列）──
+        # ── Phase 2: 两臂交接（左→右）──
         cprint("[grasp_to_drawer] 阶段2: 双臂交接（左→右）", "yellow")
-        if not self._delegate_to_left_arm(container="drawer"):
+        handover_ok = self.handover_pipeline.run(
+            mode="dual",
+            speed=0.9,
+            require_confirmation=False,
+            direction="left_to_right",
+        )
+        if not handover_ok:
             cprint("[grasp_to_drawer] 双臂交接失败", "red")
             return False
 
         # ── Phase 3: 右臂移动到 drawer_1_placement 并松开夹爪 ──
         cprint("[grasp_to_drawer] 阶段3: 右臂放置到抽屉", "yellow")
-        right_arm = self._ensure_right_arm()
-        right_gripper = self._ensure_right_gripper()
-        right_cfg = self.config.get_arm_config("right")
-        place_pose = right_cfg.get("drawer_1_placement")
-        if place_pose is None:
-            cprint("[grasp_to_drawer] drawer_1_placement 位姿不存在", "red")
+        if not self.drawer_pipeline.release_at(
+                "drawer_1_placement", side="right"):
+            cprint("[grasp_to_drawer] 放置到抽屉失败", "red")
             return False
-
-        right_arm.move_to_named_pose(place_pose, speed=15)
-        right_gripper.open()
-        time.sleep(1)
-
-        # ── Phase 4: 右臂脱离抽屉回 home ──
-        cprint("[grasp_to_drawer] 阶段4: 右臂脱离抽屉回 home", "yellow")
-        right_arm.move_to_named_pose(right_cfg["home"], speed=30)
 
         # ── Phase 5: 右臂关抽屉（轨迹回放，含回 home）──
         cprint("[grasp_to_drawer] 阶段5: 右臂关抽屉", "yellow")
-        from skills.pose_execute import PoseExecuteSkill
-        pe = PoseExecuteSkill(
-            config_path=self.config_path, save_path=self.save_path
-        )
-        if not pe.play_close_drawer(speed=1.5):
+        if not self.drawer_pipeline.close(
+                speed=self.DRAWER_TRAJECTORY_SPEED):
             cprint("[grasp_to_drawer] 关抽屉失败", "red")
             return False
 
         cprint("[grasp_to_drawer] 完成", "green")
         return True
-
-    # ------------------------------------------------------------------
-    # Right-arm client caching (avoid re-connecting across phases)
-    # ------------------------------------------------------------------
-    def _ensure_right_arm(self):
-        return self.arm_for("right")
-
-    def _ensure_right_gripper(self):
-        return self.gripper_for("right")

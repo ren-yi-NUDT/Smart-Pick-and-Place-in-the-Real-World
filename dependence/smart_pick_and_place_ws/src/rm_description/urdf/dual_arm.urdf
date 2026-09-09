@@ -839,7 +839,8 @@
 
 
   <!-- ===== Fixed joint: left base -> right base (T_right_to_left) ===== -->
-  <!-- T_right_to_left: Rz(+90deg) + translation [0.35, -0.71, 0] -->
+  <!-- Keep this visualization transform aligned with the calibrated runtime TF
+       and robot_config.json: Rz(+90deg) + translation [0.35, -0.71, 0]. -->
   <joint name="base_to_R_base" type="fixed">
     <origin xyz="0.35 -0.71 0" rpy="0 0 1.5708"/>
     <parent link="base"/>

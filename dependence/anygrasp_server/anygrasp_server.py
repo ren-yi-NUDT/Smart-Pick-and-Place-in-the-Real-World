@@ -33,7 +33,6 @@ import argparse
 import json
 import os
 import socket
-import struct
 import sys
 import threading
 import time
@@ -43,12 +42,15 @@ import numpy as np
 
 CURR_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(CURR_DIR, "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 SDK_DIR = os.path.join(PROJECT_ROOT, "dependence", "anygrasp_sdk", "grasp_detection")
 sys.path.insert(0, SDK_DIR)
 
 from termcolor import cprint  # noqa: E402
 
 from gsnet import AnyGrasp  # noqa: E402
+from core.tcp_protocol import recv_frame, send_json_frame  # noqa: E402
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8030
@@ -237,20 +239,9 @@ class AnyGraspServer:
     # ------------------------------------------------------------------ #
     # Socket protocol
     # ------------------------------------------------------------------ #
-    def _recv_exactly(self, conn, n):
-        """Read exactly n bytes from conn, or raise."""
-        buf = b""
-        while len(buf) < n:
-            chunk = conn.recv(min(65536, n - len(buf)))
-            if not chunk:
-                raise ConnectionError("client closed connection mid-message")
-            buf += chunk
-        return buf
-
     def _recv_request(self, conn):
         """Read one framed request. Returns (header_dict, depth_np, rgb_np)."""
-        (length,) = struct.unpack(">I", self._recv_exactly(conn, 4))
-        payload = self._recv_exactly(conn, length)
+        payload = recv_frame(conn)
 
         # split header from binary arrays at first newline
         nl_idx = payload.index(b"\n")
@@ -273,9 +264,7 @@ class AnyGraspServer:
         return header, depth, rgb
 
     def _send_response(self, conn, payload_dict):
-        payload = json.dumps(payload_dict).encode("utf-8")
-        conn.sendall(struct.pack(">I", len(payload)))
-        conn.sendall(payload)
+        send_json_frame(conn, payload_dict)
 
     def _handle_client(self, conn):
         with conn:

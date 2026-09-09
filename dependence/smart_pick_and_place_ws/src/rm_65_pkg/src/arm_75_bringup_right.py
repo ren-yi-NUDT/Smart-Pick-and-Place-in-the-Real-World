@@ -1,17 +1,16 @@
 #!/home/zz/anaconda3/envs/anygrasp/bin/python3
-import os
-import sys
 import socket
 from Robotic_Arm.rm_robot_interface import *
 from arm_75_rm import RM_ARM
 import rospy
-from std_msgs.msg import String
 import json, time
 from sensor_msgs.msg import JointState
 
 import numpy as np
 import threading
 import struct
+
+ARM_COMMAND_LOCK_TIMEOUT = 10.0
 
 def degree_2_pi(pose_degree):
     assert len(pose_degree) == 7
@@ -80,8 +79,22 @@ class RM_ARM_bringup_right(RM_ARM):
         self.server_port = 8011
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind((self.server_ip, self.server_port))
+        try:
+            self.server_socket.bind((self.server_ip, self.server_port))
+        except OSError as exc:
+            rospy.logfatal(
+                "Right arm bridge cannot bind TCP %s: %s. "
+                "Stop the existing process before restarting.",
+                self.server_port,
+                exc,
+            )
+            self.server_socket.close()
+            raise
         self.server_socket.listen(5)
+        # TCP clients may stay connected between commands.  Keep socket
+        # handling concurrent, but serialize SDK access because one physical
+        # arm must never receive two motion commands at the same time.
+        self.arm_command_lock = threading.Lock()
 
         self.socket_thread = threading.Thread(target=self.socket_server_worker)
         self.socket_thread.daemon = True
@@ -94,7 +107,13 @@ class RM_ARM_bringup_right(RM_ARM):
                 self.server_socket.settimeout(1.0)
                 try:
                     conn, addr = self.server_socket.accept()
-                    self.handle_client(conn)
+                    client_thread = threading.Thread(
+                        target=self.handle_client,
+                        args=(conn,),
+                        name="arm-client-%s" % (addr[0],),
+                        daemon=True,
+                    )
+                    client_thread.start()
                 except socket.timeout:
                     continue
             except Exception as e:
@@ -120,8 +139,25 @@ class RM_ARM_bringup_right(RM_ARM):
                             raise ConnectionError("Connection closed")
                         data_bytes += chunk
                     msg_str = data_bytes.decode('utf-8')
-                    response = self.rm_75_execute_trajectory_usr(msg_str)
-                    conn.sendall(response.encode('utf-8'))
+                    # Do not hold the command lock while receiving the next
+                    # frame.  An idle client must not block other clients.
+                    if not self.arm_command_lock.acquire(
+                            timeout=ARM_COMMAND_LOCK_TIMEOUT):
+                        response = json.dumps({
+                            "srv": "/right_arm/movement_control",
+                            "value": False,
+                            "info": "arm busy; previous command did not finish",
+                        })
+                    else:
+                        try:
+                            response = self.rm_75_execute_trajectory_usr(msg_str)
+                        finally:
+                            self.arm_command_lock.release()
+                    request = json.loads(msg_str)
+                    response_bytes = response.encode('utf-8')
+                    if request.get('_tcp_protocol') == 'json-frame-v1':
+                        conn.sendall(struct.pack('>I', len(response_bytes)))
+                    conn.sendall(response_bytes)
                 except Exception as e:
                     print(f"Client handler error: {e}")
                     break
@@ -130,7 +166,7 @@ class RM_ARM_bringup_right(RM_ARM):
         pub = rospy.Publisher("right_joint_states", JointState, queue_size=10)
         rate = rospy.Rate(self.publish_rate)
         while not rospy.is_shutdown():
-            tag, joints = self.robot_arm.rm_get_joint_degree()
+            tag, joints = self.read_joint_degrees()
             if tag != 0 or len(joints) != 7:
                 if tag != 0:
                     rospy.logwarn_throttle(
@@ -152,7 +188,7 @@ class RM_ARM_bringup_right(RM_ARM):
             rate.sleep()
 
     def rm_75_execute_trajectory_usr(self, data):
-        print("=== RECEIVED REQUEST (LEFT ARM / GRIPPER) ===")
+        print("=== RECEIVED REQUEST (RIGHT ARM) ===")
         print(f"Data type: {type(data)}")
         print(f"Data content: {data}")
         print("data: ", data)
@@ -160,29 +196,79 @@ class RM_ARM_bringup_right(RM_ARM):
         js_traj_type, js_trajectory, js_move_connect_tag, js_move_jont_speed ,js_move_joint_block, ee_traj_type, ee_trajectory, ee_move_connect_tag, ee_move_jont_speed ,ee_move_joint_block = rm_75_extract_traj(data)
         rospy.loginfo('EE trajectory received:')
         eetag = 1
+        check = False
+        log = "No executable trajectory received"
         for t in js_trajectory:
             rospy.loginfo(t)
         if len(js_traj_type) > 1:
             log = self.move_joint_trajectory(end_joint=js_trajectory[0], connect_tag=0, movejoint_speed=20, move_joint_block=0)
-            is_position = True
-            rospy.logwarn(f"-------{is_position}-----davit js")
-            while is_position:
-                    _, cur_joints = self.robot_arm.rm_get_joint_degree()
-                    if len(cur_joints) != 7:
-                        rospy.sleep(0.1)
-                        continue
-                    dif = np.abs(np.array(cur_joints) - np.array(js_trajectory[0]))
-                    booldif = np.linalg.norm(dif) < 0.5
-                    if np.all(booldif):
-                        is_position = False
-                        break
+            rospy.logwarn("Waiting for right arm to reach the trajectory start pose")
+            if "Succeed" not in log or not self.wait_for_joint_position(
+                    js_trajectory[0], tolerance=0.5, timeout=30.0):
+                log = "Failed to reach trajectory start pose within 30 seconds"
+                rospy.logerr(log)
+                return json.dumps({
+                    "srv": "/right_arm/movement_control",
+                    "value": False,
+                    "info": log,
+                })
             time.sleep(0.1)
             mb = js_move_joint_block[-1]
             rospy.logwarn(f"NOW IN CAN_F MODE, CURRENT POSE IS : {js_trajectory[0]}")
-            log = self.move_joint_follow(js_trajectory, js_trajectory[0], mb = mb)
+            follow_speed = js_move_jont_speed[0] if js_move_jont_speed else 20
+            follow_interval = self.follow_interval_for_speed(follow_speed)
+            rospy.loginfo(
+                "CAN-FD playback speed=%s, interval=%.4fs",
+                follow_speed, follow_interval,
+            )
+            log = self.move_joint_follow(
+                js_trajectory,
+                js_trajectory[0],
+                interval_time=follow_interval,
+                mb=mb,
+            )
+            if log != 0:
+                return json.dumps({
+                    "srv": "/right_arm/movement_control",
+                    "value": False,
+                    "info": "CAN-FD trajectory failed; SDK tag is %s" % log,
+                })
             if mb:
-                rospy.sleep(0.5)
+                # Long recorded segments (e.g. give-to-user trajectories with
+                # 150+ interpolated CAN-FD points) execute on the controller
+                # at ~200-250ms per point, so a full segment can take 30-50s.
+                # The timeout is only a ceiling; fast segments return as soon
+                # as they converge.
+                if not self.wait_for_joint_position(
+                        js_trajectory[-1], tolerance=0.5, timeout=120.0):
+                    log = "Failed to reach final CAN-FD pose within 120 seconds"
+                    rospy.logerr(log)
+                    return json.dumps({
+                        "srv": "/right_arm/movement_control",
+                        "value": False,
+                        "info": log,
+                    })
             check = True
+
+        elif len(ee_traj_type) >= 1 and len(js_traj_type) == 0:
+            # Cartesian-only requests are used for constrained tabletop
+            # motion.  Keep each segment as MOVEL so the tool follows a
+            # straight Cartesian path while preserving the supplied z/rpy.
+            for ty, tr, mt, mv, mb in zip(
+                    ee_traj_type,
+                    ee_trajectory,
+                    ee_move_connect_tag,
+                    ee_move_jont_speed,
+                    ee_move_joint_block):
+                if ty != "ee":
+                    continue
+                log = self.move_pose_trajectory(
+                    end_pose=tr,
+                    connect_tag=mt,
+                    movepose_speed=mv,
+                    movepose_block=mb,
+                )
+            check = "Succeed" in log
 
         elif len(js_traj_type) == 1:
             js_end_trajectory = js_trajectory[-1]
@@ -196,18 +282,16 @@ class RM_ARM_bringup_right(RM_ARM):
                     print("Error: The type is undefinition!")
 
             if mb == 1 and len(ee_traj_type) == 0:
-                is_position = True
-                while is_position:
-                    _, cur_joints = self.robot_arm.rm_get_joint_degree()
-                    if len(cur_joints) != 7:
-                        rospy.sleep(0.1)
-                        continue
-                    dif = np.abs(np.array(cur_joints) - np.array(js_end_trajectory))
-                    booldif = dif < 0.05
-                    if np.all(booldif):
-                        is_position = False
-                        break
-            check = True
+                if not self.wait_for_joint_position(
+                        js_end_trajectory, tolerance=0.05, timeout=30.0):
+                    log = "Failed to reach final joint pose within 30 seconds"
+                    rospy.logerr(log)
+                    return json.dumps({
+                        "srv": "/right_arm/movement_control",
+                        "value": False,
+                        "info": log,
+                    })
+            check = "Succeed" in log
 
         return_dict = {"srv": "/right_arm/movement_control", "value": check, "info": log}
         rsp = json.dumps(return_dict)

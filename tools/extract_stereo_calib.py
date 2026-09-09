@@ -17,10 +17,8 @@
 """
 
 import os
-import sys
 import json
 import argparse
-import time
 import threading
 from datetime import datetime
 

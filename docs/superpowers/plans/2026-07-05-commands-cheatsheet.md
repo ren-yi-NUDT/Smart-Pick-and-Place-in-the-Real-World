@@ -290,8 +290,8 @@ python run_skill.py handover
 ### trash — 扔垃圾
 
 ```bash
-# 移动到垃圾桶位姿松手
-python run_skill.py trash
+# 当前没有独立 trash skill，使用 pick_and_place 路由到垃圾桶
+echo '{"object":"bottle","container":"trash"}' | python run_skill.py pick_and_place
 ```
 
 ### desk_place — 放桌面

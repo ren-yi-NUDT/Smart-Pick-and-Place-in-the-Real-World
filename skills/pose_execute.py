@@ -25,15 +25,15 @@
 """
 
 import os
-import sys
 import json
 import socket
-import struct
 import time
 from threading import Thread
 from termcolor import cprint
 
 from skills.base import Skill, register_skill
+from core.drawer_executor import DRAWER_TRAJECTORY_SPEED
+from core.tcp_protocol import JSON_FRAME_PROTOCOL, recv_json_compat, send_json_frame
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -47,11 +47,6 @@ POSES_DIR = os.path.join(
 ARM_SERVER_HOST = "127.0.0.1"
 ARM_PORTS = {"left": 8010, "right": 8011}
 
-# 右臂夹爪（Robotiq 85）TCP 桥接服务
-GRIPPER_HOST = "127.0.0.1"
-GRIPPER_PORT = 8001
-GRIPPER_SRC = "/right_gripper/movement_control"
-
 # 6 值手势 → 2 值夹爪指令的映射（左臂换夹爪后保留 open/close 两种语义）
 GRIPPER_PRESET_MAP = {
     "open":  [1000, 1000],
@@ -59,16 +54,10 @@ GRIPPER_PRESET_MAP = {
     # 其他手势（peace/rock/pointing/thumbs_up/ok/grab）无夹爪对应，调用时会告警并落到 close
 }
 
-# 轨迹文件目录
-TRAJ_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "recorded_trajectories", "right",
-)
-
-# 强制指定臂的"非录制位姿"动作（轨迹回放直驱 SDK，IP 硬编码）
+# 强制指定臂的非录制动作（抽屉执行委托给统一 real/sim 执行器）
 # 名称 → 唯一允许的臂
 ACTION_ARM_RESTRICTIONS = {
-    "open_drawer": "right",   # _play_trajectory 硬编码 192.168.1.18
+    "open_drawer": "right",   # drawer executor routes through the right bridge
     "close_drawer": "right",
 }
 
@@ -84,16 +73,6 @@ def _load_poses(arm="left"):
         with open(pose_file, "r") as f:
             return json.load(f)
     return {}
-
-
-def _load_trajectory(name):
-    """加载已录制的轨迹（从 recorded_trajectories/right/{name}.json）"""
-    traj_file = os.path.join(TRAJ_DIR, f"{name}.json")
-    if not os.path.exists(traj_file):
-        cprint(f"[pose_execute] 轨迹不存在: {traj_file}", "red")
-        return None
-    with open(traj_file, "r") as f:
-        return json.load(f)
 
 
 def _resolve_action_arm(name, requested_arm):
@@ -141,20 +120,23 @@ def _resolve_action_arm(name, requested_arm):
     ), None
 
 
-def _send_gripper_cmd(values):
-    """通过 TCP 发送夹爪控制指令（静默失败）。"""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1.0)
-        sock.connect((GRIPPER_HOST, GRIPPER_PORT))
-        sock.sendall(json.dumps({
-            "src": GRIPPER_SRC, "type": "set", "cmd": list(values),
-        }).encode())
-        sock.recv(256)
-        sock.close()
-        return True
-    except Exception:
-        return False
+def _resolve_drawer_speed(speed=None):
+    """Normalize drawer speed across every pose_execute entry point.
+
+    Drawer actions use trajectory multipliers (0.5 means half speed), while
+    generic pose commands historically use controller speeds (0..100, with
+    50 as the default).  OpenClaw can pass that generic default when it
+    selects ``command=play``; normalize controller-style values so they are
+    never accidentally interpreted as a 50x trajectory multiplier.
+    """
+    if speed is None:
+        return DRAWER_TRAJECTORY_SPEED
+    value = float(speed)
+    if value == 50:
+        return DRAWER_TRAJECTORY_SPEED
+    if value > 5:
+        return value / 20
+    return value
 
 
 def _send_arm_command(sock, joint_angles, arm="right", speed=50, block=True):
@@ -183,13 +165,9 @@ def _send_arm_command(sock, joint_angles, arm="right", speed=50, block=True):
             {"type": "end", "act": []},
         ],
     }
-    msg = json.dumps(cmd).encode("utf-8")
-
-    # 4 字节大端长度前缀 + JSON 数据
-    length_prefix = struct.pack(">I", len(msg))
-    sock.sendall(length_prefix + msg)
-
-    resp = json.loads(sock.recv(1024).decode("utf-8"))
+    cmd["_tcp_protocol"] = JSON_FRAME_PROTOCOL
+    send_json_frame(sock, cmd)
+    resp = recv_json_compat(sock)
     return resp
 
 
@@ -245,7 +223,7 @@ class PoseExecuteSkill(Skill):
 
     # -- 核心: run() --
 
-    def run(self, **kwargs):
+    def execute(self, **kwargs):
         """
         执行位姿命令
 
@@ -307,9 +285,13 @@ class PoseExecuteSkill(Skill):
                     results["pose"] = False
                     results["pose_error"] = msg
                 elif name == "open_drawer":
-                    results["pose"] = self.play_open_drawer(speed=1.5)
+                    results["pose"] = self.play_open_drawer(
+                        speed=_resolve_drawer_speed(kwargs.get("speed"))
+                    )
                 elif name == "close_drawer":
-                    results["pose"] = self.play_close_drawer(speed=1.5)
+                    results["pose"] = self.play_close_drawer(
+                        speed=_resolve_drawer_speed(kwargs.get("speed"))
+                    )
                 else:
                     speed = kwargs.get("speed", 50)
                     block = kwargs.get("block", True)
@@ -329,7 +311,7 @@ class PoseExecuteSkill(Skill):
                 msg = f"动作 'open_drawer' 只能由右臂执行（请求的是 {arm}臂）"
                 cprint(f"[pose_execute] 路由失败: {msg}", "red")
                 return {"success": False, "info": msg}
-            speed = kwargs.get("speed", 1.5)
+            speed = _resolve_drawer_speed(kwargs.get("speed"))
             ok = self.play_open_drawer(speed=speed)
             return {"success": ok, "info": "开抽屉" if ok else "开抽屉失败"}
 
@@ -339,7 +321,7 @@ class PoseExecuteSkill(Skill):
                 msg = f"动作 'close_drawer' 只能由右臂执行（请求的是 {arm}臂）"
                 cprint(f"[pose_execute] 路由失败: {msg}", "red")
                 return {"success": False, "info": msg}
-            speed = kwargs.get("speed", 1.5)
+            speed = _resolve_drawer_speed(kwargs.get("speed"))
             ok = self.play_close_drawer(speed=speed)
             return {"success": ok, "info": "关抽屉" if ok else "关抽屉失败"}
 
@@ -369,12 +351,13 @@ class PoseExecuteSkill(Skill):
             return False
         arm = authoritative_arm
 
-        # 受控动作（轨迹回放，硬编码到右臂 SDK）
+        # 受控动作（轨迹回放，统一走 real/sim 执行器）
         if name in ACTION_ARM_RESTRICTIONS:
+            drawer_speed = _resolve_drawer_speed(speed)
             if name == "open_drawer":
-                return self.play_open_drawer(speed=speed / 20 if speed else 1.5)
+                return self.play_open_drawer(speed=drawer_speed)
             if name == "close_drawer":
-                return self.play_close_drawer(speed=speed / 20 if speed else 1.5)
+                return self.play_close_drawer(speed=drawer_speed)
 
         poses = _load_poses(arm)
         pose_data = poses[name]
@@ -478,6 +461,8 @@ class PoseExecuteSkill(Skill):
             cprint(f"[pose_execute] 不支持的夹爪臂: {arm}", "red")
             return False
 
+        force = None
+        speed = None
         if isinstance(hand_input, str):
             key = hand_input.lower()
             if key in GRIPPER_PRESET_MAP:
@@ -489,6 +474,29 @@ class PoseExecuteSkill(Skill):
                     "yellow",
                 )
                 cmd_values = [0, 0]
+        elif isinstance(hand_input, dict):
+            key = str(hand_input.get("action", "close")).lower()
+            if key not in GRIPPER_PRESET_MAP:
+                cprint(
+                    f"[pose_execute] 夹爪动作 '{key}' 不支持，仅支持 open/close",
+                    "red",
+                )
+                return False
+            cmd_values = list(GRIPPER_PRESET_MAP[key])
+            try:
+                if hand_input.get("force") is not None:
+                    force = int(hand_input["force"])
+                if hand_input.get("speed") is not None:
+                    speed = int(hand_input["speed"])
+            except (TypeError, ValueError):
+                cprint("[pose_execute] 夹爪 force/speed 必须是整数", "red")
+                return False
+            if force is not None and not 0 <= force <= 255:
+                cprint("[pose_execute] 夹爪 force 必须在 0 到 255 之间", "red")
+                return False
+            if speed is not None and not 0 <= speed <= 255:
+                cprint("[pose_execute] 夹爪 speed 必须在 0 到 255 之间", "red")
+                return False
         elif isinstance(hand_input, (list, tuple)):
             if len(hand_input) >= 2:
                 # 假设前两位是 [thumb, index] 类的粗略映射，取均值
@@ -505,9 +513,9 @@ class PoseExecuteSkill(Skill):
             # common Skill.gripper_for(side) factory.
             gripper = self.gripper_for(arm)
             if cmd_values[0] > 500:
-                resp = gripper.open()
+                resp = gripper.open(force=force, speed=speed)
             else:
-                resp = gripper.close()
+                resp = gripper.close(force=force, speed=speed)
             label = hand_input if isinstance(hand_input, str) else cmd_values
             cprint(f"[pose_execute] 执行{arm}臂夹爪 {label}: {resp}", "green")
             return resp.get("value", False) in (True, [1000, 1000], [0, 0])
@@ -613,10 +621,10 @@ class PoseExecuteSkill(Skill):
             "poses": list(poses.keys()),
         }
 
-    # -- 轨迹回放（开关抽屉，使用 SDK 直驱 CAN FD，保证流畅度） --
+    # -- 轨迹回放（开关抽屉，统一委托给 real/sim 执行器） --
 
-    def _play_trajectory(self, name, speed=1.5):
-        """回放录制的轨迹（臂 + 夹爪），使用 Robotic_Arm SDK 直接驱动。
+    def _play_trajectory(self, name, speed=DRAWER_TRAJECTORY_SPEED):
+        """回放录制的轨迹（臂 + 夹爪）。
 
         Args:
             name: 轨迹名（不含路径和扩展名）
@@ -625,164 +633,26 @@ class PoseExecuteSkill(Skill):
         Returns:
             bool: 是否回放成功
         """
-        if self.config.sim_mode:
-            return self._play_trajectory_sim(name, speed=speed)
+        from core.drawer_executor import create_drawer_executor
+        executor = create_drawer_executor(self.config)
+        return executor.play(name, speed=speed)
 
-        from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
-
-        ARM_IP = "192.168.1.18"
-        ARM_SDK_PORT = 8080
-
-        t = _load_trajectory(name)
-        if t is None:
-            return False
-
-        waypoints = t["waypoints"]
-        has_gripper = t.get("recorded_gripper", False)
-
-        if len(waypoints) < 2:
-            cprint("[pose_execute] 轨迹点不足", "red")
-            return False
-
-        total_dt_ms = waypoints[-1][0] - waypoints[0][0]
-        num_intervals = len(waypoints) - 1
-        base_interval_s = (total_dt_ms / num_intervals) / 1000.0
-        adjusted_interval_s = max(0.005, base_interval_s / speed)
-
-        cprint(
-            f"[pose_execute] 回放轨迹 {name}: "
-            f"{t['duration_ms'] / 1000:.1f}s × {speed}x, "
-            f"{len(waypoints)} 航点, 间隔 {adjusted_interval_s * 1000:.0f}ms (SDK)",
-            "cyan",
-        )
-
-        # 连接右臂 SDK
-        arm = RoboticArm(rm_thread_mode_e.RM_DUAL_MODE_E)
-        handle = arm.rm_create_robot_arm(ARM_IP, ARM_SDK_PORT, level=3)
-        if handle.id == -1:
-            cprint("[pose_execute] SDK 连接右臂失败", "red")
-            return False
-        cprint(f"[pose_execute] SDK 已连接右臂, 句柄 ID: {handle.id}", "green")
-
-        # 运动到起点
-        start_joints = t["start_joint_deg"]
-        tag = arm.rm_movej(joint=start_joints, v=20, r=0, connect=0, block=1)
-        if tag != 0:
-            cprint(f"[pose_execute] 运动到起点失败 tag={tag}", "red")
-            return False
-
-        # 起始夹爪
-        if has_gripper and len(waypoints[0]) >= 10:
-            _send_gripper_cmd(waypoints[0][8:10])
-
-        prev_gripper = waypoints[0][8:10] if has_gripper and len(waypoints[0]) >= 10 else None
-
-        try:
-            for i, wp in enumerate(waypoints):
-                joint = wp[1:8]
-                arm.rm_movej_canfd(joint=joint, follow=False, expand=0)
-
-                # 夹爪状态变化时发送指令
-                if has_gripper and len(wp) >= 10:
-                    gv = wp[8:10]
-                    if gv != prev_gripper:
-                        _send_gripper_cmd(gv)
-                        prev_gripper = gv
-
-                if (i + 1) % max(1, len(waypoints) // 10) == 0:
-                    cprint(
-                        f"[pose_execute] 轨迹 {name}: {i + 1}/{len(waypoints)} "
-                        f"({(i + 1) * 100 // len(waypoints)}%)",
-                        "yellow",
-                    )
-
-                time.sleep(adjusted_interval_s)
-
-            cprint(f"[pose_execute] 轨迹 {name} 回放完成 ✓", "green")
-            return True
-
-        except KeyboardInterrupt:
-            cprint(f"\n[pose_execute] 轨迹 {name} 用户中断", "yellow")
-            return False
-
-    def _play_trajectory_sim(self, name, speed=1.5):
-        """回放右臂录制轨迹到 PyBullet SimServer（sim 模式）。
-
-        抽屉轨迹固定由右臂执行。关节航点批量通过 ``execute_trajectory`` 下发，
-        夹爪状态在航点间变化时分段回放，以还原"抓把手→拉开→松手"的时序。
-        """
-        t = _load_trajectory(name)
-        if t is None:
-            return False
-
-        waypoints = t["waypoints"]
-        has_gripper = t.get("recorded_gripper", False)
-        if len(waypoints) < 2:
-            cprint("[pose_execute] 轨迹点不足", "red")
-            return False
-
-        from core.sim_arm import SimArmClient
-        from core.sim_gripper import SimGripperClient
-        host = self.config.shared.get("host", "127.0.0.1")
-        arm = SimArmClient(host, 8031, side="right")
-        if not arm.connect():
-            return False
-        gripper = None
-        if has_gripper:
-            gripper = SimGripperClient(host, 8031, src="/right_gripper/movement_control")
-            gripper.connect()
-
-        cprint(
-            f"[pose_execute] (sim) 回放右臂轨迹 {name}: "
-            f"{len(waypoints)} 航点 × {speed}x",
-            "cyan",
-        )
-
-        def _set_gripper(v):
-            if gripper is None:
-                return
-            action = "open" if v[0] > 500 else "close"
-            gripper._send({"cmd": "gripper", "side": "right",
-                           "action": action, "value": int(v[0])})
-
-        # 起始夹爪
-        if has_gripper:
-            _set_gripper(waypoints[0][8:10])
-
-        # 按夹爪状态分段回放关节轨迹
-        seg = []
-        prev_gv = tuple(waypoints[0][8:10]) if has_gripper else None
-        for wp in waypoints:
-            gv = tuple(wp[8:10]) if has_gripper else None
-            if has_gripper and gv != prev_gv:
-                if seg:
-                    arm.execute_trajectory(seg, speed=20)
-                    seg = []
-                _set_gripper(gv)
-                prev_gv = gv
-            seg.append(list(wp[1:8]))
-        if seg:
-            arm.execute_trajectory(seg, speed=20)
-
-        cprint(f"[pose_execute] 轨迹 {name} 回放完成 ✓", "green")
-        return True
-
-    def play_open_drawer(self, speed=1.5):
+    def play_open_drawer(self, speed=DRAWER_TRAJECTORY_SPEED):
         """开抽屉：home → 抓把手 → 拉开 → 松手 → 回 home。
 
         Args:
-            speed: 回放速度倍率 (默认 1.5x)
+            speed: 回放速度倍率 (默认 0.5x)
 
         Returns:
             bool: 是否成功
         """
         return self._play_trajectory("open_drawer", speed=speed)
 
-    def play_close_drawer(self, speed=1.5):
+    def play_close_drawer(self, speed=DRAWER_TRAJECTORY_SPEED):
         """关抽屉：home → 推关 → 回 home（不抓把手）。
 
         Args:
-            speed: 回放速度倍率 (默认 1.5x)
+            speed: 回放速度倍率 (默认 0.5x)
 
         Returns:
             bool: 是否成功

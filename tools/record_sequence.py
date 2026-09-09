@@ -39,6 +39,7 @@
 
 import json
 import os
+import shutil
 import socket
 import sys
 import threading
@@ -47,12 +48,20 @@ from datetime import datetime
 
 from termcolor import cprint
 
+# Running ``python3 tools/record_sequence.py`` puts ``tools/`` (rather than
+# the repository root) on sys.path.  Keep this standalone recording utility
+# importable from the documented project-root command as well as from an
+# interactive Python session.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
+from core.tcp_protocol import recv_json_compat, send_json_frame
 
 # ---------------------------------------------------------------------------
 # 路径常量
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEQUENCE_DIR = os.path.join(PROJECT_ROOT, "recorded_sequences")
 POSE_FILE = os.path.join(PROJECT_ROOT, "recorded_poses", "right.json")
 TRAJ_DIR = os.path.join(PROJECT_ROOT, "recorded_trajectories", "right")
@@ -110,9 +119,8 @@ def _get_gripper_state():
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2.0)
         sock.connect((GRIPPER_HOST, GRIPPER_PORT))
-        req = json.dumps({"src": GRIPPER_SRC, "type": "get"})
-        sock.sendall(req.encode("utf-8"))
-        resp = json.loads(sock.recv(1024).decode("utf-8"))
+        send_json_frame(sock, {"src": GRIPPER_SRC, "type": "get"})
+        resp = recv_json_compat(sock)
         sock.close()
         value = resp.get("value")
         info = resp.get("info", "")
@@ -436,8 +444,8 @@ def _try_read_gripper():
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(0.3)
         sock.connect((GRIPPER_HOST, GRIPPER_PORT))
-        sock.sendall(json.dumps({"src": GRIPPER_SRC, "type": "get"}).encode())
-        resp = json.loads(sock.recv(256).decode())
+        send_json_frame(sock, {"src": GRIPPER_SRC, "type": "get"})
+        resp = recv_json_compat(sock)
         sock.close()
         v = resp.get("value")
         if isinstance(v, list) and len(v) == 2:
@@ -511,6 +519,7 @@ def traj_record(name, description="", rate_hz=10, record_gripper=True, duration=
     if arm is None:
         return False
 
+
     waypoints = []
     stop_event = threading.Event()
 
@@ -528,10 +537,16 @@ def traj_record(name, description="", rate_hz=10, record_gripper=True, duration=
 
     # 夹爪脚本线程
     gripper_script_stop = threading.Event()
+    recording_started = threading.Event()
     if gripper_script:
         cprint(f"[traj] 夹爪脚本: {gripper_script}", "cyan")
 
         def _run_gripper_script():
+            # The script timeline starts at the actual recording marker, not
+            # when the process/3-second countdown starts.
+            recording_started.wait()
+            if gripper_script_stop.is_set():
+                return
             start = time.monotonic()
             for delay_s, action in sorted(gripper_script):
                 if gripper_script_stop.is_set():
@@ -554,6 +569,7 @@ def traj_record(name, description="", rate_hz=10, record_gripper=True, duration=
         tag = arm.rm_start_drag_teach(trajectory_record=1)
         if tag != 0:
             cprint(f"[traj] 启动拖拽示教失败，返回码: {tag}", "red")
+            gripper_script_stop.set()
             return False
 
         # 启动后台采样线程
@@ -575,6 +591,7 @@ def traj_record(name, description="", rate_hz=10, record_gripper=True, duration=
                 cprint(f"[traj] {i}...", "yellow")
                 time.sleep(1)
             cprint(f"[traj] ▶ 开始! 录制 {duration}s", "green")
+            recording_started.set()
             for remaining in range(int(duration), 0, -5):
                 if stop_event.is_set():
                     break
@@ -585,6 +602,7 @@ def traj_record(name, description="", rate_hz=10, record_gripper=True, duration=
             # 交互模式：Enter 开始，Enter 停止
             input("[traj] 按 Enter 开始录制...")
             cprint(f"[traj] ▶ 开始! 按 Enter 停止", "green")
+            recording_started.set()
             input()
             cprint("[traj] ⏹ 停止", "yellow")
 
@@ -662,7 +680,165 @@ def traj_record(name, description="", rate_hz=10, record_gripper=True, duration=
             with open(traj_file, "w") as f:
                 json.dump(traj_data, f, indent=2)
             cprint(f"[traj] 已保存 {len(waypoints)} 个采样点", "green")
-        return len(waypoints) > 0
+    return len(waypoints) > 0
+
+
+def append_home(name, rate_hz=10, duration=None):
+    """Append a smooth right-arm home segment to a recorded trajectory."""
+    traj_file = os.path.join(TRAJ_DIR, f"{name}.json")
+    if not os.path.isfile(traj_file):
+        cprint(f"[traj] 轨迹不存在: {traj_file}", "red")
+        return False
+
+    with open(traj_file, "r", encoding="utf-8") as stream:
+        traj_data = json.load(stream)
+    waypoints = traj_data.get("waypoints", [])
+    if len(waypoints) < 2 or any(len(wp) < 8 for wp in waypoints):
+        cprint("[traj] 原轨迹至少需要包含两个有效关节航点", "red")
+        return False
+
+    pose_file = os.path.join(PROJECT_ROOT, "recorded_poses", "right.json")
+    with open(pose_file, "r", encoding="utf-8") as stream:
+        home_data = json.load(stream)
+    home = home_data.get("home", {}).get("joint_angles_deg")
+    if not isinstance(home, list) or len(home) != 7:
+        cprint(f"[traj] 右臂 home 位姿无效: {pose_file}", "red")
+        return False
+    home = [float(value) for value in home]
+
+    rate_hz = max(5, min(100, int(rate_hz)))
+    last = [float(value) for value in waypoints[-1][1:8]]
+    max_delta = max(abs(start - target) for start, target in zip(last, home))
+    duration_s = (
+        max(3.0, min(15.0, max_delta / 10.0))
+        if duration is None else float(duration)
+    )
+    if duration_s <= 0:
+        raise ValueError("回 home 时长必须大于 0")
+    steps = max(2, int(round(duration_s * rate_hz)))
+    start_time = float(waypoints[-1][0])
+    interval_ms = duration_s * 1000.0 / steps
+    gripper_values = waypoints[-1][8:10] if len(waypoints[-1]) >= 10 else []
+
+    home_waypoints = []
+    for step in range(1, steps + 1):
+        ratio = step / steps
+        joints = [
+            round(start + (target - start) * ratio, 3)
+            for start, target in zip(last, home)
+        ]
+        waypoint = [round(start_time + step * interval_ms, 3)] + joints
+        if gripper_values:
+            waypoint.extend(gripper_values)
+        home_waypoints.append(waypoint)
+
+    backup_dir = os.path.join(TRAJ_DIR, ".backup")
+    os.makedirs(backup_dir, exist_ok=True)
+    backup_file = os.path.join(backup_dir, f"{name}.before_home.json")
+    if not os.path.exists(backup_file):
+        shutil.copy2(traj_file, backup_file)
+
+    traj_data["waypoints"] = waypoints + home_waypoints
+    traj_data["num_points"] = len(traj_data["waypoints"])
+    traj_data["duration_ms"] = traj_data["waypoints"][-1][0]
+    traj_data["end_joint_deg"] = home
+    if gripper_values:
+        traj_data["end_gripper"] = list(gripper_values)
+    traj_data["home_appended"] = {
+        "source": "recorded_poses/right.json:home",
+        "start_index": len(waypoints) + 1,
+        "num_points": len(home_waypoints),
+        "duration_s": duration_s,
+        "rate_hz": rate_hz,
+    }
+    with open(traj_file, "w", encoding="utf-8") as stream:
+        json.dump(traj_data, stream, ensure_ascii=False, indent=2)
+        stream.write("\n")
+    cprint(
+        f"[traj] 已追加右臂 home 段: {steps} 点 / {duration_s:.1f}s",
+        "green",
+    )
+    cprint(f"[traj] 原文件备份: {backup_file}", "cyan")
+    cprint(f"[traj] 已更新: {traj_file}", "green")
+    return True
+
+
+def derive_receive_from_delivery(source_name, output_name, force=False):
+    """Create a receive trajectory by reversing the delivery gripper event.
+
+    The joint motion is intentionally copied byte-for-byte.  The delivery
+    recording contains a close-to-open event; receive mode keeps the gripper
+    open through the approach and changes that event into the close event used
+    to take the object.  The source may start either open or closed.
+    """
+    source_file = os.path.join(TRAJ_DIR, f"{source_name}.json")
+    output_file = os.path.join(TRAJ_DIR, f"{output_name}.json")
+    if not os.path.isfile(source_file):
+        cprint(f"[traj] 源轨迹不存在: {source_file}", "red")
+        return False
+    if os.path.exists(output_file) and not force:
+        cprint(f"[traj] 输出轨迹已存在，为避免覆盖而停止: {output_file}", "red")
+        return False
+
+    with open(source_file, "r", encoding="utf-8") as stream:
+        source = json.load(stream)
+    source_waypoints = source.get("waypoints", [])
+    if len(source_waypoints) < 2 or any(len(wp) < 10 for wp in source_waypoints):
+        cprint("[traj] 源轨迹必须包含关节和夹爪状态", "red")
+        return False
+
+    open_transition = None
+    open_values = None
+    closed_values = None
+    previous = tuple(source_waypoints[0][8:10])
+    for index, waypoint in enumerate(source_waypoints[1:], start=1):
+        current = tuple(waypoint[8:10])
+        if current != previous and current[0] > 500 and previous[0] <= 500:
+            open_transition = index
+            closed_values = list(previous)
+            open_values = list(current)
+            break
+        previous = current
+    if open_transition is None:
+        cprint("[traj] 源轨迹中没有找到可转换的开爪事件", "red")
+        return False
+
+    # ``open_transition`` points at the first waypoint after the transition;
+    # use the states observed at that transition instead of assuming the
+    # source's first waypoint is open.
+    waypoints = []
+    for index, waypoint in enumerate(source_waypoints):
+        copied = list(waypoint)
+        copied[8:10] = (
+            open_values if index < open_transition else closed_values
+        )
+        waypoints.append(copied)
+
+    result = dict(source)
+    result["name"] = output_name
+    result["description"] = (
+        "由 %s 派生：保持打开接近用户，在原递送开爪事件处闭合，随后回 home"
+        % source_name
+    )
+    result["waypoints"] = waypoints
+    result["num_points"] = len(waypoints)
+    result["start_gripper"] = list(waypoints[0][8:10])
+    result["end_gripper"] = list(waypoints[-1][8:10])
+    result["receive_conversion"] = {
+        "source": source_name,
+        "close_event_index": open_transition + 1,
+        "open_values": open_values,
+        "closed_values": closed_values,
+    }
+    with open(output_file, "w", encoding="utf-8") as stream:
+        json.dump(result, stream, ensure_ascii=False, indent=2)
+        stream.write("\n")
+    cprint(f"[traj] 已生成右臂接取轨迹: {output_file}", "green")
+    cprint(
+        f"[traj] 保持张爪接近，在第 {open_transition + 1} 个航点闭爪，末尾保持闭爪回 home",
+        "cyan",
+    )
+    return True
 
 
 def traj_list():
@@ -741,10 +917,12 @@ def traj_info(name):
     print("=" * 60)
 
 
-def traj_play(name, speed=1.0, gripper_enabled=True):
+def traj_play(name, speed=1.0, gripper_enabled=True, skip_ranges=None):
     """回放录制的轨迹（臂 + 爪）。
 
     使用 rm_movej_canfd 流式发送关节角，同步控制夹爪。
+    ``skip_ranges`` 使用 1-based、首尾包含的航点编号，例如
+    ``[(10, 90), (780, 818)]``。
     """
     traj_file = os.path.join(TRAJ_DIR, f"{name}.json")
     if not os.path.exists(traj_file):
@@ -755,6 +933,24 @@ def traj_play(name, speed=1.0, gripper_enabled=True):
         t = json.load(f)
 
     waypoints = t["waypoints"]
+    original_waypoint_count = len(waypoints)
+    skip_ranges = _normalize_skip_ranges(skip_ranges, original_waypoint_count)
+    if skip_ranges:
+        waypoints = [
+            waypoint for index, waypoint in enumerate(waypoints, start=1)
+            if not any(start <= index <= end for start, end in skip_ranges)
+        ]
+        cprint(
+            "[traj] 跳过航点: %s；保留 %s/%s 个" % (
+                ", ".join("%s-%s" % item for item in skip_ranges),
+                len(waypoints),
+                original_waypoint_count,
+            ),
+            "yellow",
+        )
+        if len(waypoints) < 2:
+            cprint("[traj] 跳过后剩余航点不足 2 个", "red")
+            return False
     has_gripper = t.get("recorded_gripper", False) and gripper_enabled
 
     cprint(f"\n[traj] 回放轨迹: {name}", "cyan")
@@ -784,9 +980,12 @@ def traj_play(name, speed=1.0, gripper_enabled=True):
         cprint("[traj] 轨迹点不足", "red")
         return False
 
-    total_dt_ms = waypoints[-1][0] - waypoints[0][0]
-    num_intervals = len(waypoints) - 1
-    base_interval_s = (total_dt_ms / num_intervals) / 1000.0
+    # 保持原始录制采样周期。过滤航点后不能用过滤后的首尾时间戳重新
+    # 平均，否则删除大段轨迹会意外把剩余轨迹放慢。
+    original_waypoints = t["waypoints"]
+    total_dt_ms = original_waypoints[-1][0] - original_waypoints[0][0]
+    original_num_intervals = len(original_waypoints) - 1
+    base_interval_s = (total_dt_ms / original_num_intervals) / 1000.0
     adjusted_interval_s = base_interval_s / speed
     adjusted_interval_s = max(0.005, adjusted_interval_s)
 
@@ -829,16 +1028,37 @@ def traj_delete(name):
     return True
 
 
+def _normalize_skip_ranges(skip_ranges, waypoint_count):
+    """Validate and normalize 1-based inclusive waypoint ranges."""
+    normalized = []
+    for item in skip_ranges or []:
+        if isinstance(item, str):
+            parts = item.split(":", 1)
+            if len(parts) != 2:
+                raise ValueError("skip range must use START:END")
+            start, end = (int(value) for value in parts)
+        else:
+            if len(item) != 2:
+                raise ValueError("skip range must contain START and END")
+            start, end = int(item[0]), int(item[1])
+        if start < 1 or end < start:
+            raise ValueError("skip range must satisfy 1 <= START <= END")
+        if start > waypoint_count:
+            continue
+        normalized.append((start, min(end, waypoint_count)))
+    return normalized
+
+
 def _send_gripper_cmd(cmd_values):
     """发送夹爪指令，静默失败。"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1.0)
         sock.connect((GRIPPER_HOST, GRIPPER_PORT))
-        sock.sendall(json.dumps({
+        send_json_frame(sock, {
             "src": GRIPPER_SRC, "type": "set", "cmd": list(cmd_values),
-        }).encode())
-        sock.recv(256)
+        })
+        recv_json_compat(sock)
         sock.close()
     except Exception:
         pass
@@ -913,6 +1133,30 @@ def main():
         help="夹爪动作脚本: 逗号分隔的 t:action, 如 '0:open,8:close,20:open'",
     )
 
+    # ---- append-home ----
+    append_home_p = sub.add_parser(
+        "append-home", help="给右臂轨迹末尾追加平滑回 home 段"
+    )
+    append_home_p.add_argument("--name", "-n", required=True, help="轨迹名称")
+    append_home_p.add_argument(
+        "--rate", "-r", type=int, default=10,
+        help="追加段采样率 Hz (5-100，默认 10Hz)",
+    )
+    append_home_p.add_argument(
+        "--duration", type=float, default=None,
+        help="追加段时长（秒），默认按最大关节差自动计算，最多 15 秒",
+    )
+
+    # ---- derive-receive ----
+    derive_receive_p = sub.add_parser(
+        "derive-receive", help="从右臂递送轨迹派生接取轨迹"
+    )
+    derive_receive_p.add_argument("--source", required=True, help="递送源轨迹名称")
+    derive_receive_p.add_argument("--name", required=True, help="输出接取轨迹名称")
+    derive_receive_p.add_argument(
+        "--force", action="store_true", help="允许覆盖已有输出轨迹"
+    )
+
     # ---- traj-play ----
     traj_play_p = sub.add_parser("traj-play", help="回放轨迹")
     traj_play_p.add_argument("--name", "-n", required=True, help="轨迹名称")
@@ -923,6 +1167,10 @@ def main():
     traj_play_p.add_argument(
         "--no-gripper", action="store_true",
         help="回放时不控制夹爪",
+    )
+    traj_play_p.add_argument(
+        "--skip-range", action="append", default=[], metavar="START:END",
+        help="跳过 1-based 航点区间（可重复，例如 10:90）",
     )
 
     # ---- traj-list ----
@@ -967,9 +1215,38 @@ def main():
                     duration=args.duration,
                     gripper_script=gripper_script)
 
+    elif args.command == "append-home":
+        try:
+            ok = append_home(args.name, rate_hz=args.rate, duration=args.duration)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            cprint(f"[traj] 追加 home 失败: {exc}", "red")
+            ok = False
+        sys.exit(0 if ok else 1)
+
+    elif args.command == "derive-receive":
+        try:
+            ok = derive_receive_from_delivery(
+                args.source, args.name, force=args.force
+            )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            cprint(f"[traj] 派生接取轨迹失败: {exc}", "red")
+            ok = False
+        sys.exit(0 if ok else 1)
+
     elif args.command == "traj-play":
-        traj_play(args.name, speed=args.speed,
-                  gripper_enabled=not args.no_gripper)
+        try:
+            ok = traj_play(
+                args.name,
+                speed=args.speed,
+                gripper_enabled=not args.no_gripper,
+                skip_ranges=args.skip_range,
+            )
+        except ValueError as exc:
+            cprint(f"[traj] 参数错误: {exc}", "red")
+            ok = False
+        # The wipe_table Skill uses this process status to decide whether it
+        # is safe to continue with the return-home stage.
+        sys.exit(0 if ok else 1)
 
     elif args.command == "traj-list":
         traj_list()

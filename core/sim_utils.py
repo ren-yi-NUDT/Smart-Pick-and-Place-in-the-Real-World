@@ -2,32 +2,20 @@
 
 Kept free of pybullet/rospy imports so they can be unit-tested in isolation.
 """
-import json
-import struct
 import xml.etree.ElementTree as ET
 
 import numpy as np
+
+from core.tcp_protocol import recv_json_compat, send_json_frame
 
 DEG2RAD = np.pi / 180.0
 RAD2DEG = 180.0 / np.pi
 
 
-def recv_exact(sock, n):
-    """Read exactly *n* bytes from *sock*, or raise ConnectionError on EOF."""
-    buf = b""
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
-            raise ConnectionError("SimServer closed the connection")
-        buf += chunk
-    return buf
-
-
 def send_json(sock, data):
-    """Send a JSON request and read the SimServer's length-prefixed JSON reply."""
-    sock.sendall(json.dumps(data).encode("utf-8"))
-    n = struct.unpack(">I", recv_exact(sock, 4))[0]
-    return json.loads(recv_exact(sock, n).decode("utf-8"))
+    """Send and receive one canonical JSON frame."""
+    send_json_frame(sock, data)
+    return recv_json_compat(sock)
 
 
 def deg2rad_list(deg_values):

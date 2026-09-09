@@ -20,15 +20,21 @@
 """
 
 import argparse
-import json
 import math
 import multiprocessing as mp
 import os
 import queue
 import socket
+import sys
 import time
 
 from termcolor import cprint
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from core.tcp_protocol import recv_json_compat, send_json_frame
 
 from skills.grasp import GraspSkill
 from tools.pose_record import (
@@ -40,14 +46,12 @@ from tools.pose_record import (
     _load_home_joints,
     _load_trajectory,
     _move_to_start,
-    _playback_canfd,
     _safe_slow_stop,
     traj_play,
     _validate_waypoints,
 )
 
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ARM_IPS = {"left": "192.168.1.19", "right": "192.168.1.18"}
 GRIPPER_PORTS = {"left": 8002, "right": 8001}
 GRIPPER_SRCS = {
@@ -296,8 +300,8 @@ def _gripper_request(side, action=None):
         request["cmd"] = GRIPPER_COMMANDS[action]
     try:
         with socket.create_connection(("127.0.0.1", GRIPPER_PORTS[side]), timeout=3.0) as sock:
-            sock.sendall(json.dumps(request).encode("utf-8"))
-            response = json.loads(sock.recv(4096).decode("utf-8"))
+            send_json_frame(sock, request)
+            response = recv_json_compat(sock)
         if response.get("value") is False:
             raise RuntimeError(response)
         return response

@@ -11,7 +11,8 @@ Run manually with::
     python dependence/twin_inference/test_twin.py --side left --port 8020
 
 The request uses the current project protocol through :class:`TwinClient`:
-raw JSON on send and a four-byte length-prefixed JSON response.
+four-byte length-prefixed JSON in both directions (the service still accepts
+legacy raw JSON clients).
 """
 
 import argparse

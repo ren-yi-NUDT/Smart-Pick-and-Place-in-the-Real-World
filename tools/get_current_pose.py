@@ -5,7 +5,6 @@
 """
 
 from Robotic_Arm.rm_robot_interface import *
-import json
 
 def get_current_arm_state(arm_ip="192.168.1.19", arm_port=8080):
     """

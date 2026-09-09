@@ -28,6 +28,7 @@ from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 from pynput import keyboard
 from core.config import Config
+from core.tcp_protocol import JsonStreamReader, send_json_frame
 
 SIMULATION_STEP_DELAY = 1 / 240.
 ROUND_NUMBER = 3
@@ -126,17 +127,17 @@ class TwinTest2(World):
     def handle_client(self, conn):
         """处理单个客户端请求"""
         with conn:
+            reader = JsonStreamReader(conn)
             while not rospy.is_shutdown():
                 try:
-                    data = conn.recv(1024)
-                    if not data: break
-                    
-                    msg_str = data.decode('utf-8')
-                    data_bytes = self.twin_callback(msg_str).encode('utf-8')
-                    length_prefix = struct.pack('>I', len(data_bytes))
-                    conn.sendall(length_prefix)
-                    conn.sendall(data_bytes)
-                    # conn.sendall(response)
+                    request = reader.read()
+                    response = json.loads(self.twin_callback(json.dumps(request)))
+                    # The historical Twin client sent raw JSON but already
+                    # expected a length-prefixed response. Keep that response
+                    # contract while standardising new requests as frames.
+                    send_json_frame(conn, response)
+                except (ConnectionError, OSError):
+                    break
                 except Exception as e:
                     print(f"Client handler error: {e}")
                     break

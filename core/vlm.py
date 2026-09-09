@@ -130,15 +130,6 @@ class VLMClient:
             "found": bool(value.get("found", box is not None)) if isinstance(value, dict) else False,
         }
 
-    def expand_object_prompts(self, rgb_image, object_name, max_prompts=6):
-        """Return detector-friendly prompts for a user-described object.
-
-        The VLM is used only for semantic prompt expansion.  It does not
-        produce robot poses or authorize motion.  Returning the original
-        object name on any failure keeps the existing grasp path available.
-        """
-        return self.ground_object(rgb_image, object_name, max_prompts)["prompts"]
-
     @staticmethod
     def _parse_json_object(response):
         """Parse a tolerant JSON-object response from the VLM."""
@@ -157,36 +148,6 @@ class VLMClient:
             except json.JSONDecodeError:
                 return {}
         return value if isinstance(value, dict) else {}
-
-    @staticmethod
-    def _parse_prompt_list(response):
-        """Parse a tolerant JSON-list response from the VLM."""
-        if not response:
-            return []
-        text = str(response).strip()
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r"\[[\s\S]*?\]", text)
-            if not match:
-                return []
-            try:
-                value = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                return []
-        if not isinstance(value, list):
-            return []
-        result = []
-        seen = set()
-        for item in value:
-            if not isinstance(item, str):
-                continue
-            item = " ".join(item.split()).strip(" ,，")
-            if item and item.lower() not in seen:
-                seen.add(item.lower())
-                result.append(item)
-        return result
 
     def analyze(
         self,

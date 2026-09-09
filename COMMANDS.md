@@ -24,6 +24,9 @@ echo '{"object":"orange","container":"green bowl"}' | python run_skill.py pick_a
 # 递瓶子给用户（人机递物）
 echo '{"object":"bottle","container":"person"}' | python run_skill.py pick_and_place
 
+# 明确使用右臂直接递给用户（不经过左臂）
+echo '{"speed":15}' | python run_skill.py right_give_to_user
+
 # 扔瓶子进垃圾桶
 echo '{"object":"bottle","container":"trash"}' | python run_skill.py pick_and_place
 
@@ -51,6 +54,38 @@ echo '{"container":"trash"}' | python run_skill.py fetch_from_user
 
 # 接收物品放桌面
 echo '{"container":"desk"}' | python run_skill.py fetch_from_user
+```
+
+### receive_and_hold — 从用户手中接收并保持
+
+```bash
+# 右臂接收物品，夹持回 home
+echo '{"side":"right"}' | python run_skill.py receive_and_hold
+
+# 右臂以 0.5x 速度接收并保持
+echo '{"side":"right","speed":0.5}' | python run_skill.py receive_and_hold
+```
+
+### receive_user_trajectory — 右臂预录制取物轨迹
+
+默认以 `0.5x` 回放 `right_receive_user_v3`，沿用正式右臂递送运动，到达交接位后额外停留 5 秒，再闭爪并回 home：
+
+```bash
+echo '{}' | python run_skill.py receive_user_trajectory
+
+# 以 0.5x 速度回放，仍控制夹爪
+echo '{"speed":0.5}' | python run_skill.py receive_user_trajectory
+
+# 覆盖默认等待时间（例如不等待）
+echo '{"gripper_event_wait":0}' | python run_skill.py receive_user_trajectory
+```
+
+### right_give_to_user — 右臂直接递给用户
+
+使用右臂 `recorded_poses/right.json` 中的 `handover_pose`，默认以控制器速度 `15` 移动，到位后张爪，停留 2 秒回 home。它与 `receive_user_trajectory`（从用户处取物）以及 `dual_handover`（双臂交接）不是同一个动作。
+
+```bash
+echo '{"speed":15}' | python run_skill.py right_give_to_user
 ```
 
 ### grasp_to_drawer — 双臂交接放入抽屉
@@ -143,7 +178,7 @@ echo '{"command":"play","hand":"open","arm":"right"}' | python run_skill.py pose
 
 #### 抽屉操作（右臂轨迹回放）
 
-`open_drawer` / `close_drawer` 是预录制的完整轨迹回放（SDK 直驱右臂 192.168.1.18:8080，默认 1.5x 速度），**不是简单的位姿移动**。强制右臂执行，`arm` 参数可省略。
+`open_drawer` / `close_drawer` 是预录制的完整轨迹回放（通过右臂本地桥接 `:8011`，默认 `0.5x` 速度），**不是简单的位姿移动**。强制右臂执行，`arm` 参数可省略。
 
 ```bash
 # 开抽屉：home → 抓把手 → 拉开 → 松手 → 回 home
@@ -180,15 +215,11 @@ echo '{"object":"orange","container":"pink bowl","side":"right","object_size_m":
 ### handover — 递交给用户
 
 ```bash
-# 插值轨迹经中间点运动到 handover 位姿
+# 默认左臂：经中间点到 handover 位姿后张爪
 python run_skill.py handover
-```
 
-### trash — 扔垃圾
-
-```bash
-# 移动到垃圾桶位姿松手
-python run_skill.py trash
+# 右臂：直接回放右臂递交轨迹
+echo '{"side":"right"}' | python run_skill.py handover
 ```
 
 ### desk_place — 放桌面
@@ -196,4 +227,17 @@ python run_skill.py trash
 ```bash
 # 从 desk_pose_1/2/3 中随机选一个执行
 python run_skill.py desk_place
+```
+
+### wipe_table — 擦桌子并回 home
+
+```bash
+# 右臂回放擦桌子轨迹，成功后自动回到右臂 home（默认 0.5x）
+python run_skill.py wipe_table
+
+# 显式设置轨迹速度和回 home 速度
+echo '{"speed":0.5,"home_speed":10}' | python run_skill.py wipe_table
+
+# 仿真执行
+SIM_MODE=1 python run_skill.py wipe_table
 ```

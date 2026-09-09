@@ -24,53 +24,53 @@
   },
   "handover_pose": {
     "name": "handover_pose",
-    "description": " ",
+    "description": "",
     "arm": "right",
-    "timestamp": "2026-05-20T20:18:27.820099",
+    "timestamp": "2026-09-06T17:35:28.528278",
     "joint_angles_deg": [
-      -8.399999618530273,
-      -42.47100067138672,
-      7.098999977111816,
-      64.53700256347656,
-      175.23699951171875,
-      -101.74299621582031,
-      2.003999948501587
+      -18.344999313354492,
+      7.543000221252441,
+      -41.45199966430664,
+      51.28499984741211,
+      169.9980010986328,
+      -55.58100128173828,
+      2.0239999294281006
     ],
     "end_pose": [
-      0.041164,
-      0.009212,
-      0.53437,
-      2.987,
-      -0.98,
-      -0.023
+      0.18024,
+      -0.298999,
+      0.550516,
+      2.636,
+      -1.148,
+      -0.682
     ]
   },
   "throw_to_trash_pose": {
     "name": "throw_to_trash_pose",
-    "description": "扔垃圾",
+    "description": "\u5783\u573e\u6876\u6295\u653e\u4f4d\uff08\u73b0\u573a\u91cd\u65b0\u8bb0\u5f55\uff09",
     "arm": "right",
-    "timestamp": "2026-05-20T20:47:09.282596",
+    "timestamp": "2026-09-07T17:57:06.867098",
     "joint_angles_deg": [
-      -73.72899627685547,
-      14.592000007629395,
-      -4.6579999923706055,
-      76.26699829101562,
-      175.1959991455078,
-      -63.69300079345703,
-      17.006000518798828
+      134.32400512695312,
+      14.038999557495117,
+      3.0799999237060547,
+      56.02399826049805,
+      175.24899291992188,
+      -95.05500030517578,
+      0.6460000276565552
     ],
     "end_pose": [
-      0.06021,
-      -0.338499,
-      0.340542,
-      -3.113,
-      -0.455,
-      -1.644
+      -0.210541,
+      0.215206,
+      0.405097,
+      3.077,
+      -0.26,
+      2.373
     ]
   },
   "observe_left_arm": {
     "name": "observe_left_arm",
-    "description": "右臂观察左臂",
+    "description": "\u53f3\u81c2\u89c2\u5bdf\u5de6\u81c2",
     "arm": "right",
     "timestamp": "2026-05-20T20:49:58.393227",
     "joint_angles_deg": [
@@ -93,7 +93,7 @@
   },
   "wave_left": {
     "name": "wave_left",
-    "description": "挥手左",
+    "description": "\u6325\u624b\u5de6",
     "arm": "right",
     "timestamp": "2026-05-20T21:15:25.325506",
     "joint_angles_deg": [
@@ -116,7 +116,7 @@
   },
   "wave_right": {
     "name": "wave_right",
-    "description": "挥手右",
+    "description": "\u6325\u624b\u53f3",
     "arm": "right",
     "timestamp": "2026-05-20T21:16:01.664353",
     "joint_angles_deg": [
@@ -152,7 +152,7 @@
   },
   "right_to_left_handover_right_preset": {
     "name": "right_to_left_handover_right_preset",
-    "description": "右臂交接准备位（重录）",
+    "description": "\u53f3\u81c2\u4ea4\u63a5\u51c6\u5907\u4f4d\uff08\u91cd\u5f55\uff09",
     "arm": "right",
     "timestamp": "2026-07-12T15:32:30.300744",
     "joint_angles_deg": [
@@ -175,7 +175,7 @@
   },
   "right_to_left_handover_right_approach": {
     "name": "right_to_left_handover_right_approach",
-    "description": "右臂交接接近位",
+    "description": "\u53f3\u81c2\u4ea4\u63a5\u63a5\u8fd1\u4f4d",
     "arm": "right",
     "timestamp": "2026-07-12T15:33:56.355427",
     "joint_angles_deg": [
@@ -221,7 +221,7 @@
   },
   "home_start": {
     "name": "home_start",
-    "description": "起始位姿-home",
+    "description": "\u8d77\u59cb\u4f4d\u59ff-home",
     "arm": "right",
     "timestamp": "2026-07-06T17:24:03.010300",
     "joint_angles_deg": [
@@ -252,7 +252,7 @@
   },
   "approach_drawer": {
     "name": "approach_drawer",
-    "description": "靠近抽屉把手",
+    "description": "\u9760\u8fd1\u62bd\u5c49\u628a\u624b",
     "arm": "right",
     "timestamp": "2026-07-06T17:25:01.377417",
     "joint_angles_deg": [
@@ -283,7 +283,7 @@
   },
   "grasp_handle": {
     "name": "grasp_handle",
-    "description": "闭合夹爪抓住抽屉把手",
+    "description": "\u95ed\u5408\u5939\u722a\u6293\u4f4f\u62bd\u5c49\u628a\u624b",
     "arm": "right",
     "timestamp": "2026-07-06T17:25:18.066437",
     "joint_angles_deg": [
@@ -314,7 +314,7 @@
   },
   "drawer_open": {
     "name": "drawer_open",
-    "description": "拉开抽屉",
+    "description": "\u62c9\u5f00\u62bd\u5c49",
     "arm": "right",
     "timestamp": "2026-07-06T17:25:56.356552",
     "joint_angles_deg": [
@@ -345,7 +345,7 @@
   },
   "drawer_close": {
     "name": "drawer_close",
-    "description": "关上抽屉",
+    "description": "\u5173\u4e0a\u62bd\u5c49",
     "arm": "right",
     "timestamp": "2026-07-06T17:26:31.446302",
     "joint_angles_deg": [
@@ -376,7 +376,7 @@
   },
   "release_handle": {
     "name": "release_handle",
-    "description": "张开夹爪松开把手",
+    "description": "\u5f20\u5f00\u5939\u722a\u677e\u5f00\u628a\u624b",
     "arm": "right",
     "timestamp": "2026-07-06T17:26:43.622840",
     "joint_angles_deg": [
@@ -407,7 +407,7 @@
   },
   "home_end": {
     "name": "home_end",
-    "description": "回到home结束",
+    "description": "\u56de\u5230home\u7ed3\u675f",
     "arm": "right",
     "timestamp": "2026-07-06T17:27:07.896185",
     "joint_angles_deg": [
@@ -461,5 +461,74 @@
     ],
     "description": "synced from robot_config 2026-07-12T15:43:41",
     "timestamp": "2026-07-12T15:43:41.004629"
+  },
+  "sponge_observation_pose": {
+    "name": "sponge_observation_pose",
+    "description": "\u53f3\u81c2\u6d77\u7ef5\u89c2\u5bdf\u4f4d\u59ff",
+    "arm": "right",
+    "timestamp": "2026-09-08T10:52:04.771197",
+    "joint_angles_deg": [
+      -91.072998046875,
+      -39.45399856567383,
+      -1.5360000133514404,
+      75.61299896240234,
+      175.2740020751953,
+      -113.26899719238281,
+      -7.538000106811523
+    ],
+    "end_pose": [
+      -0.017773,
+      -0.042181,
+      0.468972,
+      3.028,
+      -0.523,
+      -1.506
+    ]
+  },
+  "sponge_grasp_pre_pose": {
+    "name": "sponge_grasp_pre_pose",
+    "description": "\u53f3\u81c2\u56fa\u5b9a\u6d77\u7ef5\u6293\u53d6\u9884\u5907\u4f4d\u59ff",
+    "arm": "right",
+    "timestamp": "2026-09-08T13:51:05.723356",
+    "joint_angles_deg": [
+      -67.3280029296875,
+      -7.824999809265137,
+      -28.00200080871582,
+      109.95800018310547,
+      175.27699279785156,
+      -69.94499969482422,
+      -1.1169999837875366
+    ],
+    "end_pose": [
+      -0.032639,
+      -0.191404,
+      0.286868,
+      3.122,
+      -0.122,
+      -1.619
+    ]
+  },
+  "sponge_grasp_pose": {
+    "name": "sponge_grasp_pose",
+    "description": "\u53f3\u81c2\u56fa\u5b9a\u6d77\u7ef5\u6293\u53d6\u4f4d\u59ff",
+    "arm": "right",
+    "timestamp": "2026-09-08T13:52:14.640765",
+    "joint_angles_deg": [
+      -66.31900024414062,
+      -4.14300012588501,
+      -27.7549991607666,
+      119.75499725341797,
+      175.36500549316406,
+      -55.99800109863281,
+      -5.690000057220459
+    ],
+    "end_pose": [
+      -0.024515,
+      -0.193375,
+      0.243992,
+      3.088,
+      -0.133,
+      -1.499
+    ]
   }
 }

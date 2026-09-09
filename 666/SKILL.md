@@ -50,13 +50,13 @@ openclaw 是**聪明的执行者**。这个 skill 描述**如何从代码库提�
 
 | 用户说 | 拆解 |
 |---|---|
-| "把桃子放到盘子里" | detect(peach) → grasp(peach) → move(plate) → release — ⚠️ YOLO-World 只认英文类名 |
+| "把桃子放到盘子里" | detect(peach) → grasp(peach) → move(plate) → release — ⚠️ YOLOE-26 建议使用英文类名 |
 | "看看桌上有什么" | look_around → 报告结果 |
 | "接着"（用户递物） | move(handover) → open_hand → wait → close_hand → place(dest) |
 | "把这个从左手递给右手" | `pose_execute` 的 `parallel` 字段，或回放 `recorded_sequences/handover.json` |
 | "把抽屉打开" | `pose_execute` 的 `command:"open_drawer"` |
 | "把橘子放进抽屉" | `grasp_to_drawer`（4 阶段已实现） |
-| "用右手递给我瓶子" | `pick_and_place` + `side:"right"` |
+| "用右手递给我瓶子" | `right_give_to_user`（或 `pick_and_place` + `side:"right"`） |
 
 ### Step 2: 匹配 skill
 
@@ -86,7 +86,7 @@ openclaw 是**聪明的执行者**。这个 skill 描述**如何从代码库提�
 
 - conda 环境：`/home/zz/anaconda3/envs/anygrasp/bin/python`
 - cuDNN 库路径：`export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib`
-- 4 端口在线：`lsof -ti:8000,8010,8011,8020`（应返回 4 PID）
+- 服务在线检查：`lsof -ti:8001,8002,8010,8011,8020,8021,8030`
 - 当前 git 分支匹配（双臂功能需 `Double-arm-on-desk`）
 
 ---
@@ -101,10 +101,11 @@ openclaw 是**聪明的执行者**。这个 skill 描述**如何从代码库提�
 |---|---|---|
 | `pick_and_place` | 抓取+放置（4 模式：容器/person/trash/desk；支持 `side:right`） | `{"object":"X","container":"Y"}` |
 | `fetch_from_user` | 从用户手中接物+放置 | `{"container":"Y"}` |
+| `right_give_to_user` | 右臂执行 `handover_pose`，到位后张爪，停留 2 秒回 home | `{"speed":15}`（可选） |
 | `grasp_to_drawer` | **双臂流水线**：左抓→右开抽屉→双臂交接→右放抽屉 | `{"object":"X","container":"drawer1"}` |
 | `look_around` | 桌面环视 + GLM-4.5V 分析 | 无 |
 | `capture_at_handover` | 拍用户手中物 | 无 |
-| `pose_execute` | 位姿/序列/双臂并行/手势执行；含 `open_drawer`/`close_drawer` 直指令 | 见 `COMMANDS.md` |
+| `pose_execute` | 位姿/序列/双臂并行/手势执行；含默认 `0.5x` 的 `open_drawer`/`close_drawer` 直指令 | 见 `COMMANDS.md` |
 
 ### 原子 skill（一般不单独用，被高级 skill 内联）
 
@@ -112,7 +113,7 @@ openclaw 是**聪明的执行者**。这个 skill 描述**如何从代码库提�
 |---|---|
 | `grasp` | 仅抓取 |
 | `place` | 仅放置 |
-| `handover` | 移到 handover 位 + 张手 |
+| `handover` | 默认左臂递交；`side:"right"` 时使用右臂直接递交轨迹 |
 | `trash` | 移到 trash 位 + 张手 |
 | `desk_place` | 桌面随机放置 |
 
@@ -194,12 +195,14 @@ echo '{"command":"close_drawer"}' | python run_skill.py pose_execute
 
 **用户原话**: "用右手拿瓶子给我" / "右手扔垃圾桶"
 
-**拆解**: `pick_and_place` + `side:"right"`
+**拆解**: `right_give_to_user`（已有物品在右爪中）；如果还需要视觉抓取，再使用 `pick_and_place` + `side:"right"`。
 
 **实际调用**:
 ```bash
-echo '{"object":"bottle","container":"person","side":"right"}' | python run_skill.py pick_and_place
+echo '{"speed":15}' | python run_skill.py right_give_to_user
 ```
+
+`container:"person", side:"right"` 现在也会走右臂 `handover_pose` 命名位姿；不会再执行“右臂转给左臂、左臂再递给用户”的旧分支。
 
 ### 需求：双臂并行执行不同动作
 
@@ -236,7 +239,7 @@ echo '{"command":"play","parallel":[
 
 | 角色 | 硬件 | 任务 |
 |---|---|---|
-| 主手 | 左臂 RM75-B + Inspire 灵巧手（6 DoF） | 抓取、精细操作、递物 |
+| 左臂 | RM75-B + Robotiq 85 夹爪 | 抓取、精细操作、递物 |
 | 副手 | 右臂 RM75-B + 夹爪 | 支撑、固定、接收、辅助 |
 
 **双臂顺序约束**：主手先动 → 副手跟进 → 主手释放。**不允许同时异动**（当前实现是序列化的）。

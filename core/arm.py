@@ -2,8 +2,10 @@
 Arm controller -- TCP client to the arm movement service.
 
 Protocol:
-  SEND:   4-byte big-endian length prefix + JSON payload
-  RECV:   raw JSON (no length prefix)
+  SEND/RECV: 4-byte big-endian length prefix + JSON payload
+
+The response reader still accepts the historical raw-JSON response so an
+already-running bridge can be upgraded independently.
 
 Usage:
     from core.arm import ArmClient
@@ -16,23 +18,20 @@ Usage:
     arm.move_to_named_pose("grasp1", speed=30)
 """
 
-import json
 import socket
-import struct
 
 from termcolor import cprint
 
 from core.config import HOST, ARM_PORT
+from core.tcp_protocol import JSON_FRAME_PROTOCOL, recv_json_compat, send_json_frame
 
 
 def _send_cmd(sock: socket.socket, data: dict) -> dict:
-    """Send *data* (dict) with a 4-byte big-endian length prefix and
-    receive a raw-JSON response."""
-    data_bytes = json.dumps(data).encode("utf-8")
-    length_prefix = struct.pack(">I", len(data_bytes))
-    sock.sendall(length_prefix)
-    sock.sendall(data_bytes)
-    resp = json.loads(sock.recv(1024).decode("utf-8"))
+    """Send and receive one canonical JSON frame."""
+    request = dict(data)
+    request["_tcp_protocol"] = JSON_FRAME_PROTOCOL
+    send_json_frame(sock, request)
+    resp = recv_json_compat(sock)
     cprint(f"Control arm response: {resp}", "red")
     return resp
 
@@ -111,15 +110,6 @@ class ArmClient:
             "block": block,
         })
 
-    def add_ee_cmd(self, ee_trajectory, speed: int = 5, block: bool = True) -> None:
-        """Append an end-effector command."""
-        self._cmds.append({
-            "type": "ee",
-            "act": ee_trajectory,
-            "speed": speed,
-            "block": block,
-        })
-
     def send_cmds(self) -> dict:
         """Flush the command queue, appending an implicit ``end`` marker."""
         if self.sock is None:
@@ -141,8 +131,8 @@ class ArmClient:
             self.reset_cmd()
             self.start_cmd()
             self.add_js_cmd(pose_dict, speed=speed, block=True)
-            self.send_cmds()
-            return True
+            response = self.send_cmds()
+            return isinstance(response, dict) and response.get("value") is True
         except Exception as e:
             cprint(f"[ArmClient] move_to_named_pose failed: {e}", "red")
             return False
@@ -166,8 +156,8 @@ class ArmClient:
                     speed=speed,
                     block=True,
                 )
-            self.send_cmds()
-            return True
+            response = self.send_cmds()
+            return isinstance(response, dict) and response.get("value") is True
         except Exception as e:
             cprint(f"[ArmClient] execute_trajectory failed: {e}", "red")
             return False

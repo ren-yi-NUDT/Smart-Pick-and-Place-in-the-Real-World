@@ -22,13 +22,19 @@ import multiprocessing as mp
 import os
 import queue
 import socket
+import sys
 import time
 from datetime import datetime
 
 from termcolor import cprint
 
-
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from core.tcp_protocol import recv_json_compat, send_json_frame
+
+
 POSE_DIR = os.path.join(PROJECT_ROOT, "recorded_poses")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "recorded_trajectories", "dual")
 
@@ -64,8 +70,8 @@ def _send_gripper(side, action):
         with socket.create_connection(
             ("127.0.0.1", ARM_CONFIG[side]["gripper_port"]), 1.0
         ) as sock:
-            sock.sendall(json.dumps(request).encode("utf-8"))
-            sock.recv(1024)
+            send_json_frame(sock, request)
+            recv_json_compat(sock)
         cprint(f"[dual-record] {side} gripper -> {action}", "yellow")
         return True
     except Exception as exc:
