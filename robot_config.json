@@ -326,6 +326,7 @@
     "twin_port_right": 8021,
     "anygrasp_host": "127.0.0.1",
     "anygrasp_port": 8030,
+    "grasp_debug_visualization": false,
     "sim_server_port": 8031,
     "drawer": {
       "arm": "right",

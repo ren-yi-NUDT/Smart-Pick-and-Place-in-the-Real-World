@@ -84,10 +84,10 @@ xfce4-terminal \
     --command="bash -ic 'tools/start_arm_bridge.sh right; exec bash'" \
     --tab --title="Twin IK (left)" \
     --working-directory="$PROJECT_ROOT/dependence/twin_inference" \
-    --command="bash -ic 'source /opt/ros/noetic/setup.bash && conda activate anygrasp && python3 twin.py --side left; exec bash'" \
+    --command="bash -ic 'source /opt/ros/noetic/setup.bash && conda activate anygrasp && python3 twin.py --side left --novis; exec bash'" \
     --tab --title="Twin IK (right)" \
     --working-directory="$PROJECT_ROOT/dependence/twin_inference" \
-    --command="bash -ic 'source /opt/ros/noetic/setup.bash && conda activate anygrasp && python3 twin.py --side right; exec bash'" \
+    --command="bash -ic 'source /opt/ros/noetic/setup.bash && conda activate anygrasp && python3 twin.py --side right --novis; exec bash'" \
     --tab --title="Gripper R (:8001)" \
     --working-directory="$PROJECT_ROOT/dependence/gripper-programming" \
     --command="bash -ic 'source /home/zz/anaconda3/etc/profile.d/conda.sh && conda activate anygrasp && python3 server.py --serial $RIGHT_GRIPPER_SERIAL --slave 9 --port 8001 --src /right_gripper/movement_control; exec bash'" \
