@@ -21,7 +21,7 @@
   * 水果/蔬菜空爪门：验爪 pos > 200 或 object_detected=False 视为
     假抓取，立即中止全流程（宁停勿错）。
 
-抽屉支线：右臂开抽屉 → 尝试视觉抓取红甜椒并直接递人（仅右臂，遵守
+抽屉支线：右臂开抽屉 → 尝试视觉抓取红甜椒，回 home 后递人（仅右臂，遵守
 抽屉取物规则）→ 左臂抓蔬菜 → 双臂交接 → drawer_1_placement 入抽 →
 关抽屉。红甜椒不在/识别失败时报告并跳过，不阻塞主流程。
 
@@ -403,7 +403,7 @@ class DeskCleanupSkill(Skill):
             cprint(f"[desk_cleanup] 纸团已投掷 {thrown} 个", "green")
 
     def _run_drawer(self, veg_words, max_veg, take_red_pepper):
-        """抽屉支线：开抽 → 红甜椒出抽递人（右臂）→ 蔬菜入抽（左臂链路）→ 关抽。"""
+        """抽屉支线：开抽 → 红甜椒出抽回 home 后递人（右臂）→ 蔬菜入抽 → 关抽。"""
         red_pepper = "skipped"
         veg_in = 0
 
@@ -414,8 +414,7 @@ class DeskCleanupSkill(Skill):
         if take_red_pepper:
             cprint("[desk_cleanup] 抽屉: 尝试取出红甜椒（仅右臂视觉，防滑验爪）", "cyan")
             # 防滑配方（16:38 CMLLR 指令恢复）：hold_after_grasp 实夹
-            # force=80 停在抓取位，被动读数验爪（不碰爪不掉力），
-            # 直接平滑递送不经 home 绕行
+            # force=80 停在抓取位，被动读数验爪（不碰爪不掉力）。
             grasp_ok = self.visual_grasp(
                 self.RED_PEPPER_WORDS[0], side="right",
                 use_vlm_grounding=False, hold_after_grasp=True,
@@ -438,7 +437,13 @@ class DeskCleanupSkill(Skill):
                 # 被动验爪：纯 get_state 读数，保持力不动
                 detected, pos = self._grip_position("right", passive=True)
                 if detected and pos <= self.EMPTY_GRASP_POS:
-                    # 直接平滑递送（不经 home 绕行，防滑脱实锤场景）
+                    if not self.control_arm(
+                        pose_type="home", speed=30, side="right",
+                    ):
+                        return red_pepper, veg_in, False, (
+                            "红甜椒已抓取但右臂回 home 失败，中止全流程"
+                            "（物体仍在右爪，请人工接管）"
+                        )
                     if self._deliver_right_direct():
                         red_pepper = "delivered"
                         cprint("[desk_cleanup] 红甜椒已出抽递人", "green")

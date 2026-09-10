@@ -20,6 +20,19 @@ class _PlaceStub:
         return True
 
 
+class _DrawerStub:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def open(self):
+        self.calls.append(("drawer", "open"))
+        return True
+
+    def close(self):
+        self.calls.append(("drawer", "close"))
+        return True
+
+
 def test_fruit_uses_1x_pose_handover_and_right_named_pose(monkeypatch):
     calls = []
     skill = object.__new__(DeskCleanupSkill)
@@ -53,6 +66,40 @@ def test_fruit_uses_1x_pose_handover_and_right_named_pose(monkeypatch):
 def test_dual_handover_speed_is_a_multiplier():
     assert _scaled_speed(15, 1) == 15
     assert _scaled_speed(10, 0.6) == 6
+
+
+def test_red_pepper_returns_home_before_right_arm_delivery(monkeypatch):
+    calls = []
+    skill = object.__new__(DeskCleanupSkill)
+    skill._drawer_pipeline_ref = _DrawerStub(calls)
+
+    monkeypatch.setattr(
+        skill,
+        "visual_grasp",
+        lambda *args, **kwargs: calls.append(("grasp", kwargs["side"])) or True,
+    )
+    monkeypatch.setattr(skill, "_grip_position", lambda *args, **kwargs: (True, 100))
+    monkeypatch.setattr(
+        skill,
+        "control_arm",
+        lambda **kwargs: calls.append(("arm", kwargs)) or True,
+    )
+    monkeypatch.setattr(
+        skill,
+        "_deliver_right_direct",
+        lambda: calls.append(("deliver", "right")) or True,
+    )
+
+    result = skill._run_drawer([], max_veg=1, take_red_pepper=True)
+
+    assert result == ("delivered", 0, True, "")
+    assert calls == [
+        ("drawer", "open"),
+        ("grasp", "right"),
+        ("arm", {"pose_type": "home", "speed": 30, "side": "right"}),
+        ("deliver", "right"),
+        ("drawer", "close"),
+    ]
 
 
 def test_papers_recheck_until_table_is_clear(monkeypatch):
