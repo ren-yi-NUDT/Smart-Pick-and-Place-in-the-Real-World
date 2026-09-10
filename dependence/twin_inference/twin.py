@@ -580,6 +580,8 @@ class TwinTest2(World):
                     print("-"*20)
                 infos.append(info)
 
+                print(info)
+
                 if is_collide:
                     rospy.logwarn(f"COLLISION AT pos:{intermediate_pos}, {intermediate_orn}, CANOT GENERATE TRAJECTORY FOR TARGET:{target_pose}")
                     return 0, trajectory, trajectory_ee, infos
@@ -830,10 +832,7 @@ if __name__ == '__main__':
     count = 0
     while not kill_program:
         count+= 1
-        if world.vis:
-            robot_state = world.step()
-        else:
-            time.sleep(0.01)
+        robot_state = world.step()
 
 
         # print(count)

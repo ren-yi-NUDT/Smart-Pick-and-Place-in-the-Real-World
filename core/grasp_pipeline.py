@@ -10,7 +10,6 @@ extra sockets or skill instances are created.
 
 import os
 import socket
-import time
 
 
 class GraspPipeline:
@@ -335,38 +334,14 @@ class GraspPipeline:
             candidate["width_score"] = float(width_score)
             candidate["length_score"] = float(length_score)
             candidate["angle_score"] = float(angle_score)
-            candidate["pre_twin_score"] = float(
+            candidate["composite_score"] = float(
                 float(weights.get("anygrasp", 0.45)) * candidate.get("anygrasp_normalized", 0.0)
+                + float(weights.get("twin", 0.30)) * candidate.get("twin_reachable", 0.0)
                 + float(weights.get("width", 0.15)) * width_score
                 + float(weights.get("length", 0.05)) * length_score
                 + float(weights.get("angle", 0.10)) * angle_score
             )
-            candidate["composite_score"] = float(
-                candidate["pre_twin_score"]
-                + float(weights.get("twin", 0.30)) * candidate.get("twin_reachable", 0.0)
-            )
         return sorted(candidates, key=lambda c: c["composite_score"], reverse=True)
-
-    def _plan_best_grasp_candidate(self, candidates, side, obs_pose):
-        """Plan only until the highest-scoring reachable candidate is found.
-
-        Twin contributes the same fixed score to every reachable candidate,
-        so sorting by the non-Twin score and stopping at the first reachable
-        candidate preserves the previous winner without planning lower-ranked
-        candidates that cannot win.
-        """
-        ranked = self._score_grasp_candidates(candidates, side)
-        ranked.sort(key=lambda candidate: candidate["pre_twin_score"], reverse=True)
-        planned_count = 0
-        for candidate in ranked:
-            planned_count += 1
-            if self._plan_grasp_candidate(candidate, side, obs_pose):
-                return (
-                    candidate,
-                    self._score_grasp_candidates(ranked, side),
-                    planned_count,
-                )
-        return None, self._score_grasp_candidates(ranked, side), planned_count
 
     def _recover_grasp_failure(self, side, obs_pose):
         """Return the arm to a known observation pose and open the gripper."""
@@ -524,36 +499,12 @@ class GraspPipeline:
         the arm at its grasp pose for a subsequent handover trajectory.
         """
         from termcolor import cprint
-
-        started_total = time.perf_counter()
-        timings = {}
-        twin_candidates_planned = 0
-
-        def record_timing(name, started):
-            timings[name] = timings.get(name, 0.0) + time.perf_counter() - started
-
-        def finish(success):
-            timings["total_s"] = time.perf_counter() - started_total
-            timings["twin_candidates_planned"] = twin_candidates_planned
-            self._set_runtime_attr("_last_grasp_timings", dict(timings))
-            phases = " ".join(
-                f"{name[:-2]}={value:.3f}s"
-                for name, value in timings.items()
-                if name.endswith("_s")
-            )
-            cprint(
-                f"[{side}/grasp] timing: {phases} "
-                f"twin_candidates={twin_candidates_planned}",
-                "cyan",
-            )
-            return success
-
         try:
             self.arm_for(side)
             self.gripper_for(side)
         except Exception as exc:
             cprint(f"[{side}/grasp] hardware connection failed: {exc}", "red")
-            return finish(False)
+            return False
 
         detector_prompts = None
         target_box = None
@@ -566,25 +517,16 @@ class GraspPipeline:
             try:
                 if pose_name != "current":
                     scoring = self.config.get_grasp_scoring(side)
-                    started = time.perf_counter()
                     if not self.control_arm(
                         pose_type=pose_name,
                         speed=int(scoring.get("grasp_observation_speed", 15)),
                         side=side,
                     ):
-                        record_timing("observation_move_s", started)
                         continue
-                    record_timing("observation_move_s", started)
-                started = time.perf_counter()
                 self.control_hand(cmd_type="open", side=side)
-                record_timing("gripper_open_s", started)
-                started = time.perf_counter()
                 rgb, depth = self.get_camera_obs(side)
-                record_timing("camera_capture_s", started)
                 self.rgb, self.depth = rgb, depth
-                started = time.perf_counter()
                 self.save_current_transformation(side)
-                record_timing("transform_update_s", started)
                 camera = self.get_camera(side)
                 camera_intrinsics = getattr(
                     camera, "intrinsics",
@@ -598,12 +540,10 @@ class GraspPipeline:
                     f"intrinsics={camera_intrinsics}",
                     "cyan",
                 )
-                started = time.perf_counter()
                 raw = self.perception.detect_grasps(
                     rgb, depth, side=side, intrinsics=camera_intrinsics,
                     depth_scale=depth_scale,
                 )
-                record_timing("anygrasp_s", started)
                 if not raw:
                     cprint(f"[{side}/grasp] no AnyGrasp candidates at {pose_name}", "yellow")
                     continue
@@ -614,9 +554,7 @@ class GraspPipeline:
                 # that need phrase expansion or instance disambiguation.
                 if detector_prompts is None:
                     if use_vlm_grounding:
-                        started = time.perf_counter()
                         grounding = self.vlm.ground_object(rgb, object_name)
-                        record_timing("grounding_s", started)
                         detector_prompts = grounding.get("prompts", [])
                         target_box = grounding.get("box")
                         if not detector_prompts:
@@ -630,50 +568,44 @@ class GraspPipeline:
                 )
                 if target_box is not None:
                     cprint(f"[{side}/grasp] VLM target box: {target_box}", "cyan")
-                started = time.perf_counter()
                 filtered = self.perception.filter_grasps_by_detection(
                     raw, rgb, class_name=detector_prompts, side=side,
-                    intrinsics=camera_intrinsics,
-                    vis=bool(
-                        self.config.shared.get("grasp_debug_visualization", False)
-                    ),
+                    intrinsics=camera_intrinsics, vis=True,
                     target_box=target_box,
                 )
-                record_timing("detection_filter_s", started)
-                started = time.perf_counter()
                 candidates = self._build_grasp_candidates(filtered, side)
-                record_timing("candidate_build_s", started)
                 if not candidates:
                     continue
-                started = time.perf_counter()
-                candidate, ranked, planned_count = self._plan_best_grasp_candidate(
-                    candidates, side, obs_pose
-                )
-                twin_candidates_planned += planned_count
-                record_timing("twin_planning_s", started)
-                self._set_runtime_attr("_last_grasp_candidates", ranked)
-                if candidate is None:
+                for candidate in candidates:
+                    self._plan_grasp_candidate(candidate, side, obs_pose)
+                if not any(c.get("twin_reachable") for c in candidates):
                     cprint(f"[{side}/grasp] no Twin-reachable candidate at {pose_name}", "yellow")
                     continue
-                started = time.perf_counter()
-                succeeded = self._execute_scored_grasp(
-                    candidate,
-                    side,
-                    obs_pose,
-                    hold_after_grasp=hold_after_grasp,
-                )
-                record_timing("execution_s", started)
-                if succeeded:
-                    return finish(True)
-                # A physical failure can move the object. Do not try a
-                # second pose computed from this stale RGB-D frame.
-                detector_prompts = None
-                target_box = None
+                # Rank all candidates, including unreachable ones, so the
+                # Twin term is a real part of the composite score rather than
+                # a post-filter that is always equal to one.
+                ranked = self._score_grasp_candidates(candidates, side)
+                self._set_runtime_attr("_last_grasp_candidates", ranked)
+                for candidate in ranked:
+                    if not candidate.get("twin_reachable"):
+                        continue
+                    if self._execute_scored_grasp(
+                        candidate,
+                        side,
+                        obs_pose,
+                        hold_after_grasp=hold_after_grasp,
+                    ):
+                        return True
+                    # A physical failure can move the object. Do not try a
+                    # second pose computed from this stale RGB-D frame.
+                    detector_prompts = None
+                    target_box = None
+                    break
             except Exception as exc:
                 cprint(f"[{side}/grasp] observation '{pose_name}' failed: {exc}", "red")
                 self._recover_grasp_failure(side, obs_pose)
         cprint(f"[{side}/grasp] all observation poses failed", "red")
-        return finish(False)
+        return False
 
     def _save_grasp_visualization(
         self, image, grasp_points, valid_indices, valid_boxes, class_names,

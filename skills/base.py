@@ -83,7 +83,6 @@ class Skill(ABC):
         # can use this fresh candidate for a subsequent placement trajectory.
         self._last_grasp_candidates = []
         self._last_successful_grasp_candidate = None
-        self._last_grasp_timings = {}
         from core.skill_runtime import RobotContext
         self.context = RobotContext(self)
         self.last_result = None
