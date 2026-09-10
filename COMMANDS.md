@@ -131,6 +131,22 @@ SIM_MODE=1 python -m tools.dual_vlm_sorting --sim --execute --yes
 /home/zz/anaconda3/envs/anygrasp/bin/python tools/calibrate_arms.py verify
 ```
 
+### D455 逐臂手眼标定（eye-in-hand）
+
+标定板在每条臂的完整采集期间必须固定不动。脚本不会控制机械臂；手动将
+机械臂移稳后，在相机窗口按 `c` 采集，`u` 撤销，`q` 求解。建议每臂
+采集 20 个包含多轴旋转的位姿，保存后再用新的 5 个位姿独立验证。
+
+```bash
+# 左臂：采集并求解，再独立验证
+/home/zz/anaconda3/envs/anygrasp/bin/python tools/calibrate_hand_eye.py calibrate --side left
+/home/zz/anaconda3/envs/anygrasp/bin/python tools/calibrate_hand_eye.py verify --side left
+
+# 右臂
+/home/zz/anaconda3/envs/anygrasp/bin/python tools/calibrate_hand_eye.py calibrate --side right
+/home/zz/anaconda3/envs/anygrasp/bin/python tools/calibrate_hand_eye.py verify --side right
+```
+
 ### look_around — 环视桌面 + VLM 分析
 
 ```bash

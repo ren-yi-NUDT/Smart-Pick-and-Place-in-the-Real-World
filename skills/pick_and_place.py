@@ -123,7 +123,7 @@ class PickAndPlaceSkill(Skill):
         )
         try:
             ok = self.handover_pipeline.run(
-                mode="dual", speed=0.9, require_confirmation=False,
+                mode="dual", speed=1, require_confirmation=False,
                 direction="left_to_right",
             )
             if ok:
@@ -147,7 +147,7 @@ class PickAndPlaceSkill(Skill):
         cprint("H=================== Right→left handover (recorded replay) ===================", "cyan")
         try:
             ok = self.handover_pipeline.run(
-                mode="dual", speed=0.9, require_confirmation=False,
+                mode="dual", speed=1, require_confirmation=False,
                 direction="right_to_left",
             )
             if ok:

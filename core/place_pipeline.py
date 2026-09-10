@@ -679,14 +679,13 @@ class PlacePipeline:
     def _placement_execution_offset_base_m(self, side):
         """Return the calibrated final placement offset in the arm base frame.
 
-        Placement uses a separate empirical correction from grasp: X is
-        shifted by -30 mm by default. A placement-specific shared override is
-        supported without changing the grasp correction.
+        Placement has no empirical correction by default. A placement-specific
+        shared or per-arm override is supported without changing grasp.
         """
         offset = self.config.shared.get("place_execution_offset_base_m")
         if offset is None:
             offset = self.config.get_grasp_scoring(side).get(
-                "place_execution_offset_base_m", [-0.030, 0.0, 0.0]
+                "place_execution_offset_base_m", [0.0, 0.0, 0.0]
             )
         try:
             values = np.asarray(offset, dtype=float).reshape(-1)
@@ -695,10 +694,10 @@ class PlacePipeline:
             return values
         except (TypeError, ValueError):
             cprint(
-                f"[place] invalid placement calibration offset {offset!r}; using [-0.03, 0, 0]m",
+                f"[place] invalid placement calibration offset {offset!r}; using [0, 0, 0]m",
                 "yellow",
             )
-            return np.array([-0.030, 0.0, 0.0], dtype=float)
+            return np.zeros(3, dtype=float)
 
     @staticmethod
     def _valid_box(box, width, height):

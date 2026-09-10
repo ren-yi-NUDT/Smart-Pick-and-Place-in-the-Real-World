@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """双臂交接：验证过的 4 步纯位姿复现序列（f181619，2026-07-05 实测可用）。
 
-流程:
-  0. 双臂并行 → 预置位 (speed=15)
-  1. 接收臂开爪；右臂 → 接近位 (speed=10，两个方向都由右臂做接近动作)
+流程（下列基础速度乘以 ``speed`` 参数，默认 1 倍速）:
+  0. 双臂并行 → 预置位 (基础 speed=15)
+  1. 接收臂开爪；右臂 → 接近位 (基础 speed=10，两个方向都由右臂做接近动作)
   2. 接收臂闭合 → 1.5s → 交出臂打开
-  3. 右臂 → 预置位 (speed=15)
-  4. 双臂并行 → home (speed=30)
+  3. 右臂 → 预置位 (基础 speed=15)
+  4. 双臂并行 → home (基础 speed=30)
 
 两个方向共用同一位姿组；``direction`` 只决定夹爪事件角色：
 ``left_to_right`` 右夹爪闭合接收、左夹爪打开交出，``right_to_left`` 互换。
@@ -34,16 +34,32 @@ def _load_pose(side, name):
     return {f"J{i + 1}": float(j) for i, j in enumerate(joints)}
 
 
-def play(name=None, speed=None, require_confirmation=True,
+def _scaled_speed(base, scale):
+    """将基础速度按倍率缩放，并限制在控制器接受的 1..100。"""
+    return max(1, min(100, int(round(base * scale))))
+
+
+def play(name=None, speed=1, require_confirmation=True,
          direction="left_to_right", skill=None):
     """回放 4 步双臂交接位姿序列，返回 bool。
 
-    ``name``/``speed`` 为旧定时回放签名的兼容参数，位姿序列不使用。
+    ``name`` 为旧定时回放签名的兼容参数；``speed`` 是速度倍率，默认 1。
     ``skill`` 传入调用方 Skill 实例以复用其 arm_for/gripper_for 连接
     （sim 自动路由）；省略时真机直连 127.0.0.1 默认端口。
     """
     if direction not in ("left_to_right", "right_to_left"):
         raise ValueError(f"未知方向: {direction}")
+    try:
+        speed_scale = 1.0 if speed is None else float(speed)
+    except (TypeError, ValueError):
+        cprint(f"[dual-play] 非法速度倍率: {speed}", "red")
+        return False
+    if speed_scale <= 0:
+        cprint(f"[dual-play] 速度倍率必须大于 0: {speed}", "red")
+        return False
+    preset_speed = _scaled_speed(15, speed_scale)
+    approach_speed = _scaled_speed(10, speed_scale)
+    home_speed = _scaled_speed(30, speed_scale)
     receiver, giver = (
         ("right", "left") if direction == "left_to_right" else ("left", "right")
     )
@@ -89,7 +105,7 @@ def play(name=None, speed=None, require_confirmation=True,
     threads = [
         threading.Thread(
             target=arms[side].move_to_named_pose,
-            args=(presets[side],), kwargs={"speed": 15},
+            args=(presets[side],), kwargs={"speed": preset_speed},
         )
         for side in SIDES
     ]
@@ -101,7 +117,7 @@ def play(name=None, speed=None, require_confirmation=True,
     # Step 1: 接收臂开爪 → 右臂接近位
     grippers[receiver].open()
     time.sleep(0.5)
-    arms["right"].move_to_named_pose(right_approach, speed=10)
+    arms["right"].move_to_named_pose(right_approach, speed=approach_speed)
 
     # Step 2: 交接 — 接收臂闭合 → 1.5s → 交出臂打开
     grippers[receiver].close()
@@ -110,13 +126,13 @@ def play(name=None, speed=None, require_confirmation=True,
     time.sleep(1.0)
 
     # Step 3: 右臂 → 预置位
-    arms["right"].move_to_named_pose(right_preset, speed=15)
+    arms["right"].move_to_named_pose(right_preset, speed=preset_speed)
 
     # Step 4: 双臂并行 → home
     threads = [
         threading.Thread(
             target=arms[side].move_to_named_pose,
-            args=(homes[side],), kwargs={"speed": 30},
+            args=(homes[side],), kwargs={"speed": home_speed},
         )
         for side in SIDES
     ]

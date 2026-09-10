@@ -80,7 +80,7 @@ class GraspToDrawer(Skill):
         cprint("[grasp_to_drawer] 阶段2: 双臂交接（左→右）", "yellow")
         handover_ok = self.handover_pipeline.run(
             mode="dual",
-            speed=0.9,
+            speed=1,
             require_confirmation=False,
             direction="left_to_right",
         )

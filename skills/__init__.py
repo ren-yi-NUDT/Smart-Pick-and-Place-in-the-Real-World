@@ -15,6 +15,7 @@ from skills import (
     receive_and_hold,
     receive_user_trajectory,
     right_give_to_user,
+    desk_cleanup,
 )
 
 # Importing these modules registers their Skills; expose the same names so
@@ -36,4 +37,5 @@ __all__ = (
     "receive_and_hold",
     "receive_user_trajectory",
     "right_give_to_user",
+    "desk_cleanup",
 )

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""擦桌子技能（完整流程：抓海绵 → 擦桌 → 放回海绵）。
+"""擦桌子技能（完整流程：抓海绵 → 回 home → 擦桌 → 放回海绵）。
 
 三个有明确顺序的阶段：
 
-1. 固定位姿抓取海绵：张爪 → home → 观察位 → YOLO 确认淡绿色海绵在
-   固定抓取区域 → 抓取预备位 → 抓取位 → 最低力（force=1）闭合；
+1. 固定位姿抓取海绵：张爪 → home → 观察位 → 抓取预备位 → 抓取位 →
+   最低力（force=1）闭合，随后沿抓取逆路径经抓取预备位、观察位回到
+   home；
 2. 回放右臂的 ``wipe_table_demo`` 录制轨迹（夹爪不受控，保持低力夹持）；
 3. 抓取逆操作放回海绵：预备位 → 抓取位 → 张爪 → 预备位 → home。
 
 抓取使用固定位姿而非视觉抓取——擦桌效果依赖海绵在夹爪中的位姿相对
-不变；观察位的 YOLO 只做"存在性 + 固定区域"校验，失败即中止。
+不变；闭爪后仅通过夹爪状态确认是否抓取成功。
 
 轨迹回放：真机经 ``tools/record_sequence.traj_play`` 按**录制时间戳**
 回放（speed 为拖动速度的倍率，并自动先移到轨迹起点）；仿真模式走
-``core.drawer_executor`` 的 PyBullet 执行器（仿真跳过视觉校验）。
+``core.drawer_executor`` 的 PyBullet 执行器。
 全程复用本 Skill 实例的臂/夹爪连接，不创建新 Skill 实例。
 
 CLI 示例：
@@ -37,7 +38,7 @@ from skills.pose_execute import _load_poses
 
 @register_skill("wipe_table")
 class WipeTableSkill(Skill):
-    """抓海绵 → 擦桌轨迹回放 → 放回海绵，右臂全程单臂完成。"""
+    """抓海绵 → 逆路径回 home → 擦桌轨迹 → 放回海绵。"""
 
     ARM_SIDE = "right"
     DEFAULT_TRAJECTORY = "wipe_table_demo"
@@ -47,10 +48,6 @@ class WipeTableSkill(Skill):
     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     # 海绵固定抓取流程参数（实测验证值，勿随意改动）
-    SPONGE_PROMPT = "light green sponge"
-    SPONGE_CONF = 0.30
-    SPONGE_REGION_CENTER_PX = (282.0, 314.0)
-    SPONGE_REGION_TOL_PX = 45.0
     SPONGE_GRASP_FORCE = 1   # 最低非零夹持力，防止海绵形变
     GRIPPER_SPEED = 10
     SPEED_HOME = 15
@@ -144,33 +141,6 @@ class WipeTableSkill(Skill):
             cprint(f"[wipe_table] [{self.ARM_SIDE}] 执行位姿 {name} 失败", "red")
         return ok
 
-    def _check_sponge_visible(self):
-        """观察位拍照，YOLO 确认海绵存在且在固定抓取区域。
-
-        Returns:
-            None 表示通过，否则返回错误信息字符串。
-        """
-        rgb, _ = self.get_camera_obs(self.ARM_SIDE)
-        detections = self.perception.detect_objects(
-            rgb, [self.SPONGE_PROMPT], conf=self.SPONGE_CONF
-        )
-        if not detections:
-            return "未检测到淡绿色海绵"
-        x1, y1, x2, y2, conf, _ = [float(v) for v in detections[0][:6]]
-        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-        ecx, ecy = self.SPONGE_REGION_CENTER_PX
-        tol = self.SPONGE_REGION_TOL_PX
-        cprint(
-            f"[wipe_table] 海绵检测: center=({cx:.1f},{cy:.1f}) conf={conf:.3f}",
-            "cyan",
-        )
-        if abs(cx - ecx) > tol or abs(cy - ecy) > tol:
-            return (
-                f"海绵不在固定抓取区域 center=({cx:.1f},{cy:.1f})，"
-                f"期望 ({ecx:.0f},{ecy:.0f})±{tol:.0f}px"
-            )
-        return None
-
     def _grasp_sponge(self):
         """阶段1：固定抓取海绵。返回 None 表示成功，否则为错误码。"""
         cprint("[wipe_table] 阶段1: 固定位姿抓取海绵", "cyan")
@@ -183,14 +153,6 @@ class WipeTableSkill(Skill):
         if not self._play_teach_pose("sponge_observation_pose", self.SPEED_TRAVEL):
             return "OBSERVE_POSE_FAILED"
 
-        if self.config.sim_mode:
-            cprint("[wipe_table] (sim) 跳过海绵视觉校验", "yellow")
-        else:
-            error = self._check_sponge_visible()
-            if error:
-                cprint(f"[wipe_table] STOP: {error}", "red")
-                return "SPONGE_NOT_FOUND"
-
         if not self._play_teach_pose("sponge_grasp_pre_pose", self.SPEED_TRAVEL):
             return "GRASP_PRE_FAILED"
         if not self._play_teach_pose("sponge_grasp_pose", self.SPEED_GRASP):
@@ -201,6 +163,15 @@ class WipeTableSkill(Skill):
             cprint("[wipe_table] STOP: 夹爪未检测到海绵", "red")
             return "SPONGE_GRASP_FAILED"
         return None
+
+    def _return_home_after_grasp(self):
+        """抓取成功后沿固定抓取路径的逆序安全退回 home。"""
+        cprint("[wipe_table] 抓取完成，沿抓取逆路径回 home", "cyan")
+        return (
+            self._play_teach_pose("sponge_grasp_pre_pose", self.SPEED_TRAVEL)
+            and self._play_teach_pose("sponge_observation_pose", self.SPEED_TRAVEL)
+            and self._play_teach_pose("home", self.SPEED_HOME)
+        )
 
     def _put_back_sponge(self):
         """阶段3：抓取逆操作放回海绵。"""
@@ -233,7 +204,7 @@ class WipeTableSkill(Skill):
 
         ``trajectory`` 和 ``name`` 是 ``trajectory_name`` 的兼容别名。
 
-        ``grasp_sponge``: 阶段1 固定抓取海绵（默认 True）。
+        ``grasp_sponge``: 阶段1 固定抓取海绵并沿逆路径回 home（默认 True）。
         ``put_back``: 阶段3 放回海绵；默认跟随 ``grasp_sponge``。
         ``gripper_enabled``: 轨迹回放期间是否按录制值控制夹爪，默认
         False（保护海绵的 force=1 低力夹持）。
@@ -273,6 +244,16 @@ class WipeTableSkill(Skill):
                     data={"arm": self.ARM_SIDE, "stage": "grasp"},
                 )
             stages.append("grasp")
+
+            if not self._return_home_after_grasp():
+                return SkillResult(
+                    ok=False,
+                    code="GRASP_RETURN_HOME_FAILED",
+                    message="海绵已抓取，但沿抓取逆路径回 home 失败，已停止，不执行擦桌",
+                    recoverable=True,
+                    data={"arm": self.ARM_SIDE, "stages": stages},
+                )
+            stages.append("grasp_return_home")
 
         if not self._play_trajectory(
             trajectory_name, speed, gripper_enabled, skip_ranges

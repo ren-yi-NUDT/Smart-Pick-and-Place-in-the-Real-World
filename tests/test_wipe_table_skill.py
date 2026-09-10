@@ -129,6 +129,10 @@ def test_wipe_table_full_flow_order(monkeypatch):
 
     monkeypatch.setattr(skill, "_grasp_sponge", lambda: calls.append("grasp") or None)
     monkeypatch.setattr(
+        skill, "_return_home_after_grasp",
+        lambda: calls.append("grasp_return_home") or True,
+    )
+    monkeypatch.setattr(
         skill, "_play_trajectory",
         lambda *a, **k: calls.append("wipe") or True,
     )
@@ -137,30 +141,59 @@ def test_wipe_table_full_flow_order(monkeypatch):
     result = skill.execute(home_speed=10)
 
     assert result.ok is True
-    assert calls == ["grasp", "wipe", "put_back"]
-    assert result.data["stages"] == ["grasp", "wipe", "put_back"]
+    assert calls == ["grasp", "grasp_return_home", "wipe", "put_back"]
+    assert result.data["stages"] == [
+        "grasp", "grasp_return_home", "wipe", "put_back",
+    ]
     assert events[-1][0] == "home"
 
 
-def test_wipe_table_stops_when_sponge_missing(monkeypatch):
-    events = []
+def test_wipe_table_returns_home_along_reverse_grasp_path(monkeypatch):
     calls = []
-
-    skill = _skill(events)
-
+    skill = _skill([])
     monkeypatch.setattr(
-        skill, "_grasp_sponge", lambda: "SPONGE_NOT_FOUND"
-    )
-    monkeypatch.setattr(
-        skill, "_play_trajectory",
-        lambda *a, **k: calls.append("wipe") or True,
+        skill, "_play_teach_pose",
+        lambda name, speed: calls.append((name, speed)) or True,
     )
 
-    result = skill.execute()
+    assert skill._return_home_after_grasp() is True
+    assert calls == [
+        ("sponge_grasp_pre_pose", skill.SPEED_TRAVEL),
+        ("sponge_observation_pose", skill.SPEED_TRAVEL),
+        ("home", skill.SPEED_HOME),
+    ]
 
-    assert result.ok is False
-    assert result.code == "SPONGE_NOT_FOUND"
-    assert calls == []
+
+def test_wipe_table_fixed_grasp_does_not_use_vision(monkeypatch):
+    calls = []
+    skill = _skill([])
+
+    class Gripper:
+        def open(self, **kwargs):
+            calls.append("open")
+
+        def close(self, **kwargs):
+            calls.append("close")
+
+        def is_grasping(self, **kwargs):
+            return True
+
+    def unexpected_camera_call(*args, **kwargs):
+        raise AssertionError("fixed sponge grasp must not access the camera")
+
+    monkeypatch.setattr(skill.context, "gripper", lambda side: Gripper())
+    monkeypatch.setattr(
+        skill,
+        "_play_teach_pose",
+        lambda name, speed: calls.append(name) or True,
+    )
+    monkeypatch.setattr(skill, "get_camera_obs", unexpected_camera_call)
+
+    assert skill._grasp_sponge() is None
+    assert calls == [
+        "open", "home", "sponge_observation_pose",
+        "sponge_grasp_pre_pose", "sponge_grasp_pose", "close",
+    ]
 
 
 def test_wipe_table_put_back_defaults_to_grasp_flag(monkeypatch):

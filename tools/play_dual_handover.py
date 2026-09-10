@@ -8,11 +8,11 @@ import argparse
 def main():
     from core.dual_handover import play
 
-    parser = argparse.ArgumentParser(description="双臂定时交接轨迹回放")
+    parser = argparse.ArgumentParser(description="双臂交接位姿回放")
     parser.add_argument("--name", default=None, help="默认 dual_handover_timed_20260826_v2")
     parser.add_argument(
-        "--speed", type=float, default=None,
-        help="速度倍率；当前 v2 交接轨迹默认 0.9，其它轨迹默认 0.5",
+        "--speed", type=float, default=1,
+        help="速度倍率，默认 1",
     )
     parser.add_argument(
         "--direction", choices=("left_to_right", "right_to_left"),

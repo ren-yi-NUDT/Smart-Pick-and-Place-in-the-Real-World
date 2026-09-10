@@ -76,7 +76,7 @@ class HandoverPipeline:
         time.sleep(release_wait)
         return self._return_home(side, speed=30)
 
-    def dual(self, direction="left_to_right", name=None, speed=None,
+    def dual(self, direction="left_to_right", name=None, speed=1,
              require_confirmation=False):
         """Replay the validated dual-arm handover using shared clients."""
         if direction not in ("left_to_right", "right_to_left"):

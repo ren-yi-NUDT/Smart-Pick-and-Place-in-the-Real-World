@@ -20,14 +20,14 @@ class DualHandoverSkill(Skill):
 
     def execute(self, **kwargs):
         name = kwargs.get("name")
-        speed = kwargs.get("speed")
+        speed = kwargs.get("speed", 1)
         direction = kwargs.get("direction", "left_to_right")
         if direction not in ("left_to_right", "right_to_left"):
             cprint(f"[dual_handover] 未知方向: {direction}", "red")
             return False
 
         cprint(
-            f"[dual_handover] {direction} ({name or 'default'}, speed={speed or 'default'})",
+            f"[dual_handover] {direction} ({name or 'default'}, speed={speed})",
             "cyan",
         )
         try:

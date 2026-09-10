@@ -9,6 +9,9 @@ class _Config:
     def get_camera_intrinsics(self, side):
         return {"fx": 385.0, "fy": 385.0, "cx": 320.0, "cy": 240.0}
 
+    def get_grasp_scoring(self, side):
+        return {}
+
 
 def _skill_with_rgbd():
     """Return (skill, place_pipeline) with RGB-D fixtures seeded on the skill.
@@ -23,6 +26,14 @@ def _skill_with_rgbd():
     skill.depth = np.full((120, 160), 700, dtype=np.uint16)
     skill._placement_side = "left"
     return skill, skill.place_pipeline
+
+
+def test_placement_execution_offset_defaults_to_zero():
+    _, pp = _skill_with_rgbd()
+
+    np.testing.assert_array_equal(
+        pp._placement_execution_offset_base_m("left"), np.zeros(3)
+    )
 
 
 def test_place_samples_safe_interior_points_using_object_footprint():
