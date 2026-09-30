@@ -96,7 +96,7 @@ class PickAndPlaceSkill(Skill):
             if throw_pose is None:
                 cprint("T=================== Trash task failed: throw_to_trash_pose not found ===================", "red")
                 return False
-            joint_angles = [throw_pose[f"J{i}"] for i in range(1, 8)]
+            joint_angles = [throw_pose[f"J{i}"] for i in range(1, 7)]
             self.control_arm(trajectory=np.array([joint_angles]), speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
@@ -112,7 +112,7 @@ class PickAndPlaceSkill(Skill):
             if desk_pose is None:
                 cprint(f"D=================== Desk task failed: {selected} not found ===================", "red")
                 return False
-            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 8)]
+            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 7)]
             self.control_arm(trajectory=np.array([joint_angles]), speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
@@ -234,7 +234,6 @@ class PickAndPlaceSkill(Skill):
 
         basic_mat = np.eye(4)
         execution_grasping_pos = grasping_pose_world_hand @ basic_mat
-        print("=-============================", execution_grasping_pos[2, 3])
         execution_grasping_pos[2, 3] = max(execution_grasping_pos[2, 3], 0.042)
         execution_grasping_pos = execution_grasping_pos @ self.T_hand_effector_to_arm_endlink
         execution_grasping_pos_position = execution_grasping_pos[:3, 3]
@@ -249,7 +248,7 @@ class PickAndPlaceSkill(Skill):
                  execution_grasping_pos_orientation[0], execution_grasping_pos_orientation[1], execution_grasping_pos_orientation[2], execution_grasping_pos_orientation[3]],
             ],
             "current_js": default_traj_js_rad,
-            "struct": "left_arm",
+            "struct": "rm65",
         }
         rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         state = rsp["value"]
@@ -327,7 +326,7 @@ class PickAndPlaceSkill(Skill):
         cnfg = {
             "target_pose": [[pos[0], pos[1], pos[2], orn[0], orn[1], orn[2], orn[3]]],
             "current_js": default_js_rad,
-            "struct": "left_arm",
+            "struct": "rm65",
         }
         rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         if rsp["value"]:

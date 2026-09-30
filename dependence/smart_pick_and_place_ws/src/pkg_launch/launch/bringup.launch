@@ -1,18 +1,27 @@
 <launch>
     <!-- load urdf-->
-    <param name="robot_description" textfile="$(find rm_description)/urdf/SingleArm/easy_single_arm.urdf" />
+    <param name="robot_description" textfile="$(find rm_description)/urdf/SingleArm/rm65.urdf" />
 
     <!-- bringup robot -->
-    <node pkg="rm_65_pkg" type="arm_75_bringup.py" name="arm_75_bringup" output="screen">
+    <node pkg="rm_65_pkg" type="arm_75_bringup.py" name="rm65_bringup" output="screen">
     </node>
 
     <!-- mount camera -->
     <node pkg="rm_65_pkg" type="mount_camera.py" name="mount_camera_erdaiji_grasp_left" output="screen"></node>
 
-    <node pkg="rm_65_pkg" type="inspire_hand_bringup.py" name="inspire_hand_bringup" output="screen"></node>
 
     <!-- publish joint state -->
     <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+
+    <!-- 别加 joint_state_publisher: 它是为了给夹爪 mimic joints (finger_joint 等) 发 TF
+         显示用的, 但它会 **把所有 12 个关节** 按 0 位一起发到 /joint_states, 和
+         rm65_bringup 发的 6 个真实角度打架。robot_state_publisher 谁后到用谁, 于是
+         base_link->cam_link_grasp 在 ~2s 周期里来回跳: 一半时间相机在世界系 z=0.97 朝
+         天上看, 于是 T_base_to_cam @ 抓取点 算出 z≈1.27m 的空中目标, 孪生判不可达,
+         抓取随机失败。实测同一帧图像两次查询给出 z=0.0015 和 z=1.271 两个结果。
+         管线只查 cam_link_grasp / gripper_endeffector, 两个都是 fixed joint,
+         robot_state_publisher 直接按 URDF 发布, 不依赖 joint_states —— 删掉无影响,
+         只有 RViz 里手指不动 (纯显示)。 -->
 
     <!-- launch rviz -->
     <node name="rviz" pkg="rviz" type="rviz" args="-d $(find rm_description)/config/singlearm.rviz" />

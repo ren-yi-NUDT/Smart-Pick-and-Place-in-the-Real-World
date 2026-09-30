@@ -28,26 +28,36 @@ ROUND_NUMBER = 3
 
 
 
+def robot_base_pose(robot_id):
+    """机器人基座 **URDF root link** 位姿 (world 系) —— "self 系" 的原点。
+
+    原实现取 getLinkState(robot_id, 0)[:2], 那是 link_1 的**质心系**: 它跟着 J1
+    一起转, 还比基座高 0.133m。而所有 skill 发过来的位姿都在 ROS base_link 系里,
+    实测 base_link 与 twin 的 world 系完全重合 (0.0001m / 0.01deg), 于是每条指令
+    都被额外转了 J1、又平移了 0.133m —— 实测 delta_rpy 0.45~0.72rad 正好等于 J1
+    (grasp1 时 26.6deg), 位置残差 0.30m, 所有候选全部判不可达。
+
+    注意不能直接用 getBasePositionAndOrientation: 它给的是基座的**质心**系, 同一个
+    [:2]/[4:6] 的坑。URDF 里 base_link 的惯量原点偏了 (-0.0005, -0.00005, 0.060019),
+    直接用会让整条链路凭空高 6cm。减掉惯量偏移才是 root link 系, 实测正好落在原点。
+    """
+    pos, orn = p.getBasePositionAndOrientation(robot_id)
+    local_inertial = np.array(p.getDynamicsInfo(robot_id, -1)[3])
+    rot = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+    return list(np.array(pos) - rot @ local_inertial), orn
+
+
 def world_to_robot(robot_id, world_pos, world_orn):
-    robot_base_pos, robot_base_orn = p.getLinkState(robot_id, 0)[:2] 
-    # print(robot_id)
-    # print("robot_base_pos, robot_base_orn")
-    # print(robot_base_pos, robot_base_orn)
-    # print("=---------------------------")
-    # pos, orn = p.getLinkState(robot_id, 0)[:2] 
-    # print("pos, orn")
-    # print(pos, orn)
-    # print("===========================")
+    robot_base_pos, robot_base_orn = robot_base_pose(robot_id)
     T_w_r = calcul_transformation_matrix(robot_base_pos, robot_base_orn)
     T_w_p = calcul_transformation_matrix(world_pos, world_orn)
     T_r_p = np.linalg.inv(T_w_r) @ T_w_p
     robot_pos, robot_orn = calcul_pos_orn(T_r_p)
     return robot_pos, robot_orn
-    
+
 
 def robot_to_world(robot_id, robot_pos, robot_orn):
-    robot_base_pos, robot_base_orn = p.getLinkState(robot_id, 0)[:2] 
-    # print(robot_base_pos, robot_base_orn)
+    robot_base_pos, robot_base_orn = robot_base_pose(robot_id)
     T_w_r = calcul_transformation_matrix(robot_base_pos, robot_base_orn)
     T_r_p = calcul_transformation_matrix(robot_pos, robot_orn)
     T_w_p = T_w_r @ T_r_p
@@ -76,7 +86,6 @@ class ErdaijiRobot:
         self.collision_threshold = 0.001
         self.vis = vis
         
-        del self.robot_config['left_hand']
         self.struct_list = list(self.robot_config.keys())
         rospy.loginfo(f"ROBOT STRUCT LIST: {self.struct_list}")
         
@@ -624,11 +633,15 @@ class BaseStruct:
     def get_end_link_pose_world(self):
         # <<< return current end_link_pose in <<< WORLD COORDINATE >>>
         # <<< nend_link is predefined in the struct config
-        return p.getLinkState(self.robot_id, self.end_link_id)[:2]    
+        # 必须取 [4:6] = worldLinkFramePosition/Orientation (URDF link 系)。
+        # [:2] 是 linkWorldPosition, 即质心系 —— 和 calculateInverseKinematics
+        # 的目标系差一个质心偏移 (link_6 实测 10.588mm)。用错的话 IK 明明把 link
+        # 系摆到位了, 这里读质心系, check_reach 就会恒定差 10.6mm 判不可达。
+        return p.getLinkState(self.robot_id, self.end_link_id)[4:6]
     def get_end_link_pose_self(self):
         # <<< return current end_link_pose in <<< ROBOT COORDINATE >>>
         # <<< end_link is predefined in the struct config
-        w_pos, w_orn = p.getLinkState(self.robot_id, self.end_link_id)[:2]
+        w_pos, w_orn = p.getLinkState(self.robot_id, self.end_link_id)[4:6]
         return  world_to_robot(self.robot_id, w_pos, w_orn)
     
     
@@ -907,19 +920,42 @@ class Arm(BaseStruct):
     
     def reset_by_ee_pose_self(self, pos, orn, js = None):
 
-        
+
         pos_world, orn_world = robot_to_world(self.robot_id, pos, orn)
-        
-        
-        curr_js_fake = self.create_fake_js(js = js)
-        joint_poses = p.calculateInverseKinematics(self.robot_id, self.end_link_id, pos_world, orn,
-                                                    self.ll_robot, self.ul_robot, self.jr_robot, curr_js_fake,
-                                                    maxNumIterations=2500, residualThreshold=1e-4, solver = p.IK_DLS) 
-        
-        controllable_joint_poses = [joint_poses[idx] for idx in self.joint_index]
-        
-        self.reset_by_joint_states(controllable_joint_poses)
-        self.move_joint(controllable_joint_poses)
+        orn_world = np.array(orn_world)
+
+        def solve(seed):
+            # 目标位姿是 <<< robot 系 >>> 的, 必须传 orn_world。传 orn 等于把一个
+            # robot 系的四元数当 world 系喂给 IK —— 姿态目标整个错掉, 求解器为了
+            # 兼顾姿态会把位置也带偏 (实测 grasp1 自己到自己: 29mm / 5.9rad)。
+            jp = p.calculateInverseKinematics(self.robot_id, self.end_link_id, pos_world, orn_world,
+                                              self.ll_robot, self.ul_robot, self.jr_robot, seed,
+                                              maxNumIterations=2500, residualThreshold=1e-4, solver = p.IK_DLS)
+            return [jp[idx] for idx in self.joint_index]
+
+        def err_of(arm_js):
+            self.reset_by_joint_states(arm_js)
+            cur_pos, cur_orn = p.getLinkState(self.robot_id, self.end_link_id)[4:6]
+            return (float(np.linalg.norm(np.array(cur_pos) - np.array(pos_world))),
+                    float(2.0 * np.arccos(min(1.0, abs(float(np.dot(cur_orn, orn_world)))))))
+
+        # DLS-IK 是局部求解器: 同一个目标, 换个种子就可能从 0.1mm 掉到 21mm —— 实测
+        # 抓取点用 grasp1 种子差 106mm, 换随机种子 40 个里 15 个能到 1.8mm。单种子
+        # 会把这个可达目标判成不可达 (check_reach 阈值 10mm), 所有抓取候选全军覆没。
+        # 所以第一次没打准就换随机种子重试。中间路点第一次几乎总能过, 快速路径不受影响。
+        best = solve(self.create_fake_js(js = js))
+        best_err = err_of(best)
+        if best_err[0] > 0.005 or best_err[1] > 0.02:
+            for _ in range(24):
+                cand = solve(list(np.random.uniform(self.ll_robot, self.ul_robot)))
+                e = err_of(cand)
+                if e < best_err:
+                    best, best_err = cand, e
+                if best_err[0] <= 0.002 and best_err[1] <= 0.01:
+                    break
+
+        self.reset_by_joint_states(best)
+        self.move_joint(best)
         return True
 
     def solve_robust_ik(self, target_pos, target_orn, seed_js=None):
@@ -962,14 +998,14 @@ class Arm(BaseStruct):
             if ll is not None and ul is not None and jr is not None and rp is not None:
                 # 使用 Null Space (最推荐，最稳定)
                 joint_poses = p.calculateInverseKinematics(
-                    self.robot_id, self.end_link_id, pos_world, target_orn, # 注意：calculateIK 通常接受目标的世界坐标系位置和方向
+                    self.robot_id, self.end_link_id, pos_world, orn_world, # 目标系是 world, 用变换后的 orn
                     lowerLimits=ll, upperLimits=ul, jointRanges=jr, restPoses=rp,
                     maxNumIterations=5000, residualThreshold=1e-4, solver=p.IK_DLS
                 )
             else:
                 # 普通 IK (DLS)
                 joint_poses = p.calculateInverseKinematics(
-                    self.robot_id, self.end_link_id, pos_world, target_orn,
+                    self.robot_id, self.end_link_id, pos_world, orn_world,
                     maxNumIterations=5000, residualThreshold=1e-4, solver=p.IK_DLS
                 )
             

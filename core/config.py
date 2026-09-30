@@ -22,7 +22,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ---------------------------------------------------------------------------
 HOST = "127.0.0.1"
 ARM_PORT = 8010
-HAND_PORT = 8000
+GRIPPER_PORT = 8001  # Robotiq 85 夹爪服务 (dependence/gripper-programming/server.py)
 TWIN_PORT = 8020
 
 # ---------------------------------------------------------------------------
@@ -36,12 +36,6 @@ DEFAULT_ANYGRASP_CHECKPOINT = os.path.join(
     PROJECT_ROOT,
     "dependence", "anygrasp_sdk", "checkpoint_detection.tar",
 )
-
-# ---------------------------------------------------------------------------
-# Hand gesture configurations
-# ---------------------------------------------------------------------------
-HAND_CLOSE = [0, 0, 0, 460, 0, 0]
-HAND_OPEN = [1000, 1000, 1000, 1000, 1000, 0]
 
 # ---------------------------------------------------------------------------
 # Named poses exposed from robot_config.json
@@ -71,8 +65,8 @@ class Config(BaseConfig):
         self.default_traj_js: dict = {}
         self.base_link_name: str = "base_link"
         self.camera_link_name: str = "cam_link_grasp"
-        self.hand_effector_name: str = "L_hand_endeffector"
-        self.arm_end_link_name: str = "Link7"
+        self.hand_effector_name: str = "gripper_endeffector"
+        self.arm_end_link_name: str = "link_6"
         self.reload()
 
     # ------------------------------------------------------------------
@@ -90,7 +84,7 @@ class Config(BaseConfig):
         self.arm_end_link_name = self.robot_config.get("arm_end_link_name", self.arm_end_link_name)
 
     def get_pose(self, name):
-        """Return a named joint-space pose dict (e.g. {"J1": ..., "J7": ...})."""
+        """Return a named six-joint pose dict (e.g. {"J1": ..., "J6": ...})."""
         # Check top-level first (handover, desk poses, etc.)
         pose = self.robot_config.get(name)
         if pose is not None and "J1" in pose:
