@@ -824,6 +824,73 @@ class Arm(BaseStruct):
         n = len(self.joint_index)
         return self.ll_robot[:n], self.ul_robot[:n], self.jr_robot[:n], list(rest_js)[:n]
 
+    def wrap_joint_limits(self, js):
+        """每个关节各自按 2π 回卷到限位内; 有任何一个折不回去就返回 None。
+
+        真机 J4 限位 ±177.96°, 而 DLS-IK 常给出 -210° 这种值 —— 数学上 FK 是周期
+        的 (FK(-210°) == FK(+149.5°)), 但真机 J4 转不到 -210°, 它只会被控制器卡在
+        ±178°, 夹爪因此停在离目标很远的地方。回卷是"同一个物理构型换个写法", 位姿
+        不变, 真机也能执行。
+        """
+        n = len(self.joint_index)
+        out = []
+        for i in range(n):
+            lo, hi = self.ll_robot[i], self.ul_robot[i]
+            v = float(js[i])
+            if v < lo or v > hi:
+                # 只在越限时才回卷。J6 限位是 ±359.82° (≈±2π), 合法的 +59.6° 会被
+                # 无差别回卷成 -300.4° —— 物理上是同一个角, 数值上却差了 360°,
+                # 后面按"离上一个路点最近"挑分支时就会因此选错分支。
+                v = v - 2 * np.pi * np.floor((v - lo) / (2 * np.pi))
+                if v > hi + 1e-9:
+                    return None  # 落在限位死区 (限位宽度略小于 2π)
+            out.append(v)
+        return out
+
+    def joint_dist(self, a, b):
+        """两个构型之间"真机要走多远"。限位宽度 ≥ 2π 的关节 (J6) 按圆周距离算,
+        否则 -300° 和 +59° 会被算成 360°, 挑分支时又选错。"""
+        d = np.array(a, dtype=float) - np.array(b, dtype=float)
+        for i in range(len(d)):
+            if self.ul_robot[i] - self.ll_robot[i] >= 2 * np.pi - 1e-9:
+                d[i] = (d[i] + np.pi) % (2 * np.pi) - np.pi
+        return float(np.linalg.norm(d))
+
+    def enforce_joint_limits(self, js, ref=None):
+        """把 IK 解折回真机限位内的等价表示, 多个可行解里取离 ref 最近的。
+
+        两种等价写法:
+          - 2π 回卷: 物理构型完全相同, 位姿不变。
+          - ZYZ 腕部翻转 (J4±π, -J5, J6±π): 6 轴球腕的另一个解, 末端位姿相同
+            (实测位置差 0.001mm / 姿态差 0.022°), 但构型不同 —— 回卷折不回去时用它。
+        取离 ref (上一个路点) 最近的解, 是为了让整条轨迹落在同一个分支上, 不然相邻
+        路点之间会出现 100°+ 的关节跳变, 真机照着走会扫过桌面。
+        """
+        cands = []
+        w = self.wrap_joint_limits(js)
+        if w is not None:
+            cands.append(w)
+        if len(js) == 6:
+            f = list(js)
+            f[3] += np.pi
+            f[4] = -f[4]
+            f[5] += np.pi
+            w = self.wrap_joint_limits(f)
+            if w is not None:
+                cands.append(w)
+        if not cands:
+            return None
+        if ref is None:
+            return cands[0]
+        ref = np.array(ref, dtype=float)[:len(cands[0])]
+        return [float(v) for v in min(cands, key=lambda c: self.joint_dist(c, ref))]
+
+    def in_joint_limits(self, js=None):
+        """当前 (或给定) 构型是否在真机关节限位内。"""
+        n = len(self.joint_index)
+        q = self.get_joint_pose()[:n] if js is None else np.array(js, dtype=float)[:n]
+        return bool(np.all(q >= np.array(self.ll_robot[:n]) - 1e-6)
+                    and np.all(q <= np.array(self.ul_robot[:n]) + 1e-6))
 
     def get_action_and_execute(self, cmd_to_execute):
         if cmd_to_execute["type"] == "js":
@@ -959,6 +1026,8 @@ class Arm(BaseStruct):
 
         pos_world, orn_world = robot_to_world(self.robot_id, pos, orn)
         orn_world = np.array(orn_world)
+        # 连续性的参考点: 上一个路点的关节角。enforce_joint_limits 用它挑分支。
+        ref = self.get_joint_pose() if js is None else np.array(js, dtype=float)
 
         def solve(seed):
             # 目标位姿是 <<< robot 系 >>> 的, 必须传 orn_world。传 orn 等于把一个
@@ -968,7 +1037,10 @@ class Arm(BaseStruct):
             jp = p.calculateInverseKinematics(self.robot_id, self.end_link_id, pos_world, orn_world,
                                               ll, ul, jr, rp,
                                               maxNumIterations=2500, residualThreshold=1e-4, solver = p.IK_DLS)
-            return [jp[idx] for idx in self.joint_index]
+            # IK 的输出必须折回真机限位。PyBullet 的 resetJointState 不看限位, 所以
+            # 越限解在仿真里 FK 也是准的、check_reach 也报"可达", 但真机 J4 到不了
+            # -210°, 只会卡在 -178° —— 实测就是这么"差很远"地抓空的。
+            return self.enforce_joint_limits([jp[idx] for idx in self.joint_index], ref = ref)
 
         def err_of(arm_js):
             self.reset_by_joint_states(arm_js)
@@ -981,15 +1053,25 @@ class Arm(BaseStruct):
         # 会把这个可达目标判成不可达 (check_reach 阈值 10mm), 所有抓取候选全军覆没。
         # 所以第一次没打准就换随机种子重试。中间路点第一次几乎总能过, 快速路径不受影响。
         best = solve(self.create_fake_js(js = js))
-        best_err = err_of(best)
-        if best_err[0] > 0.005 or best_err[1] > 0.02:
+        best_err = (1e9, 1e9) if best is None else err_of(best)
+        if best is None or best_err[0] > 0.005 or best_err[1] > 0.02:
             for _ in range(24):
                 cand = solve(list(np.random.uniform(self.ll_robot, self.ul_robot)))
+                if cand is None:
+                    continue
                 e = err_of(cand)
                 if e < best_err:
                     best, best_err = cand, e
                 if best_err[0] <= 0.002 and best_err[1] <= 0.01:
                     break
+
+        if best is None:
+            # 这个位姿在真机限位内无解。把仿真复位到参考构型 (保证后续 get_joint_pose
+            # 读到的是合法值), 返回 False —— 调用方的 check_reach 会因为位姿对不上而
+            # 判不可达, 不会把越限关节发给真机。
+            self.reset_by_joint_states(ref)
+            self.move_joint(ref)
+            return False
 
         self.reset_by_joint_states(best)
         self.move_joint(best)

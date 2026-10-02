@@ -277,10 +277,18 @@ class TwinTest2(World):
             
             # reset robot to interval pose
             arm = self.robot.robot_structs[struct_name]
+            prev_js = np.array(intermediate_js, dtype=float)
             arm.reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
 
             # 同 linear_traj_generation2: 先读构型再 step (trajectory 里存的是 intermediate_js)
             intermediate_js = arm.get_joint_pose()
+
+            # 同 linear_traj_generation2: 相邻路点换腕分支 -> 真机会扫过桌面, 直接拒发
+            jump = float(np.max(np.abs(intermediate_js - prev_js)))
+            if jump > np.radians(90):
+                rospy.logwarn(f"BRANCH_JUMP {np.degrees(jump):.1f}deg at {intermediate_pos} "
+                              f"CANNOT GENERATE TRAJECTORY")
+                return 0, trajectory, trajectory_ee, infos
             is_reach, delta_xyz, delta_rpy = arm.check_reach(intermediate_pos, intermediate_orn
                                                              , xyz_threshold =0.01, rpy_threshold = 0.01)
 
@@ -479,12 +487,25 @@ class TwinTest2(World):
                 
                 # reset robot to interval pose
                 arm = self.robot.robot_structs[struct_name]
+                prev_js = np.array(intermediate_js, dtype=float)
                 arm.reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
 
                 # 同 381 行: 先读构型再 step。这里更要紧 —— trajectory 里存的是
                 # intermediate_js, 而这条轨迹是要发给真机的。在 step 之后取, 取到的是
                 # 仿真里被甩开 0.4rad 的关节角, 等于把错的目标点发给机械臂。
                 intermediate_js = arm.get_joint_pose()
+
+                # 分支一致性。enforce_joint_limits 只保证"这个点本身合法"; 如果相邻
+                # 路点换了腕部分支 (J4 一次跳 ~180°), 真机照着走会让整条臂扫过桌面。
+                # 相邻路点间距恒为 interval_threshold (~50mm), 这个尺度下 90° 的关节
+                # 跳变只可能来自换分支。判不可用 -> 上层去试下一个观察位姿, 而不是
+                # 发一条会把夹爪甩飞的轨迹。
+                jump = float(np.max(np.abs(intermediate_js - prev_js)))
+                if jump > np.radians(90):
+                    rospy.logwarn(f"BRANCH_JUMP {np.degrees(jump):.1f}deg at {intermediate_pos} "
+                                  f"(prev={np.degrees(prev_js).round(1)} now={np.degrees(intermediate_js).round(1)}) "
+                                  f"CANNOT GENERATE TRAJECTORY")
+                    return 0, trajectory, trajectory_ee, infos
                 is_reach, delta_xyz, delta_rpy = arm.check_reach(intermediate_pos, intermediate_orn
                                                                  , xyz_threshold =0.01, rpy_threshold = 0.01)
                 is_collide, collide_id = self.robot.check_collision()
