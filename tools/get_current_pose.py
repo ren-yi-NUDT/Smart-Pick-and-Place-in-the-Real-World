@@ -7,7 +7,7 @@
 from Robotic_Arm.rm_robot_interface import *
 import json
 
-def get_current_arm_state(arm_ip="192.168.1.19", arm_port=8080):
+def get_current_arm_state(arm_ip="192.168.1.18", arm_port=8080):
     """
     获取当前机械臂的关节状态和末端位姿
 
@@ -34,7 +34,7 @@ def get_current_arm_state(arm_ip="192.168.1.19", arm_port=8080):
         return None
 
     result = {
-        "joint_angles_deg": arm_state["joint"],  # 7个关节角度，单位：度
+        "joint_angles_deg": arm_state["joint"],
         "end_pose": arm_state["pose"],            # 末端位姿 [x, y, z, rx, ry, rz]
     }
 
@@ -65,8 +65,7 @@ def get_current_arm_state(arm_ip="192.168.1.19", arm_port=8080):
         "J3": %.3f,
         "J4": %.3f,
         "J5": %.3f,
-        "J6": %.3f,
-        "J7": %.3f
+        "J6": %.3f
     }
 ''' % tuple(joints)
     print(config_str)
@@ -79,7 +78,7 @@ def get_current_arm_state(arm_ip="192.168.1.19", arm_port=8080):
 
 if __name__ == "__main__":
     # 机械臂IP（根据实际情况修改）
-    ARM_IP = "192.168.1.19"
+    ARM_IP = "192.168.1.18"
 
     print("请将机械臂手动拖动到你想要的递送位置，然后按回车继续...")
     input()

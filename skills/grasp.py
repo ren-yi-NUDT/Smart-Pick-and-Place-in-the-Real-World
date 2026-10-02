@@ -302,7 +302,7 @@ class GraspSkill(Skill):
     # Twin-service helpers
     # ------------------------------------------------------------------
     def create_send_config_2(self, prep_pos, prep_orn, exec_pos, exec_orn,
-                             current_js_pose=None, struct="left_arm"):
+                             current_js_pose=None, struct="rm65"):
         if current_js_pose is None:
             self._config = {
                 "target_pose": [
@@ -411,6 +411,21 @@ class GraspSkill(Skill):
 
             self.control_arm(pose_type=key, speed=30)
             self.rgb, self.depth = self.get_camera_obs()
+
+            # jev 快速识别场景物体；与目标匹配则用细类过滤，否则报告场景内容
+            from core.fast_classify import identify_scene_objects
+            try:
+                scene_classes = identify_scene_objects(self.perception, self.rgb)
+            except Exception as e:
+                scene_classes = []
+                cprint(f"[grasp] fast_classify unavailable: {e}", "yellow")
+            target_classes = [c.strip() for c in obj.split(",")]
+            matched = [c for c in scene_classes
+                       if any(t in c or c in t for t in target_classes)]
+            if scene_classes:
+                cprint(f"[grasp] scene objects: {scene_classes} "
+                       f"(target: {target_classes}, matched: {matched})", "cyan")
+
             cprint(
                 f"G=================== Save current rgb and depth observations: "
                 f"{self.save_path} ===================",
@@ -426,8 +441,14 @@ class GraspSkill(Skill):
             if not anygrasp_pose:
                 continue
 
+            # 场景里有目标但细类名不同（如 "fruit"→"orange"）时，用细类名过滤更准
+            filter_name = obj
+            if matched and matched[0] not in target_classes:
+                filter_name = matched[0]
+                cprint(f"[grasp] using fine class '{filter_name}' from jev", "cyan")
+
             filtering_grasping_pose = self.filtering_pose(
-                anygrasp_pose, class_name=obj, image=self.rgb
+                anygrasp_pose, class_name=filter_name, image=self.rgb
             )
             if not filtering_grasping_pose:
                 continue

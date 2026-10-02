@@ -38,7 +38,7 @@ class FetchFromUserSkill(Skill):
         cprint("=================== Moving to receive pose (handover) ===================", "cyan")
         joint_angles = [
             handover_pose["J1"], handover_pose["J2"], handover_pose["J3"],
-            handover_pose["J4"], handover_pose["J5"], handover_pose["J6"], handover_pose["J7"]
+            handover_pose["J4"], handover_pose["J5"], handover_pose["J6"]
         ]
         trajectory = np.array([joint_angles])
         self.control_arm(trajectory=trajectory, speed=15)
@@ -73,7 +73,7 @@ class FetchFromUserSkill(Skill):
             if throw_pose is None:
                 cprint("=================== Trash task failed: throw_to_trash_pose not found ===================", "red")
                 return False
-            joint_angles = [throw_pose[f"J{i}"] for i in range(1, 8)]
+            joint_angles = [throw_pose[f"J{i}"] for i in range(1, 7)]
             self.control_arm(trajectory=np.array([joint_angles]), speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
@@ -90,7 +90,7 @@ class FetchFromUserSkill(Skill):
             if desk_pose is None:
                 cprint(f"=================== Desk task failed: {selected} not found ===================", "red")
                 return False
-            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 8)]
+            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 7)]
             self.control_arm(trajectory=np.array([joint_angles]), speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
@@ -181,7 +181,7 @@ class FetchFromUserSkill(Skill):
         cnfg = {
             "target_pose": [[pos[0], pos[1], pos[2], orn[0], orn[1], orn[2], orn[3]]],
             "current_js": default_js_rad,
-            "struct": "left_arm",
+            "struct": "rm65",
         }
         rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         if rsp["value"]:

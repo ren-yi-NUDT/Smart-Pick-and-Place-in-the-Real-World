@@ -21,7 +21,7 @@ class BaseConfig(ABC):
 
     @abstractmethod
     def get_pose(self, name: str):
-        """Return a named joint-space pose dict (e.g. {"J1": deg, ..., "J7": deg}).
+        """Return a named joint-space pose dict (e.g. {"J1": deg, ..., "J6": deg}).
 
         Returns None if the pose is not found.
         """
@@ -53,7 +53,7 @@ class BaseArm(ABC):
 
     @abstractmethod
     def add_js_cmd(self, joint_dict: dict, speed: int = 5, block: bool = True) -> None:
-        """Append a joint-space command. joint_dict: {"J1": deg, ..., "J7": deg}."""
+        """Append a joint-space command. joint_dict: {"J1": deg, ..., "J6": deg}."""
 
     @abstractmethod
     def add_ee_cmd(self, ee_trajectory, speed: int = 5, block: bool = True) -> None: ...

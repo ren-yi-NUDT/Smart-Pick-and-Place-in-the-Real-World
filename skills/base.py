@@ -222,10 +222,10 @@ class Skill(ABC):
                 pose = self.config.get_pose(pose_type)
                 if pose is None:
                     raise KeyError(f"Pose '{pose_type}' not found in config")
-                arm.move_to_named_pose(pose, speed=speed)
+                return arm.move_to_named_pose(pose, speed=speed)
             elif trajectory is not None:
-                arm.execute_trajectory(trajectory, speed=speed)
-            return True
+                return arm.execute_trajectory(trajectory, speed=speed)
+            return False
         except Exception as e:
             from termcolor import cprint
             cprint(f"Arm control error: {e}", "red")

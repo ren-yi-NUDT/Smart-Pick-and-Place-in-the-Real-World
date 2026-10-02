@@ -12,7 +12,7 @@ Usage:
     from core.twin_client import TwinClient
     twin = TwinClient()
     twin.connect()
-    resp = twin.generate_trajectory2(target_pose=[...], current_js=[...], struct="left_arm")
+    resp = twin.generate_trajectory2(target_pose=[...], current_js=[...], struct="rm65")
 """
 
 import json
@@ -89,7 +89,7 @@ class TwinClient(BaseTwinClient):
         grasp_position, grasp_orn,
         current_js_rad=None,
         default_traj_js_rad=None,
-        struct: str = "left_arm",
+        struct: str = "rm65",
     ) -> dict:
         """Build the configuration payload for a *grasp* trajectory.
 
@@ -120,7 +120,7 @@ class TwinClient(BaseTwinClient):
         place_position, place_orn,
         current_js_rad=None,
         default_traj_js_rad=None,
-        struct: str = "left_arm",
+        struct: str = "rm65",
     ) -> dict:
         """Build the configuration payload for a *place* trajectory.
 

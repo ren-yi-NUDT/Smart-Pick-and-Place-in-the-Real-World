@@ -41,7 +41,7 @@ def _send_cmd(sock: socket.socket, data: dict) -> dict:
 class ArmClient(BaseArm):
     """Stateless wrapper around the arm TCP service."""
 
-    SERVICE_NAME = "/right_arm/movement_control"
+    SERVICE_NAME = "/arm/movement_control"
 
     def __init__(self, host: str = HOST, port: int = ARM_PORT):
         self.host = host
@@ -89,6 +89,8 @@ class ArmClient(BaseArm):
 
         *joint_dict* should be like ``{"J1": 1.745, "J2": -0.504, ...}``
         """
+        if set(joint_dict) != {f"J{i}" for i in range(1, 7)}:
+            raise ValueError("RM65 requires exactly J1 through J6")
         self._cmds.append({
             "type": "js",
             "act": joint_dict,
@@ -114,9 +116,6 @@ class ArmClient(BaseArm):
         req = {"srv": self.SERVICE_NAME, "cmd": self._cmds}
         resp = _send_cmd(self.sock, req)
         self.reset_cmd()
-
-        state = resp.get("value")
-        _info = resp.get("info", {})
         return resp
 
     # ------------------------------------------------------------------
@@ -128,8 +127,7 @@ class ArmClient(BaseArm):
             self.reset_cmd()
             self.start_cmd()
             self.add_js_cmd(pose_dict, speed=speed, block=True)
-            self.send_cmds()
-            return True
+            return bool(self.send_cmds().get("value"))
         except Exception as e:
             cprint(f"[ArmClient] move_to_named_pose failed: {e}", "red")
             return False
@@ -137,10 +135,12 @@ class ArmClient(BaseArm):
     def execute_trajectory(self, trajectory, speed: int = 20) -> bool:
         """Execute a list of joint-space waypoints.
 
-        *trajectory* is an iterable of ``[J1, J2, J3, J4, J5, J6, J7]``.
+        *trajectory* is an iterable of ``[J1, J2, J3, J4, J5, J6]``.
         """
         try:
             traj_list = list(trajectory)
+            if not traj_list or any(len(wp) != 6 for wp in traj_list):
+                raise ValueError("RM65 trajectory requires six-joint waypoints")
             self._set_recv_timeout(len(traj_list))
             self.reset_cmd()
             self.start_cmd()
@@ -148,13 +148,12 @@ class ArmClient(BaseArm):
                 self.add_js_cmd(
                     {
                         "J1": wp[0], "J2": wp[1], "J3": wp[2],
-                        "J4": wp[3], "J5": wp[4], "J6": wp[5], "J7": wp[6],
+                        "J4": wp[3], "J5": wp[4], "J6": wp[5],
                     },
                     speed=speed,
                     block=True,
                 )
-            self.send_cmds()
-            return True
+            return bool(self.send_cmds().get("value"))
         except Exception as e:
             cprint(f"[ArmClient] execute_trajectory failed: {e}", "red")
             return False

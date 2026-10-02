@@ -78,7 +78,7 @@ class MountCamera():
 
 if __name__ == '__main__':
     name = 'realsense'
-    parent_frame = 'Link7'
+    parent_frame = 'link_6'
     child_frame = 'cam_link_grasp'
     mc = MountCamera(name, parent_frame, child_frame)
     mc.calculate_and_broadcast()

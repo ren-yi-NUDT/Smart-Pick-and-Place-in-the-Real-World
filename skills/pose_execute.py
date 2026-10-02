@@ -119,10 +119,12 @@ def _send_arm_command(sock, joint_angles, speed=30, block=True):
     Returns:
         dict: 服务器响应
     """
+    if len(joint_angles) != 6:
+        raise ValueError("RM65 requires six calibrated joint angles")
     joint_dict = {f"J{i+1}": j for i, j in enumerate(joint_angles)}
 
     cmd = {
-        "srv": "/right_arm/movement_control",
+        "srv": "/arm/movement_control",
         "cmd": [
             {"type": "start", "act": []},
             {"type": "js", "act": joint_dict, "speed": speed, "block": block},
@@ -293,13 +295,23 @@ class PoseExecuteSkill(Skill):
             bool: 是否执行成功
         """
         poses = _load_poses()
-
-        if name not in poses:
-            cprint(f"[pose_execute] 未找到位姿: {name}", "red")
-            return False
-
-        pose_data = poses[name]
-        joint_angles = pose_data["joint_angles_deg"]
+        joint_angles = None
+        if name in poses:
+            pose_data = poses[name]
+            if len(pose_data["joint_angles_deg"]) == 6:
+                joint_angles = pose_data["joint_angles_deg"]
+            else:
+                cprint(
+                    f"[pose_execute] recorded pose {name} has {len(pose_data['joint_angles_deg'])} joints, not RM65 six-joint",
+                    "yellow",
+                )
+        if joint_angles is None:
+            pose = self.config.get_pose(name)
+            if pose and "J1" in pose:
+                joint_angles = [pose[f"J{i}"] for i in range(1, 7)]
+            else:
+                cprint(f"[pose_execute] 未找到可用的 RM65 六关节位姿: {name}", "red")
+                return False
 
         sock = self.arm_sock
         if sock is None:

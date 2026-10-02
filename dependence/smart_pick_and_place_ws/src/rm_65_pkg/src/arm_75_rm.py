@@ -30,7 +30,7 @@ class RM_ARM():
         self.arm_id = -1
         self.arm_ip = arm_ip
         self.arm_port = 8080
-        self.arm_type = "RM_75B"
+        self.arm_type = "RM_65"
         self.arm_TCP = "end_effector"
         self.arm_workcoordinate = "base_link"
         # arm move arg config
@@ -46,12 +46,7 @@ class RM_ARM():
 
 
     def arm_connet(self, mode=None):  #connet to the arm
-        if mode is not None:
-            thread_mode = rm_thread_mode_e.RM_DUAL_MODE_E
-            self.robot_arm = RoboticArm(thread_mode)
-        else:
-            self.robot_arm = RoboticArm()
-        #self.robot_arm = RoboticArm(rm_thread_mode_e.RM_DUAL_MODE_E)
+        self.robot_arm = RoboticArm(rm_thread_mode_e.RM_DUAL_MODE_E)
         self.handle = self.robot_arm.rm_create_robot_arm(self.arm_ip, self.arm_port, level=3)
         print(self.handle.id)
         self.arm_id = self.handle.id
@@ -61,7 +56,7 @@ class RM_ARM():
             print("Succeed to connnet the robot arm!")
         return self.handle.id
     
-    def set_arm_config(self, arm_id = None, arm_ip = "192.168.1.18", arm_port = 8080, arm_type = "RM_75B", arm_TCP = None, arm_workcoordinate = None):
+    def set_arm_config(self, arm_id = None, arm_ip = "192.168.1.18", arm_port = 8080, arm_type = "RM_65", arm_TCP = None, arm_workcoordinate = None):
         self.arm_id = arm_id
         self.arm_ip = arm_ip
         self.arm_port = arm_port
@@ -136,7 +131,12 @@ class RM_ARM():
 
     def move_joint_trajectory(self, end_joint, connect_tag, movejoint_speed, move_joint_block):
         # print(end_joint)
-        tag = self.robot_arm.rm_movej(joint=end_joint, v=movejoint_speed, r=self.movejoint_r, connect=connect_tag, block=move_joint_block)
+        sdk_lock = getattr(self, 'sdk_lock', None)
+        if sdk_lock:
+            with sdk_lock:
+                tag = self.robot_arm.rm_movej(joint=end_joint, v=movejoint_speed, r=self.movejoint_r, connect=connect_tag, block=move_joint_block)
+        else:
+            tag = self.robot_arm.rm_movej(joint=end_joint, v=movejoint_speed, r=self.movejoint_r, connect=connect_tag, block=move_joint_block)
         if tag == 0:
             log = "Succeed to move joint to end_joint!"
             print("Succeed to move joint to end_joint!")
@@ -146,7 +146,12 @@ class RM_ARM():
         return log
 
     def move_pose_trajectory(self, end_pose, connect_tag, movepose_speed, movepose_block):
-        tag = self.robot_arm.rm_movel(pose=end_pose, v=movepose_speed, r=self.movejoint_r, connect=connect_tag, block=movepose_block)
+        sdk_lock = getattr(self, 'sdk_lock', None)
+        if sdk_lock:
+            with sdk_lock:
+                tag = self.robot_arm.rm_movel(pose=end_pose, v=movepose_speed, r=self.movejoint_r, connect=connect_tag, block=movepose_block)
+        else:
+            tag = self.robot_arm.rm_movel(pose=end_pose, v=movepose_speed, r=self.movejoint_r, connect=connect_tag, block=movepose_block)
         if tag == 0:
             log = "Succeed to move joint to end_pose!"
             print("Succeed to move joint to end_pose!")
@@ -202,7 +207,7 @@ class RM_ARM():
             #         traj_fragment[i, :] = start_js[:] + delta_js * (i+1) / num_point
             
 
-            traj_fragment = np.zeros((num_point, 7))
+            traj_fragment = np.zeros((num_point, len(start_js)))
             # first_js = start_js[:] + delta_js * (i+1) / num_point
             # soft_start_ps = generate_consecutive_arrays(start_js, first_js, soft_start_num)
 
@@ -226,9 +231,14 @@ class RM_ARM():
     def move_joint_follow(self, trajectory, current_js, interval_time = 0.013, mb = 0):
         joint_follow_traj = self.generate_joint_follow_trajectory(trajectory, current_js, mb = mb)
         interval_time = max(0.01, interval_time)
-        
+
+        sdk_lock = getattr(self, 'sdk_lock', None)
         for j in range(joint_follow_traj.shape[0]):
-            tag = self.robot_arm.rm_movej_canfd(joint= list(joint_follow_traj[j,:]), follow=True, expand=0)
+            if sdk_lock:
+                with sdk_lock:
+                    tag = self.robot_arm.rm_movej_canfd(joint= list(joint_follow_traj[j,:]), follow=True, expand=0)
+            else:
+                tag = self.robot_arm.rm_movej_canfd(joint= list(joint_follow_traj[j,:]), follow=True, expand=0)
             rospy.sleep(interval_time)
         
         if tag == 0:
@@ -240,10 +250,10 @@ class RM_ARM():
 
 
 if __name__ == "__main__":
-    robot_ip = "192.168.1.19"
+    robot_ip = "192.168.1.18"
     arm = RM_ARM(arm_ip=robot_ip)
     arm_id = arm.arm_connet(mode=1)
-    arm.set_arm_config(arm_id=arm_id, arm_ip=robot_ip, arm_port=8080, arm_type="RM_75B", arm_TCP="end_effector", arm_workcoordinate="base_link")
+    arm.set_arm_config(arm_id=arm_id, arm_ip=robot_ip, arm_port=8080, arm_type="RM_65", arm_TCP="end_effector", arm_workcoordinate="base_link")
     arm.read_arm_config()
     arm.read_joint_state()
 

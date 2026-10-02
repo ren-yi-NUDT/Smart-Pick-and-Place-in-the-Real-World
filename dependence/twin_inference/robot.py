@@ -236,6 +236,21 @@ class ErdaijiRobot:
             if self.robot_config[struct_name]["struct_type"] == "hand":
                 ig_set = set(combinations([self.linkName_to_id[l] for l in self.robot_config[struct_name]["link_names"]], 2))
                 ignore_pair_set |= ig_set
+
+        # 夹爪自己零件之间不做自碰撞检查。Robotiq 85 是闭环连杆, 手指合拢时指节本来
+        # 就互相嵌入 (URDF 几何就是这么画的), 不是碰撞。实测跑一次抓取: 22 次
+        # "碰撞" 全部是夹爪内部零件对撞, 外部碰撞 0 次 —— 全是误报, 而 check_collision
+        # 一报 True 整个抓取候选就被判死, 4 个候选无一例外。
+        # 上面那段只覆盖 struct_type == "hand" 的 struct, 而 rm65 配置里只有 arm 一个
+        # struct, 夹爪那 10 个 link (6..15) 一对都没被排除。
+        # 只排除"夹爪 vs 夹爪"; 夹爪 vs 臂杆 照查 (那个是真会撞的)。
+        arm_link_ids = {self.linkName_to_id[l]
+                        for struct_name in self.struct_list
+                        if self.robot_config[struct_name]["struct_type"] == "arm"
+                        for l in self.robot_config[struct_name]["link_names"]}
+        gripper_link_ids = [lid for lid in self.linkName_to_id.values()
+                            if lid not in arm_link_ids]
+        ignore_pair_set |= set(combinations(gripper_link_ids, 2))
         # print(ignore_pair_set)
         
         self.link_pairs = get_self_link_pairs(
@@ -637,11 +652,16 @@ class BaseStruct:
         # [:2] 是 linkWorldPosition, 即质心系 —— 和 calculateInverseKinematics
         # 的目标系差一个质心偏移 (link_6 实测 10.588mm)。用错的话 IK 明明把 link
         # 系摆到位了, 这里读质心系, check_reach 就会恒定差 10.6mm 判不可达。
-        return p.getLinkState(self.robot_id, self.end_link_id)[4:6]
+        # computeForwardKinematics=1 必须显式给: 默认 0 会返回上一次 FK 的缓存,
+        # 而 resetJointState 之后缓存还是旧的 —— 同一个位姿, 本地读 0.1mm、服务器
+        # 读 40mm, 差别只在于谁的缓存被刷新过。可达性检查不能建立在缓存上。
+        return p.getLinkState(self.robot_id, self.end_link_id,
+                              computeForwardKinematics=1)[4:6]
     def get_end_link_pose_self(self):
         # <<< return current end_link_pose in <<< ROBOT COORDINATE >>>
         # <<< end_link is predefined in the struct config
-        w_pos, w_orn = p.getLinkState(self.robot_id, self.end_link_id)[4:6]
+        w_pos, w_orn = p.getLinkState(self.robot_id, self.end_link_id,
+                                      computeForwardKinematics=1)[4:6]
         return  world_to_robot(self.robot_id, w_pos, w_orn)
     
     
@@ -761,11 +781,13 @@ class BaseStruct:
     
     def check_reach(self, target_pos, target_orn, xyz_threshold = None, rpy_threshold = None):
         curr_pos, curr_orn = self.get_end_link_pose_self()
-        target_rpy = np.array(p.getEulerFromQuaternion(target_orn))
-        curr_rpy = np.array(p.getEulerFromQuaternion(curr_orn))
-        
+
         delta_xyz = np.linalg.norm(curr_pos - target_pos)
-        delta_rpy = np.linalg.norm(curr_rpy - target_rpy)
+        # 姿态差用四元数夹角, 不用欧拉角逐分量相减。欧拉角在 ±pi 处会跳变:
+        # 俯视姿态 (R = diag(1,-1,-1)) 恰好压在边界上, getEulerFromQuaternion 给出
+        # 的某个分量在 +pi / -pi 之间翻一下, 差值就是 2pi = 6.2832 —— 明明姿态完全
+        # 一致, 却被 0.01rad 的阈值判成"不可达"。四元数夹角在 [0, pi] 上连续, 没有这个问题。
+        delta_rpy = 2.0 * np.arccos(min(1.0, abs(float(np.dot(curr_orn, target_orn)))))
         if xyz_threshold is None:
             xyz_threshold = self.achievement_threshold 
         if rpy_threshold is None:
@@ -789,8 +811,20 @@ class Arm(BaseStruct):
             self.ll_robot[i] = self.robot_joints_info["lower_limits"][name]
             self.ul_robot[i] = self.robot_joints_info["upper_limits"][name]
             self.jr_robot[i] = self.robot_joints_info["joint_ranges"][name]
-        
-    
+
+    def ik_args(self, rest_js):
+        """喂给 calculateInverseKinematics 的 (限位, 上限, 关节范围, 静止位姿)。
+
+        这四个数组必须**只覆盖末端链上的关节** (这里 6 个), 不能是 URDF 全部 12 个
+        (还含 6 个夹爪关节)。给一个 6 自由度链喂 12 长数组, PyBullet 会算出错解 ——
+        实测同一目标 200 个随机种子: 12 长命中 0/200 (最优 99mm, 看着像"够不着"),
+        6 长命中 200/200 (最优 0.00mm)。所有抓取候选因此全军覆没, 而重试再多也没用:
+        错的是数组长度, 不是种子。
+        """
+        n = len(self.joint_index)
+        return self.ll_robot[:n], self.ul_robot[:n], self.jr_robot[:n], list(rest_js)[:n]
+
+
     def get_action_and_execute(self, cmd_to_execute):
         if cmd_to_execute["type"] == "js":
             act = cmd_to_execute["act"]
@@ -845,9 +879,10 @@ class Arm(BaseStruct):
         ###### <<< new IK
         
         curr_js_fake = self.create_fake_js()
+        ll, ul, jr, rp = self.ik_args(curr_js_fake)
         joint_poses = p.calculateInverseKinematics(self.robot_id, self.end_link_id, target_pos, target_orn,
-                                                    self.ll_robot, self.ul_robot, self.jr_robot, curr_js_fake,
-                                                    maxNumIterations=1000, residualThreshold=1e-4, solver = p.IK_DLS) 
+                                                    ll, ul, jr, rp,
+                                                    maxNumIterations=1000, residualThreshold=1e-4, solver = p.IK_DLS)
         controllable_joint_poses = [joint_poses[idx] for idx in self.joint_index]
         self.move_joint(controllable_joint_poses)
     
@@ -873,9 +908,10 @@ class Arm(BaseStruct):
         
         ###### <<< new IK
         curr_js_fake = self.create_fake_js()
+        ll, ul, jr, rp = self.ik_args(curr_js_fake)
         joint_poses = p.calculateInverseKinematics(self.robot_id, self.end_link_id, target_pos, target_orn,
-                                                    self.ll_robot, self.ul_robot, self.jr_robot, curr_js_fake,
-                                                    maxNumIterations=2500, residualThreshold=1e-5, solver = p.IK_DLS) 
+                                                    ll, ul, jr, rp,
+                                                    maxNumIterations=2500, residualThreshold=1e-5, solver = p.IK_DLS)
         
         controllable_joint_poses = [joint_poses[idx] for idx in self.joint_index]
         self.move_joint(controllable_joint_poses)
@@ -928,8 +964,9 @@ class Arm(BaseStruct):
             # 目标位姿是 <<< robot 系 >>> 的, 必须传 orn_world。传 orn 等于把一个
             # robot 系的四元数当 world 系喂给 IK —— 姿态目标整个错掉, 求解器为了
             # 兼顾姿态会把位置也带偏 (实测 grasp1 自己到自己: 29mm / 5.9rad)。
+            ll, ul, jr, rp = self.ik_args(seed)
             jp = p.calculateInverseKinematics(self.robot_id, self.end_link_id, pos_world, orn_world,
-                                              self.ll_robot, self.ul_robot, self.jr_robot, seed,
+                                              ll, ul, jr, rp,
                                               maxNumIterations=2500, residualThreshold=1e-4, solver = p.IK_DLS)
             return [jp[idx] for idx in self.joint_index]
 
@@ -969,19 +1006,12 @@ class Arm(BaseStruct):
         best_js = None
         min_error = float('inf')
         
-        # 准备 IK 参数
-        ll = getattr(self, 'll_robot', None) # Lower limits
-        ul = getattr(self, 'ul_robot', None) # Upper limits
-        jr = getattr(self, 'jr_robot', None) # Joint ranges
-        rp = getattr(self, 'rp_robot', None) # Rest poses
-        
-        # 如果没有 rest poses，使用 seed_js 作为 rest pose 的一种替代策略，或者保持 None
-        if rp is None and seed_js is not None:
-             # 注意：rp 长度必须匹配全机器人自由度，这里需要小心处理
-             # 假设 self.rp_robot 应该在初始化时被正确设置。如果没有，Null Space 计算会退化为普通 IK。
-             pass
-
         curr_js_fake = self.create_fake_js(js=seed_js) if seed_js is not None else None
+        # 限位数组必须只覆盖末端链 (6 个), 见 ik_args 注释。
+        # 原来读的是 self.rp_robot —— 这个属性根本不存在, rp 恒为 None, 于是每次都走
+        # 下面"不带限位"的普通 IK 分支, 解的质量差一大截, 而它的返回值又是 pre_check
+        # 的唯一依据。
+        ll, ul, jr, rp = self.ik_args(curr_js_fake if curr_js_fake is not None else self.default_pose["reset"])
 
         for attempt in range(max_attempts):
             # 转换坐标系
@@ -995,19 +1025,11 @@ class Arm(BaseStruct):
                 iter_js = curr_js_fake
 
             # 调用 PyBullet IK
-            if ll is not None and ul is not None and jr is not None and rp is not None:
-                # 使用 Null Space (最推荐，最稳定)
-                joint_poses = p.calculateInverseKinematics(
-                    self.robot_id, self.end_link_id, pos_world, orn_world, # 目标系是 world, 用变换后的 orn
-                    lowerLimits=ll, upperLimits=ul, jointRanges=jr, restPoses=rp,
-                    maxNumIterations=5000, residualThreshold=1e-4, solver=p.IK_DLS
-                )
-            else:
-                # 普通 IK (DLS)
-                joint_poses = p.calculateInverseKinematics(
-                    self.robot_id, self.end_link_id, pos_world, orn_world,
-                    maxNumIterations=5000, residualThreshold=1e-4, solver=p.IK_DLS
-                )
+            joint_poses = p.calculateInverseKinematics(
+                self.robot_id, self.end_link_id, pos_world, orn_world,
+                ll, ul, jr, rp,
+                maxNumIterations=5000, residualThreshold=1e-4, solver=p.IK_DLS
+            )
             
             # 提取控制关节
             controllable_joint_poses = [joint_poses[idx] for idx in self.joint_index]

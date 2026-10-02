@@ -42,7 +42,7 @@ DEFAULT_POSE_FILE = os.path.join(
     "recorded_poses.json",
 )
 
-ARM_IP = "192.168.1.19"
+ARM_IP = "192.168.1.18"
 ARM_PORT = 8080
 
 

@@ -68,7 +68,7 @@ class PlaceSkill(Skill):
         cnfg = {
             "target_pose": [[pos[0], pos[1], pos[2], orn[0], orn[1], orn[2], orn[3]]],
             "current_js": [v / 180 * np.pi for v in self.config.default_traj_js["grasp1"].values()],
-            "struct": "left_arm",
+            "struct": "rm65",
         }
         rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
         if rsp["value"]:

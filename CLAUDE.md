@@ -18,13 +18,20 @@
 系统需要通过 `start.bash` 启动 2 个并发进程：
 
 ```bash
-./start.bash  # 在 2 个 gnome-terminal 中启动 ROS bringup 和 Twin IK 服务
+./start.bash  # 在 4 个 gnome-terminal 中启动 ROS bringup、Twin IK、Azure 录像守护和夹爪服务
 ```
 
-- **终端1**：ROS bringup — 构建工作空间并启动 ROS 节点（机器人驱动、相机、灵巧手）
+- **终端1**：ROS bringup — 构建工作空间并启动 ROS 节点（机械臂驱动、相机）
 - **终端2**：孪生推理服务 — PyBullet 仿真用于逆运动学/轨迹生成（端口 8020）
+- **终端3**：Azure 录像守护 — ping 机械臂在线时录像（有 30 分钟/10GB 上限保护）
+- **终端4**：Robotiq 85 夹爪服务 — Modbus RTU (ttyUSB0) 桥接到 TCP :8001
 
 **Conda 环境**：`anygrasp`（Python 3.9）
+
+**硬件 IP 地址**：
+- 机械臂 RM65：192.168.1.18，SDK 端口 8080（`robot_config.json` 为准）
+- 末端执行器：Robotiq 2F-85 夹爪（RS485/FTDI `/dev/ttyUSB0`，Modbus RTU slave 1）
+- Inspire 灵巧手已停用（192.168.11.209 旧设备，不在当前真机上）
 
 **cuDNN 库路径**（AnyGrasp 运行必需）：
 ```bash
@@ -32,8 +39,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/zz/anaconda3/envs/anygrasp/lib/pyt
 ```
 
 **硬件 IP 地址**：
-- 机械臂：192.168.1.19
-- 灵巧手：192.168.11.209
+- 机械臂 RM65：192.168.1.18，SDK 端口 8080（`robot_config.json` 为准）
 
 ## 系统架构
 
@@ -192,16 +198,17 @@ Smart-Pick-and-Place-in-the-Real-World/
 |---|---|
 | `src/rm_65_pkg/src/arm_75_bringup.py` | 机械臂 ROS bringup 节点 |
 | `src/rm_65_pkg/src/mount_camera.py` | 相机安装/标定节点 |
-| `src/rm_65_pkg/src/inspire_hand_bringup.py` | Inspire 灵巧手 ROS 节点 |
-| `src/rm_65_pkg/src/hand_controller_modbus.py` | 通过 Modbus 协议控制灵巧手 |
+| `src/rm_65_pkg/src/inspire_hand_bringup.py` | Inspire 灵巧手 ROS 节点（旧设备，当前未使用） |
+| `src/rm_65_pkg/src/hand_controller_modbus.py` | 通过 Modbus 协议控制灵巧手（旧设备） |
 | `src/rm_description/urdf/SingleArm/` | 仿真用 URDF 模型和机器人配置 |
 
 ## Socket 通信协议
 
 | 端口 | 服务 | 协议 | 消息格式 |
 |---|---|---|---|
-| 8000 | 灵巧手控制 | TCP | JSON：`{"src": "/left_hand/movement_control", "type": "set"/"get", "cmd": [...]}` |
-| 8010 | 机械臂控制 | TCP | 4 字节大端长度前缀 + JSON：`{"srv": "/right_arm/movement_control", "cmd": [{"type": "start"}, {"type": "js", "act": {...}, "speed": N, "block": bool}, {"type": "end"}]}` |
+| 8000 | 灵巧手控制（旧，已停用：真机末端为 Robotiq 85 夹爪） | TCP | JSON：`{"src": "/left_hand/movement_control", "type": "set"/"get", "cmd": [...]}` |
+| 8001 | Robotiq 85 夹爪（`dependence/gripper-programming/server.py`，Modbus RTU ttyUSB0 slave 1） | TCP | 4 字节大端长度前缀 + JSON：`{"src": "/right_gripper/movement_control", "type": "set"/"get", "cmd": [1000,1000]/[0,0]}`（1000=开, 0=合） |
+| 8010 | 机械臂控制 | TCP | 4 字节大端长度前缀 + JSON：`{"srv": "/arm/movement_control", "cmd": [{"type": "start"}, {"type": "js", "act": {...}, "speed": N, "block": bool}, {"type": "end"}]}` |
 | 8020 | 孪生推理 | TCP | 请求：纯 JSON；响应：4 字节大端长度前缀 + JSON |
 
 **重要**：`robot_config.json` 和机械臂命令中的关节角度使用**角度制（度）**。孪生推理返回的轨迹使用**弧度制**，skill 内部会进行转换（除以 π × 180）。

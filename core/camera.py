@@ -56,6 +56,11 @@ class RealSenseCapture(BaseCamera):
         color_sensor = profile.get_device().query_sensors()[1]
         color_sensor.set_option(rs.option.enable_auto_white_balance, False)
         color_sensor.set_option(rs.option.white_balance, 5500)
+        # 曝光模式必须显式复位。手动曝光是存在相机里的, 会跨进程残留 —— 谁 (诊断脚本、
+        # 崩掉的进程) 把它留在手动档, 之后每次采集都静默出废图: 档位偏低就是全黑,
+        # 偏高就是全白 (实测残留 exposure=10000/gain=128 时平均亮度 252, YOLO 一个框
+        # 都出不来, 但日志里看不出任何异常)。
+        color_sensor.set_option(rs.option.enable_auto_exposure, 1)
 
         align = rs.align(rs.stream.color) if self.enable_align else None
 
