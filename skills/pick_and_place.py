@@ -7,6 +7,20 @@ from termcolor import cprint
 from skills.base import Skill, register_skill
 from core.transforms import graspcam2pixel, self_rotation_np, rpy_to_vector, pixel_to_camera_point2
 
+# soft close 探测到物体后服务端是以 force=0 持握的, 提臂前补一次实夹的力度。
+GRIPPER_HOLD_FORCE = 40
+
+# 放容器时的末端朝向备选。只给一个写死的四元数不够用: 实测同一个盘子中心点,
+# 默认朝向 IK 残差 66mm (够不着), 换成 place2 的末端朝向 0.1mm 精确命中 —— 卡住
+# 的是姿态不是位置。这三个是机械臂自己录制的"放下物体"位姿的末端朝向。
+# 重新生成: 用孪生跑一次 trajectory_generation2 (target_pose 给任意可达点, current_js
+# 给该录制位姿), 返回的 trajectory_ee[0][3:] 就是它的末端四元数。
+PLACEMENT_ORN_FALLBACKS = [
+    [0.0656, -0.7928, 0.1117, 0.5956],  # place2
+    [0.2197, -0.7229, 0.0792, 0.6503],  # place1
+    [0.0094, -0.8820, 0.0341, 0.4698],  # desk_pose_3
+]
+
 
 @register_skill("pick_and_place")
 class PickAndPlaceSkill(Skill):
@@ -134,11 +148,16 @@ class PickAndPlaceSkill(Skill):
 
             if not len(placing_pos_world):
                 continue
-            check = self._execute_placement(placing_pos_world)
+            check = self._execute_placement(placing_pos_world, current_js=value)
             if check:
                 break
 
         self.control_arm(pose_type="grasp1", speed=30)
+        # 四个观察位姿都放不下就是失败 —— 以前这里无条件报成功, 于是"所有位姿都被孪生
+        # 拒了"也打印 Successfully completed, 现场看起来像放好了其实夹爪一直夹着东西。
+        if not check:
+            cprint("P=================== Placement task failed ===================", "red")
+            return False
         cprint("P=================== 5. Successfully completed the placement task ===================", "green")
         return True
 
@@ -264,9 +283,23 @@ class PickAndPlaceSkill(Skill):
             self.control_hand(cmd_type="close")
             cprint("=============== Close hand =============")
             time.sleep(0.5)
+
+            # 孪生"能生成轨迹"只说明这个位姿够得着, 不代表夹爪真夹住了东西。
+            # 以前这里直接 return True, 于是候选循环永远停在第一个可达候选上 ——
+            # 橙子那次就是第一个候选斜着进刀把果子推开了, 照样算"抓取成功"。
+            # check_grasping_object 走夹爪的 soft close, 用 gOBJ 判定合拢时中间有没有东西。
+            held = self.check_grasping_object()
+            if held:
+                # soft close 探测完是以 force=0 持握的, 光滑一点的物体一提就滑。
+                # 探测通过后补一次实夹再提臂。
+                self.hand.close(force=GRIPPER_HOLD_FORCE)
+
             self.control_arm(pose_type=idx, speed=30)
             cprint("=============== Reach post grasping pose =============")
-            return True
+            if not held:
+                cprint("=============== 夹爪空合, 该候选没夹住, 试下一个 =============", "yellow")
+                self.control_hand(cmd_type="open")
+            return held
         else:
             cprint("********************* The preparasion pose is not reachable !! *********************")
             return False
@@ -319,20 +352,36 @@ class PickAndPlaceSkill(Skill):
         T_world_pose = T_world_point.copy()
         return T_world_pose
 
-    def _execute_placement(self, placement_pos_world):
-        placement_pos_world[2, 3] += 0.15
-        placement_pos_arm = placement_pos_world @ self.T_hand_effector_to_arm_endlink
-        pos = placement_pos_arm[:3, 3]
-        orn = R.from_matrix(placement_pos_arm[:3, :3]).as_quat()
+    def _execute_placement(self, placement_pos_world, current_js=None):
+        base = placement_pos_world.copy()
+        base[2, 3] += 0.15
 
-        default_js_rad = [v / 180 * np.pi for v in self.config.default_traj_js["grasp1"].values()]
-        cnfg = {
-            "target_pose": [[pos[0], pos[1], pos[2], orn[0], orn[1], orn[2], orn[3]]],
-            "current_js": default_js_rad,
-            "struct": "rm65",
-        }
-        rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
-        if rsp["value"]:
+        # 必须用"机械臂此刻真正所在的观察位姿"当轨迹起点。写死 grasp1 时, 如果放置是在
+        # grasp2/3/4 上找到容器, 轨迹第一个路点就是 grasp1 —— 真机会从 grasp4 直接甩到
+        # grasp1, 中间扫过桌面。调用方在 line 128 刚把臂移到 key, 所以起点就是 key。
+        if current_js is None:
+            current_js = self.config.default_traj_js["grasp1"]
+        default_js_rad = [v / 180 * np.pi for v in current_js.values()]
+
+        # 容器自身朝向优先 (原来的行为), 不行再换备选朝向。位置随朝向变 ——
+        # T_hand_effector_to_arm_endlink 是纯平移, 但平移方向跟着朝向转, 所以每个
+        # 候选都得重新算一遍 pos。
+        orns = [base[:3, :3]] + [R.from_quat(q).as_matrix() for q in PLACEMENT_ORN_FALLBACKS]
+        for i, rot in enumerate(orns):
+            T = base.copy()
+            T[:3, :3] = rot
+            T = T @ self.T_hand_effector_to_arm_endlink
+            pos, orn = T[:3, 3], R.from_matrix(T[:3, :3]).as_quat()
+            cnfg = {
+                "target_pose": [[pos[0], pos[1], pos[2], orn[0], orn[1], orn[2], orn[3]]],
+                "current_js": default_js_rad,
+                "struct": "rm65",
+            }
+            rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
+            if not rsp["value"]:
+                continue
+            if i:
+                cprint(f"=============== 默认放置朝向不可达, 换第 {i} 个备选朝向 =============", "yellow")
             traj = np.array(copy.deepcopy(rsp["info"]["trajectory"])) / np.pi * 180
             self.control_arm(trajectory=traj, speed=20)
             time.sleep(0.5)
