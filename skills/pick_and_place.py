@@ -146,7 +146,10 @@ class PickAndPlaceSkill(Skill):
     # Grasp helpers (from planner.py)
     # ------------------------------------------------------------------
     def _filtering_pose(self, anygrasp_pose, class_name="", image=None):
-        detections = self.perception.detect_objects(image, class_name, conf=0.2)
+        # YOLO-World 在这张桌面上对单件蔬果只给 0.05 左右的分数 (框是准的, 分低),
+        # 用 0.2 会把目标整个漏掉, 后面所有候选都被判"没有物体"。
+        # 放宽到 0.05 后仍要求框内必须落进 AnyGrasp 候选点, 空框自然被丢掉。
+        detections = self.perception.detect_objects(image, class_name, conf=0.05)
 
         grasp_points, grasp_pose_cam = graspcam2pixel(anygrasp_pose)
         valid_indices = set()
