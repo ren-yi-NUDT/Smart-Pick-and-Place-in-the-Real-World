@@ -31,6 +31,7 @@ from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 
 from skills.base import Skill, register_skill
+from core.config import YOLO_CONF_GRASP
 from core.transforms import (
     graspcam2pixel,
     self_rotation_np,
@@ -87,7 +88,7 @@ class GraspSkill(Skill):
     # ------------------------------------------------------------------
     def filtering_pose(self, anygrasp_pose, class_name="", image="", return_label=False, vis=True):
         class_name_list = [cls for cls in class_name.split(",")]
-        detections = self.perception.detect_objects(image, class_name_list, conf=0.2)
+        detections = self.perception.detect_objects(image, class_name_list, conf=YOLO_CONF_GRASP)
 
         grasp_points, grasp_pose_cam = graspcam2pixel(anygrasp_pose)
         valid_indices = set()

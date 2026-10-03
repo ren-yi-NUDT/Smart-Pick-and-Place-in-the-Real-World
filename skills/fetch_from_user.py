@@ -4,6 +4,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 from skills.base import Skill, register_skill
+from core.config import YOLO_CONF_CONTAINER
 from core.transforms import pixel_to_camera_point2
 
 
@@ -43,6 +44,21 @@ class FetchFromUserSkill(Skill):
         trajectory = np.array([joint_angles])
         self.control_arm(trajectory=trajectory, speed=15)
         cprint("=================== Reached receive pose ===================", "green")
+
+        # ---- Step 2.5: 先看一眼用户手上有没有东西 ----
+        # handover_pose 和 look_over_what_in_user_hand_pose 是同一组关节角, 所以
+        # 到了交接位相机已经在看用户的手, 不用额外动臂。空手就直接跳过, 免得
+        # 对着空气合爪再走一遍重试。判定失败(None)不跳过 —— 宁可多试一次。
+        self.rgb, self.depth = self.get_camera_obs()
+        holding, name = self.vlm.detect_hand_object(self.rgb)
+        if holding is False:
+            cprint("=================== 用户手上没有物品, 跳过本次接收 ===================", "yellow")
+            self.control_arm(pose_type="grasp1", speed=30)
+            return False
+        if holding is None:
+            cprint("=================== VLM 判定失败, 按原流程继续尝试 ===================", "yellow")
+        else:
+            cprint(f"=================== 用户手上: {name} ===================", "green")
 
         # ---- Step 3: Open hand and wait ----
         self.control_hand(cmd_type="open")
@@ -133,7 +149,7 @@ class FetchFromUserSkill(Skill):
     # Placement helpers (from fetch_from_user.py)
     # ------------------------------------------------------------------
     def _get_placing_position(self, class_name=None, image=None):
-        detections = self.perception.detect_objects(image, [class_name], conf=0.25)
+        detections = self.perception.detect_objects(image, [class_name], conf=YOLO_CONF_CONTAINER)
         try:
             if len(detections):
                 det = detections[0][:4]

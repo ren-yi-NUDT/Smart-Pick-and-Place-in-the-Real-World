@@ -16,6 +16,9 @@ from core.abc import BaseCamera
 import numpy as np
 import pyrealsense2 as rs
 from PIL import Image
+from termcolor import cprint
+
+from core.config import MIN_FRAME_BRIGHTNESS
 
 
 class RealSenseCapture(BaseCamera):
@@ -79,6 +82,18 @@ class RealSenseCapture(BaseCamera):
         # Convert BGR -> RGB
         rgb = np.asanyarray(color_frame.get_data())[..., ::-1]
         depth = np.asanyarray(depth_frame.get_data())
+
+        # 欠曝检查。曝光/增益都顶格还暗, 说明房间光不够 —— 这时候 YOLO 的分数会掉到
+        # 噪声级 (实测黄瓜 0.012)、AnyGrasp 的深度也是废的, 但下游只会表现成"没检出",
+        # 完全看不出是相机的问题。这里主动喊一声, 别让废图静默流下去。
+        mean_brightness = float(rgb.mean())
+        if mean_brightness < MIN_FRAME_BRIGHTNESS:
+            cprint(
+                f"[Camera] 采集帧欠曝: 平均亮度 {mean_brightness:.0f}/255 "
+                f"(阈值 {MIN_FRAME_BRIGHTNESS}, 曝光/增益已顶格)。"
+                f"YOLO 和 AnyGrasp 在这个亮度下不可靠, 请检查补光。",
+                "red",
+            )
 
         pipeline.stop()
 

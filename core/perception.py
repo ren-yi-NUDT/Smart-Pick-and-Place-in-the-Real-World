@@ -23,6 +23,7 @@ from termcolor import cprint
 from ultralytics import YOLOWorld
 
 from core.abc import BasePerception
+from core.config import YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
 from core.transforms import graspcam2pixel
 
 
@@ -144,7 +145,7 @@ class Perception(BasePerception):
             Filtered grasp poses.
         """
         class_name_list = [cls for cls in class_name.split(",")]
-        detections = self.detect_objects(image, class_name_list, conf=0.2)
+        detections = self.detect_objects(image, class_name_list, conf=YOLO_CONF_GRASP)
 
         grasp_points, grasp_pose_cam = graspcam2pixel(anygrasp_pose)
         valid_indices = set()
@@ -226,7 +227,7 @@ class Perception(BasePerception):
         """
         from core.transforms import pixel_to_camera_point2
 
-        detections = self.detect_objects(image, [class_name], conf=0.25)
+        detections = self.detect_objects(image, [class_name], conf=YOLO_CONF_CONTAINER)
 
         try:
             if len(detections):

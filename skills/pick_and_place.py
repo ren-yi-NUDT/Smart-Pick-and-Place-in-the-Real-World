@@ -5,6 +5,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 from skills.base import Skill, register_skill
+from core.config import YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
 from core.transforms import graspcam2pixel, self_rotation_np, rpy_to_vector, pixel_to_camera_point2
 
 # soft close 探测到物体后服务端是以 force=0 持握的, 提臂前补一次实夹的力度。
@@ -167,8 +168,9 @@ class PickAndPlaceSkill(Skill):
     def _filtering_pose(self, anygrasp_pose, class_name="", image=None):
         # YOLO-World 在这张桌面上对单件蔬果只给 0.05 左右的分数 (框是准的, 分低),
         # 用 0.2 会把目标整个漏掉, 后面所有候选都被判"没有物体"。
-        # 放宽到 0.05 后仍要求框内必须落进 AnyGrasp 候选点, 空框自然被丢掉。
-        detections = self.perception.detect_objects(image, class_name, conf=0.05)
+        # 阈值见 core/config.py:YOLO_CONF_GRASP (实测目标分数低到 0.012, 高了直接漏检)。
+        # 放宽后仍要求框内必须落进 AnyGrasp 候选点, 空框自然被丢掉。
+        detections = self.perception.detect_objects(image, class_name, conf=YOLO_CONF_GRASP)
 
         grasp_points, grasp_pose_cam = graspcam2pixel(anygrasp_pose)
         valid_indices = set()
@@ -308,7 +310,7 @@ class PickAndPlaceSkill(Skill):
     # Placement helpers (from planner.py)
     # ------------------------------------------------------------------
     def _get_placing_position(self, class_name=None, image=None):
-        detections = self.perception.detect_objects(image, [class_name], conf=0.25)
+        detections = self.perception.detect_objects(image, [class_name], conf=YOLO_CONF_CONTAINER)
         try:
             if len(detections):
                 det = detections[0][:4]

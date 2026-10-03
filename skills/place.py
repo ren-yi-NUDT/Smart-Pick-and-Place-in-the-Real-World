@@ -4,6 +4,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 from skills.base import Skill, register_skill
+from core.config import YOLO_CONF_CONTAINER
 from core.transforms import pixel_to_camera_point2
 
 
@@ -33,7 +34,7 @@ class PlaceSkill(Skill):
         return True
 
     def _get_placing_position(self, class_name, image):
-        detections = self.perception.detect_objects(image, [class_name], conf=0.25)
+        detections = self.perception.detect_objects(image, [class_name], conf=YOLO_CONF_CONTAINER)
         try:
             det = detections[0][:4]
             if det[1] >= 400 and det[3] <= 480 and len(detections) > 1:
