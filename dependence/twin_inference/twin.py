@@ -29,13 +29,17 @@ from scipy.spatial.transform import Slerp
 SIMULATION_STEP_DELAY = 1 / 240.
 ROUND_NUMBER = 3
 
+# 量 link 到桌面距离时的查询半径。给足 1m, 免得够远的 link 查不到点被当成"贴着桌面"。
+_Z_QUERY_M = 1.0
+
 def visualize_pose(pos, orn, d = 1):
     T = calcul_transformation_matrix(pos, orn)
     draw_axis(T, duration=d)
 
 
 def insert_lift_waypoints(target_pos_list, target_orn_list, curr_pos, min_z_list,
-                          z_min_threshold=0.10, z_lift_margin=0.02):
+                          z_min_threshold=0.10, z_lift_margin=0.02,
+                          lateral_threshold=0.05):
     """
     给"要从别处横向过去、又贴桌面"的目标点补一个抬升路点。
 
@@ -44,8 +48,12 @@ def insert_lift_waypoints(target_pos_list, target_orn_list, curr_pos, min_z_list
     z_min_threshold 之上。纯垂直下探(与上一个点 XY 相同)不补 —— 抓取/放桌面
     本来就要贴到桌面, 补了反而够不着。
 
-    target_pos_list 是机器人坐标系, min_z_list 是世界坐标系; 抬升是纯 Z 平移,
-    机器人基座没有横滚/俯仰, 所以这个增量在两个坐标系里等价。
+    lateral_threshold 是"算横向移动"的最小 XY 距离。原来写死 1mm, 于是抓取的
+    "预抓取位姿 -> 抓取位姿"也被算成横向 —— 这两个点只差一个沿夹爪 z 的 2cm 偏移,
+    夹爪一斜 XY 就差 1.4cm。实测一次橙子抓取: 为了跨这 1.4cm, 臂先抬 107mm 再落
+    回来, 就是用户看到的"上下来回一段才抓"。这种短距离位移不构成横扫, 而且紧贴
+    物体旁边做大幅垂直运动反而更容易碰倒它。默认取一个轨迹离散步长 (0.05m),
+    比它短的位移在轨迹里本来就是一段直线, 不需要保护。
 
     返回 (pos_list, orn_list, is_lift_list), 三者等长。
     """
@@ -53,7 +61,7 @@ def insert_lift_waypoints(target_pos_list, target_orn_list, curr_pos, min_z_list
     ref_pos = np.array(curr_pos, dtype=float)
     for pos_i, orn_i, min_z in zip(target_pos_list, target_orn_list, min_z_list):
         tgt = np.array(pos_i, dtype=float)
-        lateral = np.linalg.norm(tgt[:2] - ref_pos[:2]) > 1e-3
+        lateral = np.linalg.norm(tgt[:2] - ref_pos[:2]) > lateral_threshold
         if min_z < z_min_threshold and lateral:
             rise = max(0.0, z_min_threshold - min_z) + z_lift_margin
             lift = [tgt[0], tgt[1], tgt[2] + rise]
@@ -318,13 +326,22 @@ class TwinTest2(World):
         """
         检查机械臂所有 link 的 Z 高度是否低于阈值
 
-        两个曾经的坑 (2026-09-30 修):
+        三个曾经的坑:
           1. 原来只遍历 Arm struct 的 link_names (= link_1..link_6), 夹爪那 10 个 link
              一个都不查 —— 而夹爪比最低臂杆还低 8~13cm, 盲区正好是夹爪长度。
              实测 grasp2: 臂 link 最低 0.105 刚好过 0.10 的线, 夹爪最低 0.000 贴桌面,
              Z 检查报"安全"而夹爪已经坐在桌上。
           2. 原来用 getLinkState()[0] (关节原点), 不是几何最低点, 本身就低估。
-             改用 getAABB 的最低角点。
+             改用 getAABB 的最低角点 —— 但 AABB 是**轴对齐**包围盒, link 一斜,
+             盒子就比几何大一圈, 于是从"低估"翻成"高估"。
+          3. 实测 (2026-10-04) 同一个位姿: right_inner_finger 的 AABB 最低点
+             -0.0195, 而它到桌面平面的真实距离是 +0.0005 —— 指尖正好贴桌面,
+             差 20mm 全是 AABB 的虚高 (Link4 上虚高 43mm)。后果是"指尖贴桌面"
+             这种本来正确的抓取位姿被判成"插进桌面", 直接拒掉。实测一个橙子
+             的抓取候选: IK 残差 0.0001m (完美), 三个候选全栽在这个检查上。
+             现在改用 getClosestPoints 量到桌面平面的真实距离。
+             (桌面 plane 不在 check_collision 的检查范围内 —— 那里显式跳过
+             body 0 —— 所以这个 z 检查是防插桌面的唯一一道关。)
 
         Args:
             struct_name: 机械臂结构名称 (rm65)
@@ -336,6 +353,7 @@ class TwinTest2(World):
             min_z: 最低的Z值
         """
         body = self.robot.id
+        plane = self.planeID
         unsafe_links = []
         min_z = float('inf')
 
@@ -345,7 +363,10 @@ class TwinTest2(World):
             if link_name in ("base_link", "robot_base_link", "arm_end_link"):
                 continue
 
-            link_z = p.getAABB(body, link_id)[0][2]  # 几何最低点, 不是关节原点
+            # 到桌面平面的真实距离 (不是 AABB 角点, 见上面坑 3)。负值 = 插进桌面。
+            # 没有碰撞几何的 link (如 gripper_endeffector) 查不到点, 当作够远。
+            pts = p.getClosestPoints(bodyA=body, bodyB=plane, linkIndexA=link_id, distance=_Z_QUERY_M)
+            link_z = min(q[8] for q in pts) if pts else _Z_QUERY_M
             min_z = min(min_z, link_z)
 
             if link_z < z_min_threshold:
@@ -455,7 +476,8 @@ class TwinTest2(World):
         # 真不可达时 check_collision 会返回 0, 上层看到 value=0 不会执行任何动作。
         target_pos_list, target_orn_list, _ = insert_lift_waypoints(
             target_pos_list, target_orn_list, curr_pos,
-            [info["min_z"] for info in infos], z_min_threshold, z_lift_margin)
+            [info["min_z"] for info in infos], z_min_threshold, z_lift_margin,
+            lateral_threshold=interval_threshold)
 
         trajectory  = []
         trajectory_ee = []

@@ -71,3 +71,31 @@ def test_already_safe_target_is_untouched():
 
     assert lift == [False]
     assert pos == [[0.5, 0.0, 0.2]]
+
+
+def test_pregrasp_offset_is_not_treated_as_a_lateral_sweep():
+    """预抓取位姿 -> 抓取位姿只差沿夹爪 z 的 2cm 偏移, 夹爪一斜 XY 就差 ~1.4cm。
+
+    实测 (2026-10-04) 一次橙子抓取: 为了跨这 1.4cm, 臂先抬 107mm 再落回来 ——
+    就是用户看到的"上下来回一段才抓"。这种短位移不构成横扫, 不该补抬升路点。
+    """
+    orn = [0.0, 0.0, 0.0, 1.0]
+    prep = [0.30, -0.10, 0.16]        # 预抓取: 贴桌面
+    grasp = [0.2886, -0.1132, 0.158]  # 抓取: 与预抓取 XY 差 1.4cm
+    pos, _, lift = insert_lift_waypoints(
+        [prep, grasp], [orn, orn], [0.30, -0.10, 0.37], [0.004, 0.004], TH, MARGIN,
+        lateral_threshold=0.05)
+
+    assert lift == [False, False], "1.4cm 的位移不该被当成横向移动"
+    assert pos == [prep, grasp], "位姿本身不该被改动"
+
+
+def test_a_real_sweep_still_gets_its_lift():
+    """长距离横向过去 + 贴桌面, 仍然要抬 —— 修完不能把保护一起去掉。"""
+    orn = [0.0, 0.0, 0.0, 1.0]
+    pos, _, lift = insert_lift_waypoints(
+        [[0.5, 0.0, 0.05]], [orn], [0.0, 0.0, 0.4], [0.032], TH, MARGIN,
+        lateral_threshold=0.05)
+
+    assert lift == [True, False]
+    assert pos[0][2] > pos[1][2], "抬升路点应在目标正上方"
