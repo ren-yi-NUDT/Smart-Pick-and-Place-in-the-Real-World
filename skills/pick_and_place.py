@@ -57,7 +57,13 @@ class PickAndPlaceSkill(Skill):
             self.rgb, self.depth = self.get_camera_obs()
             cprint(f"G=================== 3. Save current rgb and depth observations: {self.save_path} ===================", "cyan")
 
-            anygrasp_pose = self.perception.detect_grasps(self.rgb, self.depth)
+            # raw_depth: 相机测不到的物体 (D455 最小距离 ~286mm, 相机离桌面只有 ~30cm)
+            # 补洞后是一片桌面, AnyGrasp 会去抓物体前面的桌子。给它原始深度才能把物体
+            # 顶回来, 见 core/camera.py:dome_fill_box。
+            anygrasp_pose = self.perception.detect_grasps(
+                self.rgb, self.depth, class_name=obj,
+                raw_depth=getattr(self.camera, "raw_depth", None),
+            )
             cprint(f"G=================== 4. Generate the grasping pose and save it in file: {self.save_path}/result.json ===================", "cyan")
             self.save_current_transformation()
             if not anygrasp_pose:

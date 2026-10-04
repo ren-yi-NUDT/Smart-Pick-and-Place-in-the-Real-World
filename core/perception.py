@@ -24,8 +24,29 @@ from termcolor import cprint
 from ultralytics import YOLOWorld
 
 from core.abc import BasePerception
-from core.config import YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
+from core.config import (
+    MIN_CONTAINER_BOX_PX,
+    YOLO_CONF_GRASP,
+    YOLO_CONF_CONTAINER,
+)
 from core.transforms import graspcam2pixel
+
+
+def _well_framed(box, shape) -> bool:
+    """容器框必须完整落在画面内, 且不能小到只剩一条边。
+
+    框被画面边缘切掉时, 框中心**不是**容器中心。实测臂在 grasp3 看蓝盘子, YOLO 给的是
+    [341, 0, 576, 21] —— 21px 高、贴着上边缘, 盘子 95% 在画面外。取框中心 (458, 10)
+    算出来的"盘子中心"落在盘子远端边缘**之外**约 20cm, 机械臂就在那里松手, 火龙果落在
+    盘子旁边的桌面上。宁可这一帧不用 (换下一个观察位姿, 或回退场景地图)。
+    """
+    x1, y1, x2, y2 = box[:4]
+    h, w = shape[:2]
+    return (
+        x1 > 0 and y1 > 0 and x2 < w and y2 < h
+        and (x2 - x1) >= MIN_CONTAINER_BOX_PX
+        and (y2 - y1) >= MIN_CONTAINER_BOX_PX
+    )
 
 
 # 色相 -> 颜色名 (上界, 单位度)。换灯/换房间后要跟着 CAMERA_WHITE_BALANCE 重标。
@@ -151,10 +172,15 @@ class Perception(BasePerception):
         """
         words = class_name.split()
         if len(words) < 2:
-            return self.detect_objects(image, [class_name], conf=conf)
+            return [d for d in self.detect_objects(image, [class_name], conf=conf)
+                    if _well_framed(d, image.shape)]
 
         want, noun = words[0], words[-1]
-        detections = self.detect_objects(image, [noun], conf=conf)
+        raw = self.detect_objects(image, [noun], conf=conf)
+        detections = [d for d in raw if _well_framed(d, image.shape)]
+        if len(detections) < len(raw):
+            cprint(f"[Perception] 丢掉 {len(raw) - len(detections)} 个被画面边缘切掉的 "
+                   f"{noun} 框 (框中心不是容器中心)", "yellow")
         if not detections:
             return []
 
@@ -169,14 +195,42 @@ class Perception(BasePerception):
     # ------------------------------------------------------------------
     # AnyGrasp
     # ------------------------------------------------------------------
-    def detect_grasps(self, rgb, depth, model: str = "rs_right"):
+    def _lift_occluded(self, depth, raw_depth, rgb, class_name):
+        """把目标物体挡住、却测不到的那块深度顶起来, 再交给 AnyGrasp。
+
+        不顶的话补洞滤波把物体填成桌面, AnyGrasp 会去抓物体**前面**的桌面。
+        详见 core.camera.dome_fill_box。
+        """
+        from core.camera import dome_fill_box
+
+        names = [c.strip() for c in class_name.split(",")]
+        detections = self.detect_objects(rgb, names, conf=YOLO_CONF_GRASP)
+        depth = depth.copy()
+        for d in detections:
+            depth = dome_fill_box(raw_depth, depth, d[:4])
+        return depth
+
+    def detect_grasps(self, rgb, depth, model: str = "rs_right",
+                      class_name: str = "", raw_depth=None):
         """Run AnyGrasp on an RGB-D pair.
+
+        Parameters
+        ----------
+        class_name : str
+            Target class (comma-separated). Given together with *raw_depth*, the
+            target's occluded depth is reconstructed first -- see
+            :func:`core.camera.dome_fill_box`.
+        raw_depth : np.ndarray
+            The un-filled depth of the same frame.
 
         Returns
         -------
         list[dict]
             Each dict has keys ``"trans"``, ``"score"``, ``"rotation_matrix"``.
         """
+        if class_name and raw_depth is not None:
+            depth = self._lift_occluded(depth, raw_depth, rgb, class_name)
+
         if self._anygrasp_fn is None:
             self._anygrasp_fn = _import_anygrasp()
         try:

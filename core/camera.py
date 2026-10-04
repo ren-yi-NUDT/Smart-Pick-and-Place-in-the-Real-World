@@ -22,8 +22,77 @@ from core.config import (
     CAMERA_AUTO_WHITE_BALANCE,
     CAMERA_WHITE_BALANCE,
     HOLE_FILL_MODE,
+    MAX_OCCLUDED_HEIGHT_M,
     MIN_FRAME_BRIGHTNESS,
+    MIN_OCCLUDED_HOLE_PX,
 )
+from core.transforms import _get_intrinsics
+
+
+def dome_fill_box(raw_depth, depth, box, fx=None):
+    """把 *box* 里被物体挡住、测不到的深度顶成一个穹顶, 而不是留成桌面。
+
+    为什么需要 (2026-10-04 实测): D455 的最小可测距离 = fx*baseline/max_disparity
+    ≈ 386*0.095/128 ≈ 286mm, 而相机架在桌面上方只有 ~30cm。任何有高度的物体, 顶部
+    都比桌面更近 —— 实测橙子顶 218mm、桌面 292mm —— 整个果子落在死区里, 原始深度上
+    就是一个洞 (框内只有 11.8% 有效, 果子中心 0%)。hole_filling_filter 拿周围的
+    **桌面**把它填平, 于是 AnyGrasp 看到的是一张平桌子, 抓取点落在果子**前面**的
+    桌面上, 夹爪合在空气里 —— 用户看到的"差了点"。
+
+    按物体底面 (框外一圈最近的桌面深度) 起一个球冠: 顶点比底面高
+    (等效半径 * 底面深度 / fx), 即假设物体大致是个球、高度 = 半径。
+    实测橙子: 框 113x117px、底面 311mm -> 高度 45mm; AnyGrasp 的抓取点从果子底边
+    (v=405~430) 挪到了果子中间 (v=331~374)。
+
+    只改"原始深度就是 0"的像素, 有效深度一律不动 —— 看得见的东西不受影响。
+    必须由调用方给出 box: 洞的连通域和背景连成一片 (实测橙子的洞并进了整幅图的边框
+    连通域), 靠拓扑分不出哪个洞是物体; 而且盘子内壁也是洞, 顶起来会把放置位置搞错。
+    """
+    if fx is None:
+        fx = _get_intrinsics("right")[0]
+
+    H, W = raw_depth.shape
+    x1, y1, x2, y2 = [int(v) for v in box[:4]]
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(W, x2), min(H, y2)
+    if x2 - x1 < 4 or y2 - y1 < 4:
+        return depth
+
+    hole = raw_depth[y1:y2, x1:x2] == 0
+    area = int(hole.sum())
+    if area < MIN_OCCLUDED_HOLE_PX:
+        return depth                       # 物体在深度里看得见, 不动
+
+    # 框外一圈的有效深度 = 物体底面的桌面。取 10% 分位 = 最近的那圈, 也就是物体真正
+    # 坐着的地方 (框的另一侧是桌子更远处, 会把它垫高)。
+    pad = 8
+    ax1, ay1 = max(0, x1 - pad), max(0, y1 - pad)
+    ax2, ay2 = min(W, x2 + pad), min(H, y2 + pad)
+    ring = raw_depth[ay1:ay2, ax1:ax2]
+    inner = np.zeros(ring.shape, bool)
+    inner[y1 - ay1:y2 - ay1, x1 - ax1:x2 - ax1] = True
+    vals = ring[~inner]
+    vals = vals[vals > 0]
+    if len(vals) < 20:
+        return depth
+    base = float(np.percentile(vals, 10))
+
+    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    rx, ry = (x2 - x1) / 2.0, (y2 - y1) / 2.0
+    # 球模型的半径。长条形物体 (黄瓜) 按短边算 -> 矮, 竖着的细高物体 (瓶子) 会算矮,
+    # 这是从轮廓猜高度的天花板, 需要时再按类别给真实高度。
+    r_px = min(np.sqrt(area / np.pi), rx, ry)
+    height = min(r_px * base / fx, MAX_OCCLUDED_HEIGHT_M * 1000.0)
+
+    yy, xx = np.mgrid[y1:y2, x1:x2]
+    rho = np.sqrt(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2)
+    sel = hole & (rho < 1.0)               # 只顶框内切椭圆, 四角留给桌面
+    if not sel.any():
+        return depth
+
+    cap = base - height * np.sqrt(np.clip(1.0 - rho ** 2, 0.0, 1.0))
+    blk = depth[y1:y2, x1:x2]
+    blk[sel] = np.clip(cap[sel], 1, 65535).astype(np.uint16)
+    return depth
 
 
 class RealSenseCapture(BaseCamera):
@@ -42,6 +111,7 @@ class RealSenseCapture(BaseCamera):
         self.fps = fps
         self.enable_align = enable_align
         self.save_path = save_path
+        self.raw_depth = None      # 上一帧未补洞的深度, 见 dome_fill_box
         if self.save_path and not os.path.exists(self.save_path):
             os.makedirs(self.save_path, exist_ok=True)
 
@@ -93,11 +163,17 @@ class RealSenseCapture(BaseCamera):
         # 区域只有 14% 的像素有深度, AnyGrasp 拿到的点云就只剩零头。补完 100%,
         # 且深度中位数仍贴着物体自身 (291mm vs 原始 310mm), 没有把物体糊成一块平板。
         # 必须用 mode 2: mode 1 从右侧邻居传播, 会把野值 (实测 22.5m) 铺满整片区域。
+        raw_depth = np.asanyarray(depth_frame.get_data()).copy()
         depth_frame = hole_filler.process(depth_frame)
 
         # Convert BGR -> RGB
         rgb = np.asanyarray(color_frame.get_data())[..., ::-1]
         depth = np.asanyarray(depth_frame.get_data())
+
+        # 补洞填的是**桌面**, 但物体比桌面近 —— 比相机最小可测距离还近的物体整块是洞,
+        # 补完就成了"桌子一直延伸到物体前面"。原始深度留一份给 dome_fill_box: 只有它
+        # 知道"哪里根本测不到", 补完的那张看不出来。见 core/camera.py:dome_fill_box。
+        self.raw_depth = raw_depth
 
         # 欠曝检查。曝光/增益都顶格还暗, 说明房间光不够 —— 这时候 YOLO 的分数会掉到
         # 噪声级 (实测黄瓜 0.012)、AnyGrasp 的深度也是废的, 但下游只会表现成"没检出",
