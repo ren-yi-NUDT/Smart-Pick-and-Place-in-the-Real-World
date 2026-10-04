@@ -63,6 +63,17 @@ def test_scene_map_is_wired_into_the_skills(rel, needle):
     assert needle in (ROOT / rel).read_text()
 
 
+def test_detect_scene_maps_class_index_to_vocab_name(monkeypatch):
+    """建图和现场核对共用这一个检测 —— 名字和颜色都得从同一个地方来。"""
+    class _P:
+        def detect_objects(self, rgb, names, conf=None):
+            assert names == scene.SCAN_VOCAB          # 一次全给, 不逐类跑
+            return [[1, 2, 3, 4, 0.5, scene.SCAN_VOCAB.index("plate")]]
+
+    monkeypatch.setattr(scene, "dominant_color_name", lambda rgb, d: "blue")
+    assert scene.detect_scene(_P(), None) == [("plate", "blue", [1, 2, 3, 4], 0.5)]
+
+
 def test_look_around_refreshes_the_transform_per_pose():
     """T_base_to_cam 随臂动, 每个位姿都得重新取 —— 沿用上一个位姿会让世界坐标全错。"""
     src = (ROOT / "skills/look_around.py").read_text()
@@ -71,3 +82,97 @@ def test_look_around_refreshes_the_transform_per_pose():
     assert any(line.strip() == "self.save_current_transformation()"
                and len(line) - len(line.lstrip()) >= 12
                for line in src.splitlines())
+
+
+# ---------------------------------------------------------------------------
+# parse_target: 把指令里的一串词拆成 (颜色, 名字)
+# ---------------------------------------------------------------------------
+def test_parse_target_splits_color_from_noun():
+    assert scene.parse_target("blue plate") == ("blue", "plate")
+    assert scene.parse_target("pink plate") == ("pink", "plate")
+    assert scene.parse_target("green bowl") == ("green", "bowl")
+
+
+def test_parse_target_refuses_to_split_when_remainder_is_not_a_noun():
+    """`red fruit` 是 YOLO-World 认得出的**单个类名**, 拆成 fruit 就什么都查不到了。"""
+    assert scene.parse_target("red fruit") == (None, "red fruit")
+
+
+def test_parse_target_handles_words_that_are_both_color_and_noun():
+    assert scene.parse_target("orange") == (None, "orange")        # 单词: 不拆
+    assert scene.parse_target("orange bowl") == ("orange", "bowl")  # 后面有名词: 拆
+
+
+def test_parse_target_passes_unknown_phrases_through():
+    """特殊模式词 (trash / person / desk) 和查不到的词原样穿过, 由调用方决定怎么办。"""
+    assert scene.parse_target("trash") == (None, "trash")
+    assert scene.parse_target("person") == (None, "person")
+    assert scene.parse_target("desk") == (None, "desk")
+    assert scene.parse_target("") == (None, "")
+    assert scene.parse_target(None) == (None, None)
+
+
+def test_parse_target_handles_chinese_without_spaces():
+    """中文的颜色和名词之间没有空格, 所以是前缀匹配不是按空格切。"""
+    assert scene.parse_target("粉色盘子", noun_vocab=["盘子"]) == ("粉色", "盘子")
+
+
+# ---------------------------------------------------------------------------
+# scan_workspace: 共享扫描函数 (look_around 和 pick_and_place 共用, 不 new Skill)
+# ---------------------------------------------------------------------------
+import numpy as np          # noqa: E402
+
+
+def _fake_scan(poses, detections=None, depth_mm=1000, T=None):
+    """跑一次 scan_workspace, 返回 (entries, 调用流水)。"""
+    calls = []
+    detections = detections or [("plate", "pink", [100, 100, 200, 200], 0.9)]
+    T = np.eye(4) if T is None else T
+
+    def move_to_pose(name):
+        calls.append(("move", name))
+
+    def capture(name):
+        calls.append(("capture", name))
+        return (np.zeros((480, 640, 3), np.uint8),
+                np.full((480, 640), depth_mm, np.uint16))
+
+    def transform():
+        calls.append(("transform", None))
+        return T
+
+    def detect(rgb):
+        calls.append(("detect", None))
+        return detections
+
+    entries = scene.scan_workspace(move_to_pose, capture, transform, detect, poses)
+    return entries, calls
+
+
+def test_scan_workspace_refreshes_transform_once_per_pose():
+    """漏调一次 transform, 世界坐标就全错 —— 而日志里看不出来。所以钉住调用次数。"""
+    poses = ["grasp1", "grasp2", "grasp3"]
+    _, calls = _fake_scan(poses)
+    assert [c for c in calls if c[0] == "transform"] == [("transform", None)] * len(poses)
+
+
+def test_scan_workspace_visits_poses_in_order():
+    poses = ["grasp1", "grasp4"]
+    _, calls = _fake_scan(poses)
+    assert [c[1] for c in calls if c[0] == "move"] == poses
+    # 每个位姿: 先到位, 再刷新变换, 再拍照 —— 顺序错了坐标就是上一个位姿的
+    assert [c[0] for c in calls] == ["move", "transform", "capture", "detect"] * len(poses)
+
+
+def test_scan_workspace_returns_unmerged_unsaved_entries():
+    """同一个东西在两个位姿看到就是 2 条 —— 合并/落盘是调用方的事。"""
+    entries, _ = _fake_scan(["grasp1", "grasp2"])
+    assert len(entries) == 2
+    assert all(set(e) == {"name", "color", "world", "conf", "seen_from"} for e in entries)
+    assert [e["seen_from"] for e in entries] == [["grasp1"], ["grasp2"]]
+
+
+def test_scan_workspace_skips_detections_with_no_depth():
+    """深度全是 0 的框算不出世界坐标, 直接丢, 不能塞个假坐标进地图。"""
+    entries, _ = _fake_scan(["grasp1"], depth_mm=0)
+    assert entries == []

@@ -91,6 +91,13 @@ MAX_OCCLUDED_HEIGHT_M = 0.15
 MIN_FRAME_BRIGHTNESS = 40
 
 # ---------------------------------------------------------------------------
+# 场景地图的有效期 (秒)。超过这个时间没重扫, pick_and_place 就拒绝开工, 让人先跑
+# look_around —— 拿一张过期地图去够东西比不干活更糟 (会够到空处或撞到别的东西)。
+# 默认 300s 是拍的, 真机上要试多久合适。
+# ---------------------------------------------------------------------------
+SCENE_MAP_TTL_S = 300
+
+# ---------------------------------------------------------------------------
 # Named poses exposed from robot_config.json
 # ---------------------------------------------------------------------------
 NAMED_POSES = [
@@ -107,19 +114,37 @@ NAMED_POSES = [
 ]
 
 
-def _fold180(v: float) -> float:
-    """折进 (-180, 180]。"""
-    while v > 180.0:
-        v -= 360.0
-    while v <= -180.0:
-        v += 360.0
+# ---------------------------------------------------------------------------
+# 真机关节限位。唯一来源: dependence/twin_inference/robot.py:wrap_joint_limits 的注释。
+# 注意 J4 的行程 355.92° 比整圈少 4°, 所以 ±180 附近有 4° 的**不可达缺口**。
+# ---------------------------------------------------------------------------
+LIMITS = {"J1": 177.96, "J2": 177.96, "J3": 177.96,
+          "J4": 177.96, "J5": 177.96, "J6": 359.82}
+
+
+def fold(v: float, period: float = 360.0) -> float:
+    """折进 (-period/2, period/2]。**纯算术, 不认识任何限位。**
+
+    折完是否合法由 within_limits 判, 这里不替它兜底。比如 J4 折 360 可能折出 -179.5,
+    那正好落进 ±180 的 4° 死区里 —— 越限是真的, 但 fold 本身没做错, 不该私自把它挪走。
+    """
+    half = period / 2.0
+    while v > half:
+        v -= period
+    while v <= -half:
+        v += period
     return v
 
 
-def wrist_headroom_pose(pose: dict) -> dict:
-    """观察位姿换成 ZYZ 等价解: 物理位姿一模一样, 但腕部有余量。
+def within_limits(pose: dict) -> bool:
+    """每个关节是否落在真机限位内。越限就是越限, 不修不猜。"""
+    return all(abs(v) <= LIMITS[j] + 1e-9 for j, v in pose.items() if j in LIMITS)
 
-    实测 (2026-10-04) grasp1-4 录下来 J4 ≈ -164~-172.5°, 离真机 ±177.96° 限位只剩 ~9°。
+
+def wrist_headroom_pose(pose: dict) -> dict:
+    """位姿换成 ZYZ 等价解: 物理位姿一模一样, 但腕部有余量。
+
+    实测 (2026-10-04) 录下来的位姿 J4 ≈ -163.8~-172.5°, 离真机 ±177.96° 限位只剩 ~9°。
     腕部没有余量 = "再转一点就出限位", 于是任何需要改变夹爪朝向的抓取候选都会被 IK 逼到
     ZYZ 翻转分支上; 而翻转分支要 J4 从 -169° 走到 +172°, 只能穿过 ±180° 的限位死区 ——
     走不过去, 孪生的 BRANCH_JUMP 保护因此**正确**地把候选判成不可用 (twin.py:530)。
@@ -129,14 +154,27 @@ def wrist_headroom_pose(pose: dict) -> dict:
 
     翻转是 (J4+180, -J5, J6+180), 末端位姿不变 —— 实测位置差 0.04mm / 姿态差 0.006°,
     相机是 link_6 的固定子节点 (mount_camera.py: parent_frame='link_6'), 所以画面也不变。
-    只在 J4 贴限位时才换, 所以对已经有余量的位姿是幂等的。
+
+    **必须整表一起翻, 不能只翻一部分。** 这个翻转是对合, 且是腕关节空间上的等距变换:
+    两个位姿一起翻, J4 与 J6 的差不变、J5 的差只变号, 所以**两两相对距离逐个保持不变**。
+    2026-10-04 只翻了 grasp* 而把 home 留在原支路, 结果每次从 home 到观察位姿要在腕上
+    转 179° (实测 home J4=-170.5, 翻后的 grasp1 J4=+11) —— 现场就是"莫名其妙的翻腕"。
+
+    三个关节的规范化各不相同, 判据是**折的周期必须让结果落在该关节的限位之内**:
+      - J4 限位 ±177.96 比整圈**窄** 4°, 折 360 的结果域 (-180,180] 超出限位, 所以
+        除了折还要落进 [-90,90] 的余量带;
+      - J5 取负即可, 合法值的相反数仍合法;
+      - J6 限位 ±359.82 比整圈**宽**, 结果域 (-180,180] 含于限位, 折 360 就够。
+
+    早退条件 abs(J4) <= 90 保证**幂等**: 翻转把 (90,180] → [-90,0)、[-180,-90) → (0,90],
+    落点必在 [-90,90], 再翻一次不动。
     """
     out = dict(pose)
     if abs(out["J4"]) <= 90.0:
         return out
-    out["J4"] = _fold180(out["J4"] + 180.0)
+    out["J4"] = fold(out["J4"] + 180.0, 360.0)
     out["J5"] = -out["J5"]
-    out["J6"] = _fold180(out["J6"] + 180.0)
+    out["J6"] = fold(out["J6"] + 180.0, 360.0)
     return out
 
 
@@ -164,12 +202,26 @@ class Config(BaseConfig):
             self.robot_config = json.load(f)
 
         self.default_traj_js = self.robot_config.get("default_traj_js", {})
-        # 抓取观察位姿统一换成腕部有余量的 ZYZ 等价解。见 wrist_headroom_pose:
+        # 整份位姿表统一换到腕部有余量的 ZYZ 等价解。见 wrist_headroom_pose:
         # 录下来的 J4 贴着 ±178° 限位, 不改的话任何改朝向的抓取候选都会被孪生判成不可达。
-        # 只动 grasp* 观察位姿 —— 递送/扔垃圾/放桌面那些位姿不需要腕部余量, 别去动它们。
-        for _key, _pose in self.default_traj_js.items():
-            if _key.startswith("grasp") and isinstance(_pose, dict) and "J4" in _pose:
+        #
+        # **必须整表一起翻**: 翻转是等距变换, 全表一起翻则两两相对距离逐个不变 (一秒都不
+        # 多走), 而只翻一部分会在两拨位姿之间造出 179° 的腕部大回转。所以这里不挑名字,
+        # 凡是 J1..J6 的位姿都过一遍 —— default_traj_js 里的和顶层的 (递送/扔垃圾/放桌面)。
+        for _key, _pose in list(self.default_traj_js.items()):
+            if isinstance(_pose, dict) and "J4" in _pose:
                 self.default_traj_js[_key] = wrist_headroom_pose(_pose)
+        for _key, _pose in list(self.robot_config.items()):
+            if isinstance(_pose, dict) and "J4" in _pose:
+                self.robot_config[_key] = wrist_headroom_pose(_pose)
+        # 翻完不该有越限的。J4 落 [-90,90]、J5 取负保号、J6 落 (-180,180] ⊂ ±359.82,
+        # 三条都能证; 这里兜的是"以后有人往配置里塞了个越限位姿"。
+        for _key, _pose in list(self.default_traj_js.items()):
+            if isinstance(_pose, dict) and "J4" in _pose:
+                assert within_limits(_pose), f"{_key} 翻转后仍越限: {_pose}"
+        for _key, _pose in list(self.robot_config.items()):
+            if isinstance(_pose, dict) and "J4" in _pose:
+                assert within_limits(_pose), f"{_key} 翻转后仍越限: {_pose}"
         self.base_link_name = self.robot_config.get("base_link_name", self.base_link_name)
         self.camera_link_name = self.robot_config.get("camera_link_name", self.camera_link_name)
         self.hand_effector_name = self.robot_config.get("hand_effector_name", self.hand_effector_name)

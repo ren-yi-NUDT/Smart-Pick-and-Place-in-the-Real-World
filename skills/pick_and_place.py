@@ -6,7 +6,7 @@ from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 from skills.base import Skill, register_skill
 from core import scene as scene_map
-from core.config import YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
+from core.config import SCENE_MAP_TTL_S, YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
 from core.transforms import graspcam2pixel, self_rotation_np, rpy_to_vector, pixel_to_camera_point2
 
 # soft close 探测到物体后服务端是以 force=0 持握的, 提臂前补一次实夹的力度。
@@ -44,15 +44,23 @@ class PickAndPlaceSkill(Skill):
             cprint("JSON输入缺少必需字段 (object 或 container)", "red")
             return False
 
+        # 先查地图再动手: 没有地图就没有"东西在哪"的知识, 靠现场碰运气就是以前那个
+        # 逐位姿瞎找。过期地图比没有更糟 (照着一张过期的坐标去够会够到空处), 所以这里
+        # 直接停, 不退回四位姿循环 —— 退回就等于把"该重扫了"这个信号吃掉。
+        scene = scene_map.load_fresh(SCENE_MAP_TTL_S)
+        if scene is None:
+            cprint(f"[map] 没有可用的场景地图 (没扫过 / 文件坏了 / 超过 {SCENE_MAP_TTL_S}s 过期)。"
+                   f"请先跑 look_around。", "red")
+            return False
+
         cprint(f"=================== 2. Parse input: Grasp {obj} and place it in the {container} ===================", "cyan")
         self.control_arm(pose_type="grasp1", speed=30)
         self.control_hand(cmd_type="close")
 
         # ---- Grasp phase ----
         check = False
-        for key, value in self.config.default_traj_js.items():
-            if "grasp" not in key:
-                continue
+        poses, from_map = self._poses_for(scene, obj, "物体")
+        for key in poses:
             self.control_arm(pose_type=key, speed=30)
             self.rgb, self.depth = self.get_camera_obs()
             cprint(f"G=================== 3. Save current rgb and depth observations: {self.save_path} ===================", "cyan")
@@ -67,9 +75,15 @@ class PickAndPlaceSkill(Skill):
             cprint(f"G=================== 4. Generate the grasping pose and save it in file: {self.save_path}/result.json ===================", "cyan")
             self.save_current_transformation()
             if not anygrasp_pose:
+                cprint(f"[grasp] {key} 上 AnyGrasp 没给出任何抓取候选", "yellow")
                 continue
 
-            filtering_grasping_pose = self._filtering_pose(anygrasp_pose, class_name=obj, image=self.rgb)
+            filtering_grasping_pose, detected = self._filtering_pose(anygrasp_pose, class_name=obj, image=self.rgb)
+            # 地图说这个位姿看得见目标, 现场却什么都没检出 —— 东西被挪了, 或者地图过期了。
+            # 停下问人, 不换下一个位姿 (那是"重复移动", 而且会把地图错了这件事悄悄吃掉)。
+            if from_map and not detected:
+                self._stop_map_mismatch(obj, key, scene)
+                return False
             if not filtering_grasping_pose:
                 continue
 
@@ -77,12 +91,13 @@ class PickAndPlaceSkill(Skill):
             if not len(grasping_pose_world):
                 continue
 
-            for i in range(len(grasping_pose_world)):
-                cprint(f"=================== Checking pose: {i+1} / {len(grasping_pose_world)} ===================", "yellow")
-                check = self._execute_grasping_twin_js_2(grasping_pose_world[i], idx=key)
-                if check:
-                    break
-
+            # 只试分数最高的那一个。以前按候选逐个试, 一个抓不到就再试十几个 —— 现场看到的
+            # 是"夹爪在果子旁边反复开合", 而失败的候选本身也没被修好过。抓不到就认, 往下走。
+            #
+            # "往下走"指的是换下一个**观察位姿** (换视角才换得到抓取几何), 不是换候选。
+            # 地图命中时 poses 只有一个, 所以这里等于"抓不到就结束"。
+            cprint(f"=================== 只试最高分的一个候选 ===================", "yellow")
+            check = self._execute_grasping_twin_js_2(grasping_pose_world[0], idx=key)
             if check:
                 break
 
@@ -144,30 +159,32 @@ class PickAndPlaceSkill(Skill):
             return True
 
         # Normal vision-based placement
-        last_js = None
-        for key, value in self.config.default_traj_js.items():
-            if "grasp" not in key:
-                continue
-            last_js = value
+        check = False
+        poses, from_map = self._poses_for(scene, container, "容器")
+        for key in poses:
+            current_js = self.config.get_pose(key)
             self.control_arm(pose_type=key, speed=30)
             self.rgb, self.depth = self.get_camera_obs()
             cprint(f"P=================== 3. Save current rgb and depth observations: {self.save_path} ===================", "cyan")
             self.save_current_transformation()
-            placing_pos_world = self._get_placing_position(class_name=container, image=self.rgb)
             cprint("P=================== 4. Generate the placing pose ===================", "cyan")
 
-            if not len(placing_pos_world):
+            if from_map:
+                # 地图说这个位姿看得见容器, 现场必须也认得出 —— 认不出就停下问人。
+                # 位置直接用地图记的世界坐标: 现场那个框可能被画面切掉 (_well_framed 会
+                # 丢掉它, 实测 grasp3 看蓝盘子只框到 21px 高的一条), 地图坐标反而更稳。
+                if not self._map_still_holds(scene, container, self.rgb):
+                    self._stop_map_mismatch(container, key, scene)
+                    return False
+                placing_pos_world = self._placing_position_from_scene(container, scene)
+            else:
+                placing_pos_world = self._get_placing_position(class_name=container, image=self.rgb)
+
+            if placing_pos_world is None or not len(placing_pos_world):
                 continue
-            check = self._execute_placement(placing_pos_world, current_js=value)
+            check = self._execute_placement(placing_pos_world, current_js=current_js)
             if check:
                 break
-
-        # 四个观察位姿都没看见容器, 再查一次地图。地图命中不依赖臂的当前朝向,
-        # 所以放在循环外试一次就够。
-        if not check:
-            from_scene = self._placing_position_from_scene(container)
-            if from_scene is not None:
-                check = self._execute_placement(from_scene, current_js=last_js)
 
         self.control_arm(pose_type="grasp1", speed=30)
         # 四个观察位姿都放不下就是失败 —— 以前这里无条件报成功, 于是"所有位姿都被孪生
@@ -182,6 +199,11 @@ class PickAndPlaceSkill(Skill):
     # Grasp helpers (from planner.py)
     # ------------------------------------------------------------------
     def _filtering_pose(self, anygrasp_pose, class_name="", image=None):
+        """返回 ``(抓取位姿列表, 有没有检出目标)``。
+
+        第二个返回值不能省: "什么都没检出"和"检出了但框里没有抓取点"是两回事。
+        前者说明地图和现场对不上 (该停下问人), 后者只是这个候选不行。
+        """
         # YOLO-World 在这张桌面上对单件蔬果只给 0.05 左右的分数 (框是准的, 分低),
         # 用 0.2 会把目标整个漏掉, 后面所有候选都被判"没有物体"。
         # 阈值见 core/config.py:YOLO_CONF_GRASP (实测目标分数低到 0.012, 高了直接漏检)。
@@ -218,7 +240,53 @@ class PickAndPlaceSkill(Skill):
         else:
             cprint(f"No object detected for class: {class_name}", "yellow")
 
-        return final_grasps if ans else []
+        return (final_grasps if ans else []), bool(len(detections))
+
+    # ------------------------------------------------------------------
+    # 场景地图: 决定去哪个观察位姿
+    # ------------------------------------------------------------------
+    def _poses_for(self, scene, target, what):
+        """该去哪些观察位姿看 ``target``。返回 ``(位姿列表, 是不是地图选的)``。
+
+        地图里有它 → **只去最先看见它的那个** (``seen_from[0]``, 走路最少)。
+        地图里没有 → 回退到全部观察位姿 (保底, 但把话说清楚)。
+        """
+        all_poses = [k for k in self.config.default_traj_js if "grasp" in k]
+        color, name = scene_map.parse_target(target)
+        hit = scene_map.find(scene, name, color)
+        if hit is None:
+            cprint(f"[map] 地图里没有{what} '{target}', 回退到逐个观察位姿", "yellow")
+            return all_poses, False
+        poses = [p for p in hit["seen_from"] if p in all_poses]
+        if not poses:
+            cprint(f"[map] {what} '{target}' 的记录没带观察位姿, 回退到逐个观察位姿", "yellow")
+            return all_poses, False
+        cprint(f"[map] {what} '{target}' 命中 {hit['color'] or '?'} {hit['name']} "
+               f"(扫描于 {scene.get('scanned_at')}), 只去 {poses[0]}", "yellow")
+        return poses[:1], True
+
+    def _stop_map_mismatch(self, target, pose, scene):
+        """地图说看得见、现场看不见 —— 停下问人, 不猜、不回退、不换下一个位姿。
+
+        回退到四位姿循环正是这次要消灭的"重复移动", 而且它会把"地图错了"这个信号悄悄
+        吃掉, 下次还是错的。
+        """
+        cprint(f"[map] 地图说 '{target}' 在 {pose} 看得见 (扫描于 {scene.get('scanned_at')}), "
+               f"但现场在 {pose} 没检出它。是东西被挪了, 还是地图过期了? "
+               f"停下, 请你确认。", "red")
+
+    def _map_still_holds(self, scene, target, rgb):
+        """现场这一帧还认得出地图里那件东西吗。
+
+        用**建图同一套检测**核对 (见 core/scene.py:detect_scene) —— 换成容器的
+        detect_container 会多一层"框被切掉就丢掉"的过滤, 于是画面边缘的框会被
+        误报成"东西被挪了"。
+        """
+        color, name = scene_map.parse_target(target)
+        for got_name, got_color, _box, _conf in scene_map.detect_scene(self.perception, rgb):
+            if got_name == name and (color is None or got_color == color):
+                return True
+        return False
 
     def _transform_anygrasp_pose(self, anygrasp_pose, _visualization=True, return_labels=False):
         try:
@@ -363,21 +431,19 @@ class PickAndPlaceSkill(Skill):
             pass
         return []
 
-    def _placing_position_from_scene(self, container):
-        """实时检测没找到容器时, 回退到 look_around 存的场景地图。
+    def _placing_position_from_scene(self, container, scene):
+        """容器在世界里的位置 —— 直接取场景地图记的那个坐标。
 
         臂在 grasp1 看不见蓝盘子, 在 grasp4 看不见粉盘子 —— 用户说"放蓝盘子里"时
-        臂恰好背对着就会失败, 尽管它 10 分钟前才看过。地图就是为这个存的。
+        臂恰好背对着就会失败, 尽管它 10 分钟前才看过。地图就是为这个存的, 而且它给的
+        是世界坐标, 不受当前视角影响 (现场框被画面切掉时反而更准)。
 
-        地图是快照: 东西被人挪过就对不上了, 所以命中时把扫描时间打出来, 让现场
-        知道这个坐标有多新。
+        地图是快照, 所以调用方必须先确认现场还看得见它 (见 _map_still_holds)。
         """
-        scene = scene_map.load()
         if not scene:
             return None
-        words = container.split()
-        color = words[0] if len(words) > 1 else None
-        obj = scene_map.find(scene, words[-1], color)
+        color, name = scene_map.parse_target(container)
+        obj = scene_map.find(scene, name, color)
         if obj is None:
             return None
         cprint(f"P=========== 实时没看到 {container}, 查场景地图: 命中 "
