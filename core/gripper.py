@@ -113,6 +113,22 @@ class GripperClient:
             cmd["soft"] = True
         return self._send_cmd(cmd)
 
+    def hold(self, force: int = 40) -> dict:
+        """停在**当前位置**加力夹住, 而不是一路合到机械限位。
+
+        is_grasping() 的 soft close 探到物体后, 是停在物体所在的开度上 (force=0)。
+        接着再来一次 close() 会被当成"合到底": 从探到的开度一路推到 pos 255 (机械
+        限位)。对橙子这种近球形的果子, 那不是"夹紧", 是往里挤 —— 果子被挤出去,
+        现场看到的是"夹爪一端先碰到果子, 然后往里收, 结果没夹起来"。
+        这里把当前位置读回来原样发回去, 只把力加上, 开度不动。
+        """
+        state = self.get_state()
+        value = state.get("value", [])
+        if not isinstance(value, list) or len(value) < 2:
+            return state
+        cmd = {"src": self._src, "type": "set", "cmd": list(value), "force": force}
+        return self._send_cmd(cmd)
+
     def get_state(self) -> dict:
         cmd = {"src": self._src, "type": "get"}
         return self._send_cmd(cmd)

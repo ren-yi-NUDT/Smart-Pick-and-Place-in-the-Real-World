@@ -308,9 +308,11 @@ class PickAndPlaceSkill(Skill):
             # check_grasping_object 走夹爪的 soft close, 用 gOBJ 判定合拢时中间有没有东西。
             held = self.check_grasping_object()
             if held:
-                # soft close 探测完是以 force=0 持握的, 光滑一点的物体一提就滑。
-                # 探测通过后补一次实夹再提臂。
-                self.hand.close(force=GRIPPER_HOLD_FORCE)
+                # soft close 探测完是以 force=0 持握的, 光滑一点的物体一提就滑, 所以
+                # 要补一次实夹再提臂。但必须用 hold() 停在探测到的开度上 —— 用 close()
+                # 会被当成"合到底", 从探到的开度一路挤到机械限位, 近球形的果子直接被
+                # 挤出去 (现场: "夹爪一端先碰到果子, 然后往里收, 结果没夹起来")。
+                self.hand.hold(force=GRIPPER_HOLD_FORCE)
 
             self.control_arm(pose_type=idx, speed=30)
             cprint("=============== Reach post grasping pose =============")

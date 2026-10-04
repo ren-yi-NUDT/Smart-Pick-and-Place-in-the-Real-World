@@ -107,6 +107,39 @@ NAMED_POSES = [
 ]
 
 
+def _fold180(v: float) -> float:
+    """折进 (-180, 180]。"""
+    while v > 180.0:
+        v -= 360.0
+    while v <= -180.0:
+        v += 360.0
+    return v
+
+
+def wrist_headroom_pose(pose: dict) -> dict:
+    """观察位姿换成 ZYZ 等价解: 物理位姿一模一样, 但腕部有余量。
+
+    实测 (2026-10-04) grasp1-4 录下来 J4 ≈ -164~-172.5°, 离真机 ±177.96° 限位只剩 ~9°。
+    腕部没有余量 = "再转一点就出限位", 于是任何需要改变夹爪朝向的抓取候选都会被 IK 逼到
+    ZYZ 翻转分支上; 而翻转分支要 J4 从 -169° 走到 +172°, 只能穿过 ±180° 的限位死区 ——
+    走不过去, 孪生的 BRANCH_JUMP 保护因此**正确**地把候选判成不可用 (twin.py:530)。
+
+    实测同一个橙子, 同一个位姿: 原始 grasp1 (J4=-169°) 7 个候选只有 2 个能生成轨迹;
+    换成翻转解 (J4=+11°) 10 个里 9 个能。抓取失败的大头就在这。
+
+    翻转是 (J4+180, -J5, J6+180), 末端位姿不变 —— 实测位置差 0.04mm / 姿态差 0.006°,
+    相机是 link_6 的固定子节点 (mount_camera.py: parent_frame='link_6'), 所以画面也不变。
+    只在 J4 贴限位时才换, 所以对已经有余量的位姿是幂等的。
+    """
+    out = dict(pose)
+    if abs(out["J4"]) <= 90.0:
+        return out
+    out["J4"] = _fold180(out["J4"] + 180.0)
+    out["J5"] = -out["J5"]
+    out["J6"] = _fold180(out["J6"] + 180.0)
+    return out
+
+
 class Config(BaseConfig):
     """Loads and exposes all runtime configuration."""
 
@@ -131,6 +164,12 @@ class Config(BaseConfig):
             self.robot_config = json.load(f)
 
         self.default_traj_js = self.robot_config.get("default_traj_js", {})
+        # 抓取观察位姿统一换成腕部有余量的 ZYZ 等价解。见 wrist_headroom_pose:
+        # 录下来的 J4 贴着 ±178° 限位, 不改的话任何改朝向的抓取候选都会被孪生判成不可达。
+        # 只动 grasp* 观察位姿 —— 递送/扔垃圾/放桌面那些位姿不需要腕部余量, 别去动它们。
+        for _key, _pose in self.default_traj_js.items():
+            if _key.startswith("grasp") and isinstance(_pose, dict) and "J4" in _pose:
+                self.default_traj_js[_key] = wrist_headroom_pose(_pose)
         self.base_link_name = self.robot_config.get("base_link_name", self.base_link_name)
         self.camera_link_name = self.robot_config.get("camera_link_name", self.camera_link_name)
         self.hand_effector_name = self.robot_config.get("hand_effector_name", self.hand_effector_name)
