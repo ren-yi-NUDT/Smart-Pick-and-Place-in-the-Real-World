@@ -5,6 +5,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 from skills.base import Skill, register_skill
+from core import scene as scene_map
 from core.config import YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
 from core.transforms import graspcam2pixel, self_rotation_np, rpy_to_vector, pixel_to_camera_point2
 
@@ -137,9 +138,11 @@ class PickAndPlaceSkill(Skill):
             return True
 
         # Normal vision-based placement
+        last_js = None
         for key, value in self.config.default_traj_js.items():
             if "grasp" not in key:
                 continue
+            last_js = value
             self.control_arm(pose_type=key, speed=30)
             self.rgb, self.depth = self.get_camera_obs()
             cprint(f"P=================== 3. Save current rgb and depth observations: {self.save_path} ===================", "cyan")
@@ -152,6 +155,13 @@ class PickAndPlaceSkill(Skill):
             check = self._execute_placement(placing_pos_world, current_js=value)
             if check:
                 break
+
+        # 四个观察位姿都没看见容器, 再查一次地图。地图命中不依赖臂的当前朝向,
+        # 所以放在循环外试一次就够。
+        if not check:
+            from_scene = self._placing_position_from_scene(container)
+            if from_scene is not None:
+                check = self._execute_placement(from_scene, current_js=last_js)
 
         self.control_arm(pose_type="grasp1", speed=30)
         # 四个观察位姿都放不下就是失败 —— 以前这里无条件报成功, 于是"所有位姿都被孪生
@@ -344,6 +354,30 @@ class PickAndPlaceSkill(Skill):
         except Exception:
             pass
         return []
+
+    def _placing_position_from_scene(self, container):
+        """实时检测没找到容器时, 回退到 look_around 存的场景地图。
+
+        臂在 grasp1 看不见蓝盘子, 在 grasp4 看不见粉盘子 —— 用户说"放蓝盘子里"时
+        臂恰好背对着就会失败, 尽管它 10 分钟前才看过。地图就是为这个存的。
+
+        地图是快照: 东西被人挪过就对不上了, 所以命中时把扫描时间打出来, 让现场
+        知道这个坐标有多新。
+        """
+        scene = scene_map.load()
+        if not scene:
+            return None
+        words = container.split()
+        color = words[0] if len(words) > 1 else None
+        obj = scene_map.find(scene, words[-1], color)
+        if obj is None:
+            return None
+        cprint(f"P=========== 实时没看到 {container}, 查场景地图: 命中 "
+               f"{obj['color'] or '?'} {obj['name']} (扫描于 {scene.get('scanned_at')}) ===========", "yellow")
+        T = np.eye(4)
+        T[:3, :3] = R.from_quat(PLACEMENT_ORN_FALLBACKS[0]).as_matrix()
+        T[:3, 3] = obj["world"]
+        return T
 
     def _transform_pose_to_world(self, pose_cam_point):
         placing_translation = pose_cam_point.flatten()

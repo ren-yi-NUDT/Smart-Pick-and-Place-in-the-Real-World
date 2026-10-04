@@ -21,6 +21,7 @@ from termcolor import cprint
 from core.config import (
     CAMERA_AUTO_WHITE_BALANCE,
     CAMERA_WHITE_BALANCE,
+    HOLE_FILL_MODE,
     MIN_FRAME_BRIGHTNESS,
 )
 
@@ -74,6 +75,7 @@ class RealSenseCapture(BaseCamera):
         color_sensor.set_option(rs.option.enable_auto_exposure, 1)
 
         align = rs.align(rs.stream.color) if self.enable_align else None
+        hole_filler = rs.hole_filling_filter(HOLE_FILL_MODE)
 
         # Discard the first few frames to let auto-exposure settle
         for _ in range(5):
@@ -86,6 +88,12 @@ class RealSenseCapture(BaseCamera):
 
         color_frame = frames.get_color_frame()
         depth_frame = frames.get_depth_frame()
+
+        # 补深度空洞。D455 是主动双目, 光滑/深色物体上 IR 匹配不上 —— 实测火龙果
+        # 区域只有 14% 的像素有深度, AnyGrasp 拿到的点云就只剩零头。补完 100%,
+        # 且深度中位数仍贴着物体自身 (291mm vs 原始 310mm), 没有把物体糊成一块平板。
+        # 必须用 mode 2: mode 1 从右侧邻居传播, 会把野值 (实测 22.5m) 铺满整片区域。
+        depth_frame = hole_filler.process(depth_frame)
 
         # Convert BGR -> RGB
         rgb = np.asanyarray(color_frame.get_data())[..., ::-1]
