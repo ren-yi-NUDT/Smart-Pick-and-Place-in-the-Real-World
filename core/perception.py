@@ -29,12 +29,22 @@ from core.transforms import graspcam2pixel
 
 
 # 色相 -> 颜色名 (上界, 单位度)。换灯/换房间后要跟着 CAMERA_WHITE_BALANCE 重标。
-# 0/360 两侧都是 pink: 实测 3500K 下粉盘子 354°、橙子 14°, 中间只隔 20°, 所以
-# pink/orange 的界线定在 10° 而不是 15° (15° 会把橙子判成粉)。
+# 界线取实测各物体色相簇的中点, 不是色轮上的理论位置:
+#   橙子 14° | 柠檬 42~47° | 黄瓜 81~117° | 蓝盘子 175~205° | 粉盘子 351~355°
+# orange/yellow 原来定在 45°, 正好压在柠檬的实测区间里 —— 同一颗柠檬 grasp1 量到
+# 42°、grasp2 量到 46°, 于是同一颗果子在两个视角被记成两种颜色, 场景地图里成了
+# 两条记录。挪到 28° (14 和 42 的中点) 后三个视角都是 yellow。
+# 没有单独的 cyan 档: 蓝盘子从掠射角看量到 175°, 落在 cyan 里, 于是同一个盘子被
+# 拆成 "cyan" 和 "blue" 两条, 颜色对不上就合并不了。这里没有青色物体, 合并进 blue。
 _HUE_BINS_DEG = [
-    (10, "pink"), (45, "orange"), (70, "yellow"), (170, "green"),
-    (200, "cyan"), (270, "blue"), (330, "purple"), (360, "pink"),
+    (10, "pink"), (28, "orange"), (65, "yellow"), (170, "green"),
+    (270, "blue"), (330, "purple"), (360, "pink"),
 ]
+
+# 判颜色时只统计够饱和的像素。原来对所有像素取色相中位数 —— 物体上的高光和阴影
+# 是灰的, 色相纯属噪声, 中位数被它们拖着跑: 实测一根黄瓜在 grasp2 视角量到 88°
+# (低饱和像素占多数), 直接判成 orange。
+_SAT_MIN = 0.25
 
 
 def dominant_color_name(rgb, box, inset: float = 0.3):
@@ -53,13 +63,23 @@ def dominant_color_name(rgb, box, inset: float = 0.3):
 
     crop = np.ascontiguousarray(rgb[y1:y2, x1:x2])
     hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV).reshape(-1, 3).astype(float)
-    hue = float(np.median(hsv[:, 0])) * 2.0   # OpenCV H 0-179 -> 0-360 度
-    sat = float(np.median(hsv[:, 1])) / 255.0
-    val = float(np.median(hsv[:, 2])) / 255.0
+    hue = hsv[:, 0] * 2.0                     # OpenCV H 0-179 -> 0-360 度
+    sat = hsv[:, 1] / 255.0
+    val = hsv[:, 2] / 255.0
 
-    if sat < 0.12:                            # 近中性, 色相是噪声
-        return "white" if val > 0.70 else ("gray" if val > 0.30 else "black")
-    return next(name for hi, name in _HUE_BINS_DEG if hue < hi)
+    colored = sat >= _SAT_MIN
+    if colored.sum() < 0.15 * len(sat):       # 绝大多数像素没颜色, 说明物体本身是中性色
+        v = float(np.median(val))
+        return "white" if v > 0.70 else ("gray" if v > 0.30 else "black")
+
+    # 圆均值而不是中位数: 粉在 0/360 两侧, 直接取中位数会翻到 180° (cyan)。
+    a = np.deg2rad(hue[colored])
+    hue_mean = float(np.rad2deg(np.arctan2(np.sin(a).mean(), np.cos(a).mean())) % 360.0)
+    if hue_mean >= 360.0:
+        # 浮点尾巴: 角度略微为负时 -1e-15 % 360 返回的是 360.0 而不是 0.0,
+        # 于是下面没有一档能匹配, 直接 StopIteration。粉盘子正好量在这个位置。
+        hue_mean = 0.0
+    return next(name for hi, name in _HUE_BINS_DEG if hue_mean < hi)
 
 
 def _import_anygrasp():
