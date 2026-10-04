@@ -15,6 +15,7 @@ Usage:
 
 import os
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -25,6 +26,40 @@ from ultralytics import YOLOWorld
 from core.abc import BasePerception
 from core.config import YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
 from core.transforms import graspcam2pixel
+
+
+# 色相 -> 颜色名 (上界, 单位度)。换灯/换房间后要跟着 CAMERA_WHITE_BALANCE 重标。
+# 0/360 两侧都是 pink: 实测 3500K 下粉盘子 354°、橙子 14°, 中间只隔 20°, 所以
+# pink/orange 的界线定在 10° 而不是 15° (15° 会把橙子判成粉)。
+_HUE_BINS_DEG = [
+    (10, "pink"), (45, "orange"), (70, "yellow"), (170, "green"),
+    (200, "cyan"), (270, "blue"), (330, "purple"), (360, "pink"),
+]
+
+
+def dominant_color_name(rgb, box, inset: float = 0.3):
+    """框内主色的英文名；近中性时按明度退回 white/gray/black。
+
+    颜色必须自己从像素算, 不能问 YOLO-World 的颜色词 —— 它的颜色绑定是从语言
+    先验猜的, 跟像素无关。实测同一个蓝盘子: 问 "pink plate" 得 0.621, 问
+    "blue plate" 只有 0.165。取框中心 inset 区域避开桌面背景。
+    """
+    x1, y1, x2, y2 = [int(v) for v in box[:4]]
+    w, h = x2 - x1, y2 - y1
+    x1, y1 = x1 + int(w * inset), y1 + int(h * inset)
+    x2, y2 = x2 - int(w * inset), y2 - int(h * inset)
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    crop = np.ascontiguousarray(rgb[y1:y2, x1:x2])
+    hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV).reshape(-1, 3).astype(float)
+    hue = float(np.median(hsv[:, 0])) * 2.0   # OpenCV H 0-179 -> 0-360 度
+    sat = float(np.median(hsv[:, 1])) / 255.0
+    val = float(np.median(hsv[:, 2])) / 255.0
+
+    if sat < 0.12:                            # 近中性, 色相是噪声
+        return "white" if val > 0.70 else ("gray" if val > 0.30 else "black")
+    return next(name for hi, name in _HUE_BINS_DEG if hue < hi)
 
 
 def _import_anygrasp():
@@ -86,6 +121,30 @@ class Perception(BasePerception):
         if len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
             return []
         return results[0].boxes.data.tolist()
+
+    def detect_container(self, image, class_name, conf=YOLO_CONF_CONTAINER):
+        """检测容器。*class_name* 可以带颜色词 (``"pink plate"``)。
+
+        带颜色词时只把名词交给 YOLO, 再用框内像素的颜色挑 —— YOLO-World 的颜色
+        词是语言先验, 不是从图里看出来的, 用它等于随机。找不到匹配颜色时返回空
+        并告警, 而不是退回"随便给一个": 把东西放进错的盘子比放不进去更糟。
+        """
+        words = class_name.split()
+        if len(words) < 2:
+            return self.detect_objects(image, [class_name], conf=conf)
+
+        want, noun = words[0], words[-1]
+        detections = self.detect_objects(image, [noun], conf=conf)
+        if not detections:
+            return []
+
+        hits = [d for d in detections if dominant_color_name(image, d) == want]
+        if hits:
+            return hits
+
+        seen = {dominant_color_name(image, d) for d in detections}
+        cprint(f"[Perception] 要 {want} {noun}, 但只看到 {seen}; 颜色对不上, 不猜", "yellow")
+        return []
 
     # ------------------------------------------------------------------
     # AnyGrasp

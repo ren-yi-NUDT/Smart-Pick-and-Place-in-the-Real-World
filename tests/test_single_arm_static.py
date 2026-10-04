@@ -112,7 +112,7 @@ def test_yolo_confidence_is_not_hardcoded_in_skill_paths():
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            if getattr(node.func, "attr", None) != "detect_objects":
+            if getattr(node.func, "attr", None) not in ("detect_objects", "detect_container"):
                 continue
             confs = [kw.value for kw in node.keywords if kw.arg == "conf"]
             assert confs, f"{rel}:{node.lineno} detect_objects 没传 conf"

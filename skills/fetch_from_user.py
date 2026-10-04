@@ -149,7 +149,7 @@ class FetchFromUserSkill(Skill):
     # Placement helpers (from fetch_from_user.py)
     # ------------------------------------------------------------------
     def _get_placing_position(self, class_name=None, image=None):
-        detections = self.perception.detect_objects(image, [class_name], conf=YOLO_CONF_CONTAINER)
+        detections = self.perception.detect_container(image, class_name, conf=YOLO_CONF_CONTAINER)
         try:
             if len(detections):
                 det = detections[0][:4]

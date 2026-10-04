@@ -34,7 +34,7 @@ class PlaceSkill(Skill):
         return True
 
     def _get_placing_position(self, class_name, image):
-        detections = self.perception.detect_objects(image, [class_name], conf=YOLO_CONF_CONTAINER)
+        detections = self.perception.detect_container(image, class_name, conf=YOLO_CONF_CONTAINER)
         try:
             det = detections[0][:4]
             if det[1] >= 400 and det[3] <= 480 and len(detections) > 1:

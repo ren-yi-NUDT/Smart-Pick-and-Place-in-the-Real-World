@@ -18,7 +18,11 @@ import pyrealsense2 as rs
 from PIL import Image
 from termcolor import cprint
 
-from core.config import MIN_FRAME_BRIGHTNESS
+from core.config import (
+    CAMERA_AUTO_WHITE_BALANCE,
+    CAMERA_WHITE_BALANCE,
+    MIN_FRAME_BRIGHTNESS,
+)
 
 
 class RealSenseCapture(BaseCamera):
@@ -57,8 +61,12 @@ class RealSenseCapture(BaseCamera):
 
         profile = pipeline.start(config)
         color_sensor = profile.get_device().query_sensors()[1]
-        color_sensor.set_option(rs.option.enable_auto_white_balance, False)
-        color_sensor.set_option(rs.option.white_balance, 5500)
+        # 白平衡必须显式复位, 理由同曝光: 它也存在相机里跨进程残留。
+        # 值见 core/config.py:CAMERA_WHITE_BALANCE (实测房间灯 ~3500K)。
+        color_sensor.set_option(rs.option.enable_auto_white_balance,
+                                int(CAMERA_AUTO_WHITE_BALANCE))
+        if not CAMERA_AUTO_WHITE_BALANCE:
+            color_sensor.set_option(rs.option.white_balance, CAMERA_WHITE_BALANCE)
         # 曝光模式必须显式复位。手动曝光是存在相机里的, 会跨进程残留 —— 谁 (诊断脚本、
         # 崩掉的进程) 把它留在手动档, 之后每次采集都静默出废图: 档位偏低就是全黑,
         # 偏高就是全白 (实测残留 exposure=10000/gain=128 时平均亮度 252, YOLO 一个框
