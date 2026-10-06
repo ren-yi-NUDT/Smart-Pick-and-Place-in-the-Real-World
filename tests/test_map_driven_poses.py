@@ -154,6 +154,55 @@ def test_grasp_retries_candidates_but_is_capped():
     assert 1 < MAX_GRASP_CANDIDATES <= 5        # 1 = 回到只试一个; 太大 = 反复开合
 
 
+def test_a_successful_grasp_stops_walking_the_observation_poses(monkeypatch):
+    """夹住了就走人, 不去下一个观察位姿。
+
+    2026-10-06 抓黄瓜: 地图 seen_from=['grasp2','grasp3'], 在 grasp2 上第一个候选就
+    夹住了 (soft_close 报 object_detected), 但内层的 break 只跳出**候选**循环, 外层
+    继续走到 grasp3 —— 手里攥着黄瓜, 那儿当然检不出目标, 于是报"东西被挪了"停下来
+    问人, 整条流水线假失败, 手里的果子还得人工放。
+    """
+    import numpy as np
+
+    s = _skill()
+    s.config = types.SimpleNamespace(
+        default_traj_js={k: {"J1": 0.0} for k in POSES},
+        get_pose=lambda name: {f"J{i}": 0.0 for i in range(1, 7)},
+    )
+    visited, grasped = [], []
+    s.control_arm = lambda **kw: visited.append(kw.get("pose_type"))
+    s.control_hand = lambda **kw: None
+    s.get_camera_obs = lambda: (None, None)
+    s.save_current_transformation = lambda: None
+    s._perception = types.SimpleNamespace(detect_grasps=lambda *a, **k: [{}])
+    s._filtering_pose = lambda *a, **k: ([np.eye(4)], True, [0.0])
+    s._transform_anygrasp_pose = lambda *a, **k: [np.eye(4)]
+
+    def fake_exec(c, idx=None):
+        grasped.append(idx)
+        return True
+
+    s._execute_grasping_twin_js_2 = fake_exec
+    monkeypatch.setattr(scene_map, "load_fresh",
+                        lambda *a, **k: _scene(_obj("cucumber", "green", ["grasp2", "grasp3"])))
+
+    assert s.run(object="cucumber", container="desk") is True
+    assert grasped == ["grasp2"], f"夹住之后还往下试: {grasped}"
+    assert "grasp3" not in visited, visited
+
+
+def test_grasp_logs_how_off_centre_the_candidate_is():
+    """候选日志得报"手爪点离物体框中心多少像素"。
+
+    用户 2026-10-06: "总感觉抓的很偏, 两次都是在边缘刚好"。_most_vertical 只看倾角,
+    倾角跟"手爪点在不在物体中间"无关 —— 不报这个数就永远只能靠感觉。第一次实测:
+    黄瓜第一个候选倾角 3.1° (非常正), 但离框中心 34px。
+    """
+    src = (ROOT / "skills/pick_and_place.py").read_text()
+    assert "离框中心" in src
+    assert "offsets_px" in src
+
+
 def test_pre_grasp_falls_back_to_a_lower_lift():
     """预抓取默认抬 4cm, 够不着时降到 1cm。
 

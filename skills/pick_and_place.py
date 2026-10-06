@@ -136,7 +136,8 @@ class PickAndPlaceSkill(Skill):
                 cprint(f"[grasp] {key} 上 AnyGrasp 没给出任何抓取候选", "yellow")
                 continue
 
-            filtering_grasping_pose, detected = self._filtering_pose(anygrasp_pose, class_name=obj, image=self.rgb)
+            filtering_grasping_pose, detected, offsets_px = self._filtering_pose(
+                anygrasp_pose, class_name=obj, image=self.rgb)
             # 地图说看得见、现场什么都认不出 —— 东西被挪了, 或者地图过期了。停下问人,
             # 不猜不换位姿 (换了就把"地图错了"这个信号悄悄吃掉)。
             # 只在**最后一个**位姿上判: seen_from 可能有好几个位姿, 前面那个视角差一点、
@@ -171,12 +172,24 @@ class PickAndPlaceSkill(Skill):
             # 观察位姿, 所以下一个候选的 current_js 初值仍然是对的。
             candidate = self._most_vertical(grasping_pose_world)
             order = [candidate] + [c for c in grasping_pose_world if c is not candidate]
+            # 手爪点离物体框中心多远 —— 用户 2026-10-06: "总感觉抓的很偏, 两次都是在
+            # 边缘刚好"。_most_vertical 只看倾角, 倾角跟"手爪点在不在物体中间"无关,
+            # 所以这个数得打出来才知道是不是真偏。
+            off_of = {}
+            if len(offsets_px) == len(grasping_pose_world):
+                off_of = {id(p): o for p, o in zip(grasping_pose_world, offsets_px)}
             for n, c in enumerate(order[:MAX_GRASP_CANDIDATES], 1):
                 cprint(f"=================== 候选 {n}/{min(len(order), MAX_GRASP_CANDIDATES)}: "
-                       f"倾角 {self._tilt_deg(c):.1f}° ===================", "yellow")
+                       f"倾角 {self._tilt_deg(c):.1f}° 离框中心 "
+                       f"{off_of.get(id(c), float('nan')):.0f}px ===================", "yellow")
                 check = self._execute_grasping_twin_js_2(c, idx=key)
                 if check:
                     break
+            # 夹住了就收工。少了这句, 内层的 break 只跳出候选循环, 外层继续去下一个
+            # 观察位姿 —— 手里已经攥着果子了, 那边当然"检不出目标", 于是报"东西被挪了"
+            # 停下来问人。2026-10-06 抓黄瓜 (seen_from=[grasp2,grasp3]) 就是这么假失败的。
+            if check:
+                break
 
         if not check:
             cprint("G=================== Grasping task failed ===================", "red")
@@ -292,6 +305,7 @@ class PickAndPlaceSkill(Skill):
         grasp_points, grasp_pose_cam = graspcam2pixel(anygrasp_pose)
         valid_indices = set()
         final_grasps = []
+        offsets_px = []          # 手爪点离框中心多少像素, 和 final_grasps 一一对应
         valid_boxes = []
         ans = False
 
@@ -307,9 +321,12 @@ class PickAndPlaceSkill(Skill):
             if len(valid_indices):
                 sorted_indices = sorted(list(valid_indices))
                 class_names = [cls for cls in class_name.split(',')]
+                cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
                 for i in sorted_indices:
                     g_pose = grasp_pose_cam[i]
                     final_grasps.append(g_pose)
+                    offsets_px.append(float(np.hypot(grasp_points[i][0] - cx,
+                                                     grasp_points[i][1] - cy)))
                 cprint(
                     f"*********** Class name {class_names} ****************** "
                     f"Grasp pose number: {len(final_grasps)} ******************", "green")
@@ -319,7 +336,7 @@ class PickAndPlaceSkill(Skill):
         else:
             cprint(f"No object detected for class: {class_name}", "yellow")
 
-        return (final_grasps if ans else []), bool(len(detections))
+        return (final_grasps if ans else []), bool(len(detections)), offsets_px
 
     # ------------------------------------------------------------------
     # 场景地图: 决定去哪个观察位姿

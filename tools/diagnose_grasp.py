@@ -99,7 +99,7 @@ def main():
     if not anygrasp_pose:
         print("[anygrasp] 没有候选")
         return 1
-    filt, detected = s._filtering_pose(anygrasp_pose, class_name=args.object, image=rgb)
+    filt, detected, _offsets = s._filtering_pose(anygrasp_pose, class_name=args.object, image=rgb)
     print(f"[anygrasp] 候选 {len(anygrasp_pose)} 个, 框内 {len(filt)} 个, 检出目标={detected}")
     if not filt:
         return 1
