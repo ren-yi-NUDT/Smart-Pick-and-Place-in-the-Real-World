@@ -117,6 +117,8 @@ class PickAndPlaceSkill(Skill):
 
         # ---- Grasp phase ----
         check = False
+        self._obs_ee_world = None      # 观察位姿的末端笛卡尔位姿, 抓取那步顺带填
+        self._obs_js = None            # 观察位姿的关节角 (弧度), 同上
         poses, from_map = self._poses_for(scene, obj, "物体")
         for key in poses:
             self.control_arm(pose_type=key, speed=30)
@@ -234,13 +236,19 @@ class PickAndPlaceSkill(Skill):
 
         if container.lower() in ["desk", "桌子", "table"]:
             cprint("D=================== Desk placement mode detected: placing on desk ===================", "cyan")
-            selected = random.choice(["desk_pose_1", "desk_pose_2", "desk_pose_3"])
-            desk_pose = self.config.get_pose(selected)
-            if desk_pose is None:
-                cprint(f"D=================== Desk task failed: {selected} not found ===================", "red")
+            names = ["desk_pose_1", "desk_pose_2", "desk_pose_3"]
+            random.shuffle(names)
+            selected, traj = None, None
+            for name in names:
+                traj = self._desk_transfer(name)
+                if traj is not None:
+                    selected = name
+                    break
+            if traj is None:
+                cprint("D=== 三个桌位姿孪生都规划不过去, 放弃 —— 不裸发关节角硬走 ===", "red")
                 return False
-            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 7)]
-            self.control_arm(trajectory=np.array([joint_angles]), speed=15)
+            cprint(f"D=== 去 {selected}: 孪生校验过的转移路径, {len(traj)} 个路点 ===", "cyan")
+            self.control_arm(trajectory=traj, speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
             time.sleep(1)
@@ -434,6 +442,53 @@ class PickAndPlaceSkill(Skill):
         """
         return max(poses_world, key=lambda T: abs(T[2, 2]))
 
+    def _desk_transfer(self, name):
+        """从此刻的位姿去桌位姿 ``name`` 的关节轨迹, **孪生校验过**; 不行返回 None。
+
+        桌面模式原来只发一个裸关节角 (``control_arm(trajectory=[joints])``), 臂自己
+        在关节空间插值, 中间会不会扫过桌面没人知道。用户 2026-10-05: "上次重录后
+        机械臂在位姿间转移时夹爪撞到桌面" —— 就是这条路。
+
+        **为什么倒着问孪生**: 孪生的 ``target_pose`` 是笛卡尔的, 而桌位姿在 config 里
+        存的是关节角。正着问 (此刻 -> 桌位姿) 得先有桌位姿的末端笛卡尔坐标, 那要 FK,
+        孪生没这个接口 (它的 ``trajectory_ee[0]`` 只给 current_js 的 FK)。倒着问只要
+        **此刻观察位姿**的末端坐标 —— 那个抓取那一步已经从 ``trajectory_ee[0]`` 里
+        顺带拿到了。孪生给回来的关节轨迹倒过来执行, 就是"此刻 -> 桌位姿", 而且每个
+        路点都是它自己检查过无碰撞的。
+
+        拿不到观察位姿的末端坐标 (没走抓取那步 / 孪生没给) 就返回 None —— 宁可不放,
+        不猜。
+        """
+        obs_ee = getattr(self, "_obs_ee_world", None)
+        obs_js = getattr(self, "_obs_js", None)
+        desk = self.config.get_pose(name)
+        if obs_ee is None or obs_js is None or desk is None:
+            return None
+        desk_js = [desk[f"J{i}"] / 180 * np.pi for i in range(1, 7)]
+
+        # 第一次: 从桌位姿问回观察位姿。这一问既是"够不够得着 + 会不会撞"的判据,
+        # 又顺手把桌位姿的末端笛卡尔位姿换出来了 —— trajectory_ee[0] 就是 current_js
+        # 的 FK, 而孪生没有单独的 FK 接口。
+        back = self._twin_plan(desk_js, obs_ee)
+        if back is None:
+            return None
+
+        # 第二次: 从臂**真正在的**关节角出发规划过去。不能拿第一次的轨迹倒过来用 ——
+        # 那条轨迹的起点是孪生对观察位姿的 IK 解, 跟 config 里录的差 J4 12°、J6 10°
+        # (同一个末端位姿, 不同的关节解), 倒着执行臂会先在原地拧一下手腕。
+        fwd = self._twin_plan(obs_js, back["trajectory_ee"][0])
+        if fwd is None:
+            return None
+        return np.array(fwd["trajectory"]) / np.pi * 180
+
+    def _twin_plan(self, current_js, target_pose):
+        """问孪生要一条 current_js -> target_pose 的轨迹。规划不出来返回 None。"""
+        cnfg = {"target_pose": [list(target_pose)], "current_js": list(current_js),
+                "struct": "rm65"}
+        rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference",
+                                             "type": "trajectory_generation2", "cnfg": cnfg})
+        return rsp["info"] if rsp["value"] else None
+
     def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None):
         """Exact replica of planner.py execute_grasping_twin_js_2."""
         # 张不开就别往下走: 合拢的手指按抓取位姿压下去, 果子被推开, 后面 close 又是一次
@@ -474,6 +529,10 @@ class PickAndPlaceSkill(Skill):
         state = rsp["value"]
 
         if state:
+            # 孪生的 trajectory_ee[0] 就是 current_js (= 观察位姿) 的 FK。白捡的,
+            # 桌面模式校验转移路径要用 (见 _desk_transfer)。
+            self._obs_ee_world = list(rsp["info"]["trajectory_ee"][0])
+            self._obs_js = default_traj_js_rad
             trajectory_grasping = rsp["info"]["trajectory"]
             trajectory_grasping = np.array(copy.deepcopy(trajectory_grasping)) / np.pi * 180
             self.control_arm(trajectory=trajectory_grasping, speed=20)

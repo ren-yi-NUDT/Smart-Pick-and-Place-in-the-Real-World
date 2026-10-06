@@ -180,9 +180,14 @@ def test_a_successful_grasp_stops_walking_the_observation_poses(monkeypatch):
 
     def fake_exec(c, idx=None):
         grasped.append(idx)
+        s._obs_ee_world = [0.0] * 7        # 真实现里由 trajectory_ee[0] 填
+        s._obs_js = [0.0] * 6
         return True
 
     s._execute_grasping_twin_js_2 = fake_exec
+    s._twin = object()
+    s.send_cmd_twin = lambda *a, **k: {"value": 1, "info": {
+        "trajectory": [[0.0] * 6], "trajectory_ee": [[0.0] * 7]}}
     monkeypatch.setattr(scene_map, "load_fresh",
                         lambda *a, **k: _scene(_obj("cucumber", "green", ["grasp2", "grasp3"])))
 
@@ -201,6 +206,62 @@ def test_grasp_logs_how_off_centre_the_candidate_is():
     src = (ROOT / "skills/pick_and_place.py").read_text()
     assert "离框中心" in src
     assert "offsets_px" in src
+
+
+def _desk_skill(send):
+    import numpy as np  # noqa: F401
+    s = _skill()
+    s.config = types.SimpleNamespace(
+        default_traj_js={k: {"J1": 0.0} for k in POSES},
+        get_pose=lambda name: {f"J{i}": 90.0 for i in range(1, 7)},
+    )
+    s._obs_ee_world = [1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0]
+    s._obs_js = [0.5] * 6
+    s._twin = object()
+    s.send_cmd_twin = send
+    return s
+
+
+def test_desk_transfer_is_twin_planned_from_where_the_arm_actually_is():
+    """桌位姿的转移路径必须问过孪生, 而且起点是臂真正在的关节角。
+
+    用户 2026-10-05: "上次重录后机械臂在位姿间转移时夹爪撞到桌面"。桌面模式原来发一个
+    裸关节角, 臂自己在关节空间插值, 中间会不会扫到桌面没人知道。
+
+    两问: ① 桌位姿 -> 观察位姿 (既是判据, 又顺手把桌位姿的 FK 换出来 —— 孪生的
+    trajectory_ee[0] 就是 current_js 的 FK, 它没有单独的 FK 接口); ② 从观察位姿的
+    **录下来的**关节角规划过去。第 ② 问不能用第 ① 问的轨迹倒过来顶替: 那条轨迹的
+    起点是孪生对观察位姿的 IK 解, 实测跟录下来的差 J4 12°、J6 10°。
+    """
+    import numpy as np
+    calls = []
+
+    def fake_send(twin, data):
+        calls.append(dict(data["cnfg"]))
+        n = len(calls)
+        return {"value": 1, "info": {"trajectory": [[float(n)] * 6],
+                                     "trajectory_ee": [[9.0, 9.0, 9.0, 0, 0, 0, 1]]}}
+
+    traj = _desk_skill(fake_send)._desk_transfer("desk_pose_1")
+    assert len(calls) == 2, "得问两次"
+    assert calls[0]["target_pose"] == [[1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0]], \
+        "第①问的目标是观察位姿的末端位姿"
+    assert abs(calls[0]["current_js"][0] - np.pi / 2) < 1e-9, \
+        "第①问的起点是桌位姿的关节角 (弧度)"
+    assert calls[1]["current_js"] == [0.5] * 6, "第②问必须从录下来的观察位姿关节角出发"
+    assert calls[1]["target_pose"] == [[9.0, 9.0, 9.0, 0, 0, 0, 1]], \
+        "第②问的目标是第①问换出来的桌位姿 FK"
+    assert abs(traj[0][0] - np.degrees(2.0)) < 1e-9, "执行的得是第②问那条轨迹, 换成度"
+
+
+def test_desk_transfer_refuses_rather_than_guessing():
+    """孪生不给规划 / 拿不到观察位姿的末端位姿或关节角, 都返回 None —— 宁可不放, 不猜。"""
+    s = _desk_skill(lambda *a, **k: {"value": 0, "info": {}})
+    assert s._desk_transfer("desk_pose_1") is None
+    for missing in ("_obs_ee_world", "_obs_js"):
+        s = _desk_skill(lambda *a, **k: {"value": 1, "info": {}})
+        setattr(s, missing, None)
+        assert s._desk_transfer("desk_pose_1") is None, missing
 
 
 def test_pre_grasp_falls_back_to_a_lower_lift():
