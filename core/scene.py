@@ -14,7 +14,7 @@ import time
 import numpy as np
 
 from core.config import YOLO_CONF_SCAN
-from core.perception import dominant_color_name
+from core.perception import _well_framed, dominant_color_name
 from core.transforms import pixel_to_camera_point2
 
 SCENE_PATH = "./log/scene.json"
@@ -165,14 +165,26 @@ def parse_target(phrase, color_vocab=None, noun_vocab=None):
     return None, phrase
 
 
-def detect_scene(perception, rgb, conf=YOLO_CONF_SCAN):
+def detect_scene(perception, rgb, conf=YOLO_CONF_SCAN, framed_only=False):
     """跑一遍**建图用的那套**检测, 返回 ``[(名字, 颜色, 框, 置信度), ...]``。
 
     建图和"现场核对地图"必须用同一套判据。建图这边是 YOLO 认 SCAN_VOCAB 里的名词 +
     颜色从框内像素取; 核对若换成 ``detect_container`` 就会多一层 ``_well_framed``
     过滤, 把"框被画面边缘切掉"误报成"东西被挪了", 于是停下来问一个不存在的问题。
+
+    ``framed_only=True`` (建图用): 贴画面边缘的框不算一次目击。框被切掉时框中心不是
+    物体中心 (见 core/perception.py:_well_framed), 记进地图就是一个偏心的坐标; 更要命
+    的是它会污染 ``seen_from`` —— 2026-10-06 复扫, 桃子在地图里是
+    ``seen_from=['grasp2','grasp3']``, 而 grasp2 上桃子的框是 (522,388,640,480), 右边
+    下边都切在画面外。``_poses_for`` 取 ``seen_from[0]``, 于是"最先看见它"的那个位姿
+    恰好是只看到一角的那张, 抓取就照一个偏心的中心下爪。
+
+    核对那边**不能**跟着严: 那儿只要确认东西"还在", 坐标本来就取地图记的, 框被画面
+    切掉不算"东西被挪了"。
     """
     detections = perception.detect_objects(rgb, SCAN_VOCAB, conf=conf)
+    if framed_only:
+        detections = [d for d in detections if _well_framed(d, rgb.shape)]
     return [(SCAN_VOCAB[int(d[5])], dominant_color_name(rgb, d), d[:4], d[4])
             for d in detections]
 

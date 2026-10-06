@@ -86,15 +86,21 @@ def test_flip_is_idempotent_on_edges(j4):
 # ---------------------------------------------------------------------------
 # 翻转的性质
 # ---------------------------------------------------------------------------
-def test_grasp1_flip_is_exact():
-    """翻转就是 (J4+180, -J5, J6+180), J1-J3 逐字不动。"""
-    got = wrist_headroom_pose(POSES["grasp1"])
-    assert got["J1"] == POSES["grasp1"]["J1"]
-    assert got["J2"] == POSES["grasp1"]["J2"]
-    assert got["J3"] == POSES["grasp1"]["J3"]
+def test_flip_is_exact_and_idempotent():
+    """翻转就是 (J4+180, -J5, J6+180), J1-J3 逐字不动; 已在余量支路的原样返回。
+
+    用合成的老支路位姿, 不钉死当前录值 —— 位姿是重录的常客, 钉死就会一直挂。
+    """
+    old = {"J1": 26.559, "J2": -6.933, "J3": 90.664,
+           "J4": -168.972, "J5": -69.998, "J6": -21.2}
+    got = wrist_headroom_pose(old)
+    assert (got["J1"], got["J2"], got["J3"]) == (old["J1"], old["J2"], old["J3"])
     assert got["J4"] == pytest.approx(11.028)
     assert got["J5"] == pytest.approx(69.998)
     assert got["J6"] == pytest.approx(158.8)
+    assert wrist_headroom_pose(got) == got          # 幂等: 早退条件 abs(J4)<=90
+    # 2026-10-06 起录制工具直接写余量支路, 所以翻转对录下来的位姿是空操作
+    assert wrist_headroom_pose(POSES["grasp1"]) == POSES["grasp1"]
 
 
 @pytest.mark.parametrize("name", sorted(POSES))
@@ -115,9 +121,24 @@ def test_flip_preserves_every_pairwise_wrist_distance():
     """全表一起翻 = 等距重标号, 所以一秒都不多走。这是"整表一起翻"的全部理由。
 
     J4/J6 的差逐字不变, J5 的差只变号 —— 所以比的是绝对值。
+
+    喂**同一支路**的一张表: 翻转是幂等的 (abs(J4)<=90 早退), 所以只有全表都在老支路时
+    "一起翻"才等于等距重标号。2026-10-06 起录的新位姿本来就在余量支路, 翻转对它们是
+    空操作 —— 这时该保证的是 Config 加载后**全表落在同一支路**, 那是
+    test_config_flips_the_whole_table 管的事。
     """
-    for a, b in itertools.combinations(sorted(POSES), 2):
-        pa, pb = POSES[a], POSES[b]
+    table = {
+        "grasp1": {"J1": 26.559, "J2": -6.933, "J3": 90.664,
+                   "J4": -168.972, "J5": -69.998, "J6": -21.2},
+        "grasp2": {"J1": 6.973, "J2": -1.886, "J3": 91.234,
+                   "J4": -171.414, "J5": -57.825, "J6": -2.036},
+        "grasp3": {"J1": -22.285, "J2": -7.156, "J3": 88.132,
+                   "J4": -163.832, "J5": -66.365, "J6": 64.28},
+        "grasp4": {"J1": -49.989, "J2": -7.029, "J3": 83.869,
+                   "J4": -172.463, "J5": -77.839, "J6": -61.979},
+    }
+    for a, b in itertools.combinations(sorted(table), 2):
+        pa, pb = table[a], table[b]
         fa, fb = wrist_headroom_pose(pa), wrist_headroom_pose(pb)
         for j in ("J4", "J5", "J6"):
             before = abs(fold(pa[j] - pb[j]))

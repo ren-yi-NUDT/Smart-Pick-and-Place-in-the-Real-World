@@ -32,6 +32,12 @@ from core.config import (
 from core.transforms import graspcam2pixel
 
 
+# 框离画面边缘至少这么多像素才算"完整"。严格 >0/<w 挡不住浮点噪声: 2026-10-06 实测
+# grasp2 的桃子框距右边 0.14px、grasp4 的距下边 0.05px, 都是被切掉的, 却全都 >0 通过了;
+# 而完整框实测离边至少 50px。判据落在这两个数量级中间, 取 3。
+FRAME_MARGIN_PX = 3
+
+
 def _well_framed(box, shape) -> bool:
     """容器框必须完整落在画面内, 且不能小到只剩一条边。
 
@@ -39,11 +45,14 @@ def _well_framed(box, shape) -> bool:
     [341, 0, 576, 21] —— 21px 高、贴着上边缘, 盘子 95% 在画面外。取框中心 (458, 10)
     算出来的"盘子中心"落在盘子远端边缘**之外**约 20cm, 机械臂就在那里松手, 火龙果落在
     盘子旁边的桌面上。宁可这一帧不用 (换下一个观察位姿, 或回退场景地图)。
+
+    "完整"要留 FRAME_MARGIN_PX 的边距, 不是严格大于 0 —— 理由见那个常量。
     """
     x1, y1, x2, y2 = box[:4]
     h, w = shape[:2]
+    m = FRAME_MARGIN_PX
     return (
-        x1 > 0 and y1 > 0 and x2 < w and y2 < h
+        x1 >= m and y1 >= m and x2 <= w - m and y2 <= h - m
         and (x2 - x1) >= MIN_CONTAINER_BOX_PX
         and (y2 - y1) >= MIN_CONTAINER_BOX_PX
     )

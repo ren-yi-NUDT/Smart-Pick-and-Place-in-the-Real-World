@@ -36,7 +36,7 @@ def test_the_box_that_put_the_fruit_beside_the_plate_is_rejected():
 
 @pytest.mark.parametrize("box", [
     [277, 139, 498, 380],       # 完整在画面里的蓝盘子
-    [1, 1, 200, 200],           # 贴边但没被切
+    [5, 5, 200, 200],           # 离边 5px, 留够了边距
 ])
 def test_a_fully_visible_box_passes(box):
     assert _well_framed(box, SHAPE)
@@ -48,6 +48,12 @@ def test_a_fully_visible_box_passes(box):
     [100, 300, 300, 480],       # 贴下
     [100, 0, 300, 200],         # 贴上
     [300, 200, 320, 220],       # 太小
+    [1, 1, 200, 200],           # 只离边 1px —— 跟 0px 分不开, 按切掉算
+    # 2026-10-06 实测的四个: 严格 >0 全放过去了, 但都是被切掉的
+    [503.01, 315.51, 639.86, 415.74],   # grasp2 桃子, 距右 0.14px
+    [0.11, 145.56, 471.38, 323.06],     # grasp2 粉盘子, 距左 0.11px
+    [39.31, 381.80, 529.90, 479.95],    # grasp4 桃子, 距下 0.05px
+    [173.94, 0.02, 579.80, 378.81],     # grasp4 假 bottle, 距上 0.02px
 ])
 def test_boxes_touching_an_edge_or_too_small_are_rejected(box):
     assert not _well_framed(box, SHAPE)

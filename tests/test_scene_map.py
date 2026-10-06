@@ -74,6 +74,22 @@ def test_detect_scene_maps_class_index_to_vocab_name(monkeypatch):
     assert scene.detect_scene(_P(), None) == [("plate", "blue", [1, 2, 3, 4], 0.5)]
 
 
+def test_framed_only_drops_boxes_clipped_by_the_frame(monkeypatch):
+    """建图只收完整落在画面里的框。贴边的框中心不是物体中心, 记进地图是个偏心坐标,
+    而且会让 seen_from[0] 变成"只看到一角"的那张 —— _poses_for 就照它去抓。"""
+    import numpy as np
+
+    class _P:
+        def detect_objects(self, rgb, names, conf=None):
+            return [[10, 20, 100, 200, 0.9, scene.SCAN_VOCAB.index("plate")],      # 完整
+                    [522, 388, 640, 480, 0.6, scene.SCAN_VOCAB.index("apple")]]    # 贴右+下
+
+    monkeypatch.setattr(scene, "dominant_color_name", lambda rgb, d: "blue")
+    rgb = np.zeros((480, 640, 3), dtype=np.uint8)
+    assert [d[0] for d in scene.detect_scene(_P(), rgb)] == ["plate", "apple"]
+    assert [d[0] for d in scene.detect_scene(_P(), rgb, framed_only=True)] == ["plate"]
+
+
 def test_look_around_refreshes_the_transform_per_pose():
     """T_base_to_cam 随臂动, 每个位姿都得重新取 —— 沿用上一个位姿会让世界坐标全错。"""
     src = (ROOT / "skills/look_around.py").read_text()

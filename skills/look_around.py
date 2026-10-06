@@ -54,7 +54,7 @@ class LookAroundSkill(Skill):
             return self.T_base_to_cam
 
         def detect(rgb):
-            return scene_map.detect_scene(self.perception, rgb)
+            return scene_map.detect_scene(self.perception, rgb, framed_only=True)
 
         entries = scene_map.scan_workspace(move_to_pose, capture, transform, detect, poses)
         objects = scene_map.merge(entries)
