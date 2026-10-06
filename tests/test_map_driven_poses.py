@@ -49,21 +49,25 @@ def _obj(name, color, seen_from, conf=0.9):
 
 
 # ---------------------------------------------------------------------------
-# _poses_for: 地图命中只去一个位姿
+# _poses_for: 地图命中就去看见过它的那些位姿, 按 seen_from 的顺序
 # ---------------------------------------------------------------------------
-def test_map_hit_goes_to_the_first_pose_that_saw_it():
-    """seen_from 的顺序就是"最先看见它"的顺序 —— 只去第一个, 走路最少。"""
+def test_map_hit_goes_to_every_pose_that_saw_it_first_one_first():
+    """seen_from 的顺序就是"最先看见它"的顺序 —— 按顺序试, 第一个能用就停。
+
+    不能只去第一个: "看得见"不等于"抓得着"。2026-10-06 桃子地图命中 grasp2, YOLO
+    在那儿确实检出桃子, 但 AnyGrasp 的候选全落在旁边的黄瓜上, 一个都不在桃子上。
+    """
     s = _skill()
     poses, from_map = s._poses_for(_scene(_obj("plate", "blue", ["grasp4", "grasp2"])),
                                    "blue plate", "容器")
-    assert poses == ["grasp4"], poses
+    assert poses == ["grasp4", "grasp2"], poses
     assert from_map is True
 
 
-def test_map_hit_keeps_only_one_pose_even_with_many():
+def test_map_hit_keeps_every_pose_that_saw_it():
     s = _skill()
     poses, _ = s._poses_for(_scene(_obj("plate", "blue", POSES)), "blue plate", "容器")
-    assert poses == ["grasp1"], poses
+    assert poses == POSES, poses
 
 
 def test_color_decides_between_two_plates():
@@ -97,44 +101,6 @@ def test_colored_phrase_that_yolo_cannot_split_still_looks_up():
     poses, from_map = s._poses_for(_scene(_obj("red fruit", None, ["grasp3"])),
                                    "red fruit", "物体")
     assert poses == ["grasp3"] and from_map is True
-
-
-# ---------------------------------------------------------------------------
-# _map_still_holds: 现场核对
-# ---------------------------------------------------------------------------
-def _detections(*pairs):
-    """detect_scene 的返回格式: (名字, 颜色, 框, 置信度) 四元组。"""
-    return [(n, c, [0, 0, 1, 1], 0.5) for n, c in pairs]
-
-
-@pytest.fixture
-def fake_detect(monkeypatch):
-    """替掉建图那套检测, 让核对逻辑可以离线跑。"""
-    def install(rows):
-        monkeypatch.setattr(scene_map, "detect_scene",
-                            lambda perc, rgb, conf=None: _detections(*rows))
-    return install
-
-
-def test_map_still_holds_when_color_matches(fake_detect):
-    fake_detect([("plate", "blue")])
-    assert _skill()._map_still_holds(None, "blue plate", None) is True
-
-
-def test_map_still_holds_rejects_the_other_plate(fake_detect):
-    """现场只看见粉盘子 —— 地图说的蓝盘子就是不见了, 该停。"""
-    fake_detect([("plate", "pink")])
-    assert _skill()._map_still_holds(None, "blue plate", None) is False
-
-
-def test_map_still_holds_ignores_color_when_phrase_has_none(fake_detect):
-    fake_detect([("plate", "pink")])
-    assert _skill()._map_still_holds(None, "plate", None) is True
-
-
-def test_map_still_holds_rejects_a_different_object(fake_detect):
-    fake_detect([("cucumber", "green")])
-    assert _skill()._map_still_holds(None, "plum", None) is False
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +152,55 @@ def test_grasp_retries_candidates_but_is_capped():
     assert "Checking pose:" not in src
     assert "order[:MAX_GRASP_CANDIDATES]" in src
     assert 1 < MAX_GRASP_CANDIDATES <= 5        # 1 = 回到只试一个; 太大 = 反复开合
+
+
+def test_pre_grasp_falls_back_to_a_lower_lift():
+    """预抓取默认抬 4cm, 够不着时降到 1cm。
+
+    link_6 比指尖高 172mm, 所以预抓取抬多高, 腕部半径就多出去多少。2026-10-06 桃子:
+    指尖半径 0.439m, 抬 4cm 时腕部 0.637m > 实测 0.62m 上限 → 孪生判不可达, 而同一个
+    候选的执行位姿只有 0.609m, 残差 0.3mm。降到 1cm 后腕部 0.615m, 进得去。
+    """
+    import numpy as np
+    from skills.pick_and_place import PRE_GRASP_OFFSETS, _pre_grasp_pose
+
+    assert PRE_GRASP_OFFSETS[0] == (0.02, 0.02), "默认档不能动: 4cm 是给飞行段留的余量"
+
+    grasp = np.eye(4)
+    grasp[:3, :3] = np.diag([1.0, -1.0, -1.0])      # 接近轴朝下 (竖直下爪)
+    grasp[:3, 3] = [-0.3965, 0.1872, 0.2493]        # 桃子那次的执行位姿
+    lift = lambda off: _pre_grasp_pose(grasp, *off, np.eye(4))[2, 3] - grasp[2, 3]
+    assert abs(lift(PRE_GRASP_OFFSETS[0]) - 0.04) < 1e-9
+
+    r_xy = float(np.hypot(-0.3965, 0.1872))
+    wrist_r = lambda off: float(np.hypot(r_xy, lift(off) + 0.2493 + 0.172))
+    assert wrist_r(PRE_GRASP_OFFSETS[0]) > 0.62, "默认档在桃子这儿就是够不着"
+    assert wrist_r(PRE_GRASP_OFFSETS[-1]) <= 0.62, "兜底档得真进得去"
+
+
+def test_placement_tilts_pull_the_wrist_back_toward_the_base():
+    """容器远的时候竖直末端朝向够不着 —— 倾倒把腕部沿容器方向收回来。
+
+    腕部比指尖远 172mm (实测: 末端竖直时 link_6 正好在指尖上方 172mm), 所以竖直
+    朝下 = 把腕部往外多推 172mm。2026-10-06 蓝盘子 xy 半径 0.587: 竖直 delta 0.165
+    不可达, 朝背离容器一侧倒 45° 后 delta 0.0001 精确命中。
+    """
+    import numpy as np
+    from scipy.spatial.transform import Rotation as R
+    from skills.pick_and_place import PLACEMENT_TILTS, _placement_orn_candidates
+
+    base = R.from_euler("z", 30, degrees=True).as_matrix()   # 容器自身朝向, 随便一个
+    plate_xy = np.array([-0.364, 0.460])                     # 蓝盘子
+
+    cands = _placement_orn_candidates(base, plate_xy)
+    assert len(cands) == 1 + len(PLACEMENT_TILTS)
+    assert np.allclose(cands[0], base), "第一档必须还是原样, 近处容器行为不能变"
+    assert all(c[2, 2] < -0.4 for c in cands[1:]), "倾倒档的接近轴得朝下"
+
+    offset = np.array([0.0, 0.0, -0.172])                    # 指尖 -> link_6
+    wrist_xy = lambda rot: np.linalg.norm((plate_xy + (rot @ offset)[:2]))
+    assert abs(wrist_xy(np.diag([1.0, -1.0, -1.0])) - 0.587) < 0.01   # 竖直时 0.587
+    assert wrist_xy(cands[-1]) < 0.50, f"倒 60° 没把腕部收回来: {wrist_xy(cands[-1]):.4f}"
 
 
 def test_grasp_picks_most_vertical_candidate():

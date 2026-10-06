@@ -16,6 +16,17 @@ GRIPPER_HOLD_FORCE = 40
 # 定成 3 而不是 1 的理由见 run() 里候选循环上方的注释。
 MAX_GRASP_CANDIDATES = 3
 
+# 预抓取位姿相对抓取点的抬法, 从高到低试: 每项是 (沿接近轴后退, 世界Z再抬)。
+#
+# 第一档是原来那一档 (两笔在竖直下爪时叠成 4cm), 是给"从观察位姿飞过来"留的余量,
+# 不能动。但它在够不太着的地方会要命: link_6 比指尖高 172mm, 预抓取抬多高, 腕部半径
+# 就多出去多少。2026-10-06 桃子 (指尖半径 0.439m): 抬 4cm 的预抓取位姿腕部半径
+# 0.637m, 孪生判不可达 (差 15.8mm); 同一个候选的执行位姿腕部半径 0.609m, 残差 0.3mm。
+# 差的不是抓取点, 就是这 4cm。
+#
+# 后面几档是纯计算的重试 (臂不动, 只是再问一次孪生), 所以矮一档没有代价。
+PRE_GRASP_OFFSETS = [(0.02, 0.02), (0.005, 0.005)]
+
 # 放容器时的末端朝向备选。只给一个写死的四元数不够用: 实测同一个盘子中心点,
 # 默认朝向 IK 残差 66mm (够不着), 换成 place2 的末端朝向 0.1mm 精确命中 —— 卡住
 # 的是姿态不是位置。这三个是机械臂自己录制的"放下物体"位姿的末端朝向。
@@ -26,6 +37,44 @@ PLACEMENT_ORN_FALLBACKS = [
     [0.2197, -0.7229, 0.0792, 0.6503],  # place1
     [0.0094, -0.8820, 0.0341, 0.4698],  # desk_pose_3
 ]
+
+
+def _pre_grasp_pose(grasp_world, along, up, T_hand_effector_to_arm_endlink):
+    """抓取点 -> 预抓取位姿 (末端 link_6 系): 沿接近轴后退 ``along``, 再在世界 Z 上抬 ``up``。"""
+    basic_mat = np.eye(4)
+    basic_mat[2, 3] -= along
+    pre = grasp_world @ basic_mat
+    pre[2, 3] += up
+    return pre @ T_hand_effector_to_arm_endlink
+
+
+# 放置时"接近轴朝下"的末端朝向沿"背离容器"方向倾倒这几档 (角度单位: 度)。
+#
+# 腕部比指尖远 172mm, 竖直朝下就等于把腕部往外多推 172mm, 容器一远就够不着。
+# 朝背离容器一侧倾倒, 腕部就沿容器方向收回底座这边。实测蓝盘子 (xy 半径 0.587,
+# 落点 z=0.18): 竖直 delta 0.165 不可达, 倒 45° 后 delta 0.0001 精确命中。
+#
+# 角度只能挨个试, 不能单调扫 —— 孪生的 IK 分叉是离散的, 差一点就掉到另一支上:
+# 朝下的姿势里 0/-15/-30 被拒而 -45/-60 可行, 换成抓取位姿那个朝向基准又变成
+# 只有 -30 可行。所以两族基准都留着, 角度全列上。
+PLACEMENT_TILTS = (-15, -30, -45, -60)
+
+
+def _placement_orn_candidates(base_rot, container_xy):
+    """放置末端朝向备选: 容器自身朝向 + "接近轴朝下"沿背离容器方向倾倒的几档。
+
+    末端绕**自身接近轴**的偏航角不影响结果 —— 实测 0/90/180/270 四组 delta 完全
+    一样, 所以朝下的基准姿势随便取一个。
+    """
+    cands = [base_rot]
+    perp = np.array([-container_xy[1], container_xy[0], 0.0])
+    norm = np.linalg.norm(perp)
+    if norm < 1e-6:                     # 容器就在底座正上方, 没有"背离方向"可言
+        return cands
+    perp /= norm
+    down = R.from_euler("x", 180, degrees=True).as_matrix()      # 接近轴朝下
+    cands += [R.from_rotvec(perp * np.radians(t)).as_matrix() @ down for t in PLACEMENT_TILTS]
+    return cands
 
 
 @register_skill("pick_and_place")
@@ -88,9 +137,11 @@ class PickAndPlaceSkill(Skill):
                 continue
 
             filtering_grasping_pose, detected = self._filtering_pose(anygrasp_pose, class_name=obj, image=self.rgb)
-            # 地图说这个位姿看得见目标, 现场却什么都没检出 —— 东西被挪了, 或者地图过期了。
-            # 停下问人, 不换下一个位姿 (那是"重复移动", 而且会把地图错了这件事悄悄吃掉)。
-            if from_map and not detected:
+            # 地图说看得见、现场什么都认不出 —— 东西被挪了, 或者地图过期了。停下问人,
+            # 不猜不换位姿 (换了就把"地图错了"这个信号悄悄吃掉)。
+            # 只在**最后一个**位姿上判: seen_from 可能有好几个位姿, 前面那个视角差一点、
+            # 认不出目标很正常, 那不算地图错了。
+            if from_map and not detected and key == poses[-1]:
                 self._stop_map_mismatch(obj, key, scene)
                 return False
             if not filtering_grasping_pose:
@@ -196,12 +247,14 @@ class PickAndPlaceSkill(Skill):
             cprint("P=================== 4. Generate the placing pose ===================", "cyan")
 
             if from_map:
-                # 地图说这个位姿看得见容器, 现场必须也认得出 —— 认不出就停下问人。
-                # 位置直接用地图记的世界坐标: 现场那个框可能被画面切掉 (_well_framed 会
-                # 丢掉它, 实测 grasp3 看蓝盘子只框到 21px 高的一条), 地图坐标反而更稳。
-                if not self._map_still_holds(scene, container, self.rgb):
-                    self._stop_map_mismatch(container, key, scene)
-                    return False
+                # 位置直接用地图记的世界坐标 —— 现场那个框可能被画面切掉 (_well_framed
+                # 会丢掉它, 实测 grasp3 看蓝盘子只框到 21px 高的一条), 地图坐标反而更稳。
+                #
+                # 这里**不能**再核对"现场还认得出容器吗"。相机在腕上, 手里一有东西它就
+                # 正堵在镜头前: 2026-10-06 抓完桃子到 grasp4, log/rgb.png 整个画面就是
+                # 那颗桃子, 蓝盘子一点都看不见。物体越大越堵, 也就是**正常情况**必然触发,
+                # 而触发时臂正夹着东西悬在半空 —— 最不该停的时刻。而且它想防的场景 (容器
+                # 被挪走了) 同样被挡住, 根本防不住。地图过期由 SCENE_MAP_TTL_S 兜。
                 placing_pos_world = self._placing_position_from_scene(container, scene)
             else:
                 placing_pos_world = self._get_placing_position(class_name=container, image=self.rgb)
@@ -274,8 +327,15 @@ class PickAndPlaceSkill(Skill):
     def _poses_for(self, scene, target, what):
         """该去哪些观察位姿看 ``target``。返回 ``(位姿列表, 是不是地图选的)``。
 
-        地图里有它 → **只去最先看见它的那个** (``seen_from[0]``, 走路最少)。
+        地图里有它 → 去**看见过它的那些**位姿, 按 seen_from 的顺序 (最先看见的在前)。
         地图里没有 → 回退到全部观察位姿 (保底, 但把话说清楚)。
+
+        为什么不是一个: ``seen_from`` 记的是"从这儿**看得见**它", 而看得见不等于
+        **抓得着**。2026-10-06 桃子实测: 地图命中的是 grasp2, YOLO 在 grasp2 上确实
+        检出了桃子 (框 (495,289)-(598,395), conf 0.85, 画面对), 但 AnyGrasp 在那一帧
+        只给出 9 个候选, **全部落在中间的黄瓜上**, 桃子一个都没有 —— 桃子当时贴在画面
+        右沿、掠射角, 点云根本立不起来。位姿换到 grasp3 立刻就有 15 个候选落在桃子上。
+        这种事只有走过去才知道, 所以按顺序试, 第一个能出候选就停 (常态, 不多走一步)。
         """
         all_poses = [k for k in self.config.default_traj_js if "grasp" in k]
         color, name = scene_map.parse_target(target)
@@ -288,8 +348,8 @@ class PickAndPlaceSkill(Skill):
             cprint(f"[map] {what} '{target}' 的记录没带观察位姿, 回退到逐个观察位姿", "yellow")
             return all_poses, False
         cprint(f"[map] {what} '{target}' 命中 {hit['color'] or '?'} {hit['name']} "
-               f"(扫描于 {scene.get('scanned_at')}), 只去 {poses[0]}", "yellow")
-        return poses[:1], True
+               f"(扫描于 {scene.get('scanned_at')}), 依次去 {poses}", "yellow")
+        return poses, True
 
     def _stop_map_mismatch(self, target, pose, scene):
         """地图说看得见、现场看不见 —— 停下问人, 不猜、不回退、不换下一个位姿。
@@ -300,19 +360,6 @@ class PickAndPlaceSkill(Skill):
         cprint(f"[map] 地图说 '{target}' 在 {pose} 看得见 (扫描于 {scene.get('scanned_at')}), "
                f"但现场在 {pose} 没检出它。是东西被挪了, 还是地图过期了? "
                f"停下, 请你确认。", "red")
-
-    def _map_still_holds(self, scene, target, rgb):
-        """现场这一帧还认得出地图里那件东西吗。
-
-        用**建图同一套检测**核对 (见 core/scene.py:detect_scene) —— 换成容器的
-        detect_container 会多一层"框被切掉就丢掉"的过滤, 于是画面边缘的框会被
-        误报成"东西被挪了"。
-        """
-        color, name = scene_map.parse_target(target)
-        for got_name, got_color, _box, _conf in scene_map.detect_scene(self.perception, rgb):
-            if got_name == name and (color is None or got_color == color):
-                return True
-        return False
 
     def _transform_anygrasp_pose(self, anygrasp_pose, _visualization=True, return_labels=False):
         try:
@@ -378,33 +425,35 @@ class PickAndPlaceSkill(Skill):
         if self.control_hand(cmd_type="open").get("opened") is False:
             cprint("=================== 夹爪张不开, 放弃这次抓取 ===================", "red")
             return False
-        basic_mat = np.eye(4)
-        basic_mat[2, 3] -= 0.02
-        preparasion_grasping_pos = grasping_pose_world_hand @ basic_mat
-        preparasion_grasping_pos[2, 3] += 0.02
-        preparasion_grasping_pos = preparasion_grasping_pos @ self.T_hand_effector_to_arm_endlink
-        preparasion_grasping_pos_position = preparasion_grasping_pos[:3, 3]
-        preparasion_grasping_pos_orientation = R.from_matrix(preparasion_grasping_pos[:3, :3]).as_quat()
-
-        basic_mat = np.eye(4)
-        execution_grasping_pos = grasping_pose_world_hand @ basic_mat
+        execution_grasping_pos = grasping_pose_world_hand.copy()
         execution_grasping_pos[2, 3] = max(execution_grasping_pos[2, 3], 0.042)
         execution_grasping_pos = execution_grasping_pos @ self.T_hand_effector_to_arm_endlink
         execution_grasping_pos_position = execution_grasping_pos[:3, 3]
         execution_grasping_pos_orientation = R.from_matrix(execution_grasping_pos[:3, :3]).as_quat()
 
         default_traj_js_rad = [data / 180 * np.pi for data in self.config.default_traj_js[idx].values()]
-        cnfg = {
-            "target_pose": [
-                [preparasion_grasping_pos_position[0], preparasion_grasping_pos_position[1], preparasion_grasping_pos_position[2],
-                 preparasion_grasping_pos_orientation[0], preparasion_grasping_pos_orientation[1], preparasion_grasping_pos_orientation[2], preparasion_grasping_pos_orientation[3]],
-                [execution_grasping_pos_position[0], execution_grasping_pos_position[1], execution_grasping_pos_position[2],
-                 execution_grasping_pos_orientation[0], execution_grasping_pos_orientation[1], execution_grasping_pos_orientation[2], execution_grasping_pos_orientation[3]],
-            ],
-            "current_js": default_traj_js_rad,
-            "struct": "rm65",
-        }
-        rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
+        rsp = None
+        for along, up in PRE_GRASP_OFFSETS:
+            pre = _pre_grasp_pose(grasping_pose_world_hand, along, up,
+                                  self.T_hand_effector_to_arm_endlink)
+            pre_pos = pre[:3, 3]
+            pre_orn = R.from_matrix(pre[:3, :3]).as_quat()
+            cnfg = {
+                "target_pose": [
+                    [pre_pos[0], pre_pos[1], pre_pos[2],
+                     pre_orn[0], pre_orn[1], pre_orn[2], pre_orn[3]],
+                    [execution_grasping_pos_position[0], execution_grasping_pos_position[1], execution_grasping_pos_position[2],
+                     execution_grasping_pos_orientation[0], execution_grasping_pos_orientation[1], execution_grasping_pos_orientation[2], execution_grasping_pos_orientation[3]],
+                ],
+                "current_js": default_traj_js_rad,
+                "struct": "rm65",
+            }
+            rsp = self.send_cmd_twin(self.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
+            if rsp["value"]:
+                if (along, up) != PRE_GRASP_OFFSETS[0]:
+                    cprint(f"=================== 预抓取抬 {along + up:.3f}m 才够得着 "
+                           f"(默认 0.04m) ===================", "yellow")
+                break
         state = rsp["value"]
 
         if state:
@@ -484,7 +533,8 @@ class PickAndPlaceSkill(Skill):
         臂恰好背对着就会失败, 尽管它 10 分钟前才看过。地图就是为这个存的, 而且它给的
         是世界坐标, 不受当前视角影响 (现场框被画面切掉时反而更准)。
 
-        地图是快照, 所以调用方必须先确认现场还看得见它 (见 _map_still_holds)。
+        地图是快照, 但**放的时候没法现场核对**: 手里夹着东西, 相机在腕上, 镜头被
+        堵死。所以这里直接信地图, 过期由 SCENE_MAP_TTL_S 兜 (理由详见调用处)。
         """
         if not scene:
             return None
@@ -522,7 +572,10 @@ class PickAndPlaceSkill(Skill):
         # 容器自身朝向优先 (原来的行为), 不行再换备选朝向。位置随朝向变 ——
         # T_hand_effector_to_arm_endlink 是纯平移, 但平移方向跟着朝向转, 所以每个
         # 候选都得重新算一遍 pos。
+        # 容器自身朝向优先 (原来的行为), 不行再换备选朝向, 最后才试倾倒档 —— 倾倒档
+        # 是给"容器离底座太远"兜底的, 近处第一个朝向就成了, 一次都不会多问。
         orns = [base[:3, :3]] + [R.from_quat(q).as_matrix() for q in PLACEMENT_ORN_FALLBACKS]
+        orns += _placement_orn_candidates(base[:3, :3], base[:2, 3])[1:]
         for i, rot in enumerate(orns):
             T = base.copy()
             T[:3, :3] = rot

@@ -28,6 +28,27 @@ def test_merge_averages_same_object_and_keeps_distinct_ones():
     assert pink["conf"] == 0.92, "置信度取高值, 不是平均"
 
 
+def test_merge_ignores_color_so_one_object_stays_one_entry():
+    """同一个东西换个视角被叫成另一个颜色, 不能变成两条记录。
+
+    2026-10-06 桃子实测: grasp2 看是 pink apple (0.88), grasp3 看是 yellow apple
+    (0.85), 坐标差 19mm。分开成两条后, find 取置信度高的那条 (grasp2), 而那条只带
+    grasp2 一个观察位姿, 偏偏 grasp2 上 AnyGrasp 给不出落在桃子上的候选 —— 抓取失败。
+    """
+    merged = scene.merge([
+        _e("apple", "pink", [-0.382, 0.167, 0.058], 0.88, "grasp2"),
+        _e("apple", "yellow", [-0.390, 0.184, 0.067], 0.85, "grasp3"),
+    ])
+    assert len(merged) == 1, merged
+    assert merged[0]["seen_from"] == ["grasp2", "grasp3"]
+    assert merged[0]["color"] == "pink", "颜色跟看得最准的那次走"
+    # 同名但离得远的仍然是两样东西
+    assert len(scene.merge([
+        _e("apple", "pink", [-0.382, 0.167, 0.058], 0.88, "grasp2"),
+        _e("apple", "yellow", [-0.500, -0.300, 0.060], 0.85, "grasp1"),
+    ])) == 2
+
+
 def test_find_requires_color_match_and_survives_missing_scene():
     merged = scene.merge([_e("plate", "pink", [-0.50, -0.36, 0.02], 0.92, "grasp1")])
     s = {"objects": merged}

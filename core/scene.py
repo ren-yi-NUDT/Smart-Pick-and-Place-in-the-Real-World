@@ -65,30 +65,39 @@ def in_workspace(world, max_radius=MAX_RADIUS_M):
 
 
 def merge(entries, tol=MERGE_TOL_M):
-    """把多个视角的记录并成一份; 同一个 (名字, 颜色) 且位置相近的取平均。
+    """把多个视角的记录并成一份; **同名**且位置相近的取平均。
 
     工作台外的记录直接丢掉 —— 那些是背景上的假框, 留着会让人按地图去够一个
     根本不在桌上的坐标。
+
+    判据里**没有颜色**。颜色是每一帧现从框内像素算的, 同一个东西换个视角就会被叫成
+    另一个颜色 —— 2026-10-06 的桃子, grasp2 看是 "pink apple" (0.88), grasp3 看是
+    "yellow apple" (0.85), 世界坐标差 19mm, 却因为颜色不同各自成了一条。于是地图里
+    同一个桃子有两条记录、各自只带一个观察位姿; find 取置信度高的那条 (grasp2), 而
+    grasp2 上 AnyGrasp 一个落在桃子上的候选都给不出来, 抓取直接失败。合并本来就是
+    merge 的本职, 让颜色把它挡掉是失职。颜色和置信度跟着**看得最准的那一次**走。
     """
     out = []
     for e in entries:
         if not in_workspace(e["world"]):
             continue
         for o in out:
-            if (o["name"] == e["name"] and o.get("color") == e.get("color")
-                    and _dist(o["world"], e["world"]) < tol):
+            if o["name"] == e["name"] and _dist(o["world"], e["world"]) < tol:
                 n = len(o["seen_from"])
                 o["world"] = ((np.array(o["world"]) * n + np.array(e["world"]))
                               / (n + 1)).tolist()
                 o["seen_from"].append(e["seen_from"][0])
-                o["conf"] = max(o["conf"], e["conf"])
+                if e["conf"] > o["conf"]:
+                    o["conf"] = e["conf"]
+                    o["color"] = e.get("color")
                 break
         else:
             out.append(dict(e))
     return out
 
 
-def save(objects, path=SCENE_PATH):
+def save(objects, path=None):
+    path = path or SCENE_PATH
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         json.dump({"scanned_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -96,21 +105,22 @@ def save(objects, path=SCENE_PATH):
     return path
 
 
-def load(path=SCENE_PATH):
+def load(path=None):
     """读地图。没有或者坏了都返回 None, 由调用方决定怎么办。"""
     try:
-        with open(path) as f:
+        with open(path or SCENE_PATH) as f:
             return json.load(f)
     except (OSError, ValueError):
         return None
 
 
-def load_fresh(ttl_s, path=SCENE_PATH):
+def load_fresh(ttl_s, path=None):
     """读地图; 文件不存在、坏了、或比 ttl_s 旧, 都返回 None。
 
     过期地图比没有地图更糟 —— 东西被挪了而地图还记着老位置, 照着够会够到空处。
     所以调用方拿到 None 就该停, 而不是拿旧数据凑合。
     """
+    path = path or SCENE_PATH
     try:
         if time.time() - os.path.getmtime(path) > ttl_s:
             return None
