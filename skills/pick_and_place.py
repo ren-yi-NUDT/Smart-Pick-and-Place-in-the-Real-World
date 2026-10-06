@@ -12,6 +12,10 @@ from core.transforms import graspcam2pixel, self_rotation_np, rpy_to_vector, pix
 # soft close 探测到物体后服务端是以 force=0 持握的, 提臂前补一次实夹的力度。
 GRIPPER_HOLD_FORCE = 40
 
+# 一个观察位姿上最多试几个抓取候选。1 = 只试 _most_vertical 挑中的那个。
+# 定成 3 而不是 1 的理由见 run() 里候选循环上方的注释。
+MAX_GRASP_CANDIDATES = 3
+
 # 放容器时的末端朝向备选。只给一个写死的四元数不够用: 实测同一个盘子中心点,
 # 默认朝向 IK 残差 66mm (够不着), 换成 place2 的末端朝向 0.1mm 精确命中 —— 卡住
 # 的是姿态不是位置。这三个是机械臂自己录制的"放下物体"位姿的末端朝向。
@@ -96,22 +100,32 @@ class PickAndPlaceSkill(Skill):
             if not len(grasping_pose_world):
                 continue
 
-            # 只试一个候选。以前按候选逐个试, 一个抓不到就再试十几个 —— 现场看到的
-            # 是"夹爪在果子旁边反复开合", 而失败的候选本身也没被修好过。抓不到就认, 往下走。
+            # 候选顺序: 最竖直的排第一 (理由见 _most_vertical), 其余按 AnyGrasp 分数。
+            # **试到夹住为止, 但一个观察位姿上最多 MAX_GRASP_CANDIDATES 个。**
             #
-            # "往下走"指的是换下一个**观察位姿** (换视角才换得到抓取几何), 不是换候选。
-            # 地图命中时 poses 只有一个, 所以这里等于"抓不到就结束"。
+            # 为什么不是"只试一个": 原版 planner.py:737 是"每个候选都试, 试到夹住为止",
+            # 抓取成功率一直靠它兜着。0f0b421 改成只试一个, 理由是"失败的候选本身也没被
+            # 修好过", 现场看到的是夹爪在果子旁边反复开合。那条理由只在**所有**候选都
+            # 失败时才成立; 候选之间的差别是真实存在的 —— 同一次拍摄里桃子上最竖直的
+            # 候选手爪点压在顶沿 (离中心 35mm), 而离中心 6mm 的那两个在 58.7°, 选谁就是
+            # 夹住和空合的区别。而"哪个好"没有可靠的事前判据: _most_vertical 只看倾角,
+            # 倾角跟"手爪点在不在果子上"根本不相关。
             #
-            # 选哪个: 取接近轴最接近竖直的那个, **不是** AnyGrasp 分数最高的那个。
-            # AnyGrasp 的分数衡量的是"这个夹爪姿态夹得稳不稳", 跟"下爪下得正不正"毫无
-            # 关系。2026-10-06 桃子实测, 分数最高的候选倾角 38.6°、离果子中心 20mm, 而
-            # 倾角 14.6°、离中心 4mm 的那个排最后 —— 照分数选就是斜着进刀, 夹爪停在果子
-            # 边缘空合。用户现场的原话是"下爪的时候很歪"。
+            # 所以留一个上限内的重试。第一个就夹住时 (常态) 一次都不多试, 现场看到的和
+            # "只试一个"完全一样; 只有真没夹住才往下走, 最多三个。上限存在的意义是
+            # 不让"所有候选都失败"退化成十几次开合 —— 那种情况本来就是这个位姿的几何
+            # 不行, 该做的是换视角, 不是继续试。
+            #
+            # 每次 _execute_grasping_twin_js_2 结束都会 control_arm(pose_type=idx) 回到
+            # 观察位姿, 所以下一个候选的 current_js 初值仍然是对的。
             candidate = self._most_vertical(grasping_pose_world)
-            cprint(f"=================== 只试一个候选: 倾角 {self._tilt_deg(candidate):.1f}° ===================", "yellow")
-            check = self._execute_grasping_twin_js_2(candidate, idx=key)
-            if check:
-                break
+            order = [candidate] + [c for c in grasping_pose_world if c is not candidate]
+            for n, c in enumerate(order[:MAX_GRASP_CANDIDATES], 1):
+                cprint(f"=================== 候选 {n}/{min(len(order), MAX_GRASP_CANDIDATES)}: "
+                       f"倾角 {self._tilt_deg(c):.1f}° ===================", "yellow")
+                check = self._execute_grasping_twin_js_2(c, idx=key)
+                if check:
+                    break
 
         if not check:
             cprint("G=================== Grasping task failed ===================", "red")

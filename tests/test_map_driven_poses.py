@@ -169,16 +169,23 @@ def test_a_fresh_map_lets_it_move(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 只试一个候选
+# 候选重试: 最竖直的先试, 上限 MAX_GRASP_CANDIDATES 个
 # ---------------------------------------------------------------------------
-def test_grasp_tries_exactly_one_candidate():
-    """一次抓不到就认。堆候选的现场观感是"夹爪在果子旁边反复开合"。"""
+def test_grasp_retries_candidates_but_is_capped():
+    """一个位姿上试到夹住为止, 但不超过上限。
+
+    原版 planner.py 是"每个候选都试", 0f0b421 砍成只试一个 —— 砍掉的那半边正是抓取
+    成功率。这里钉住三件事: 还是只有一个执行点 (不再按分数逐个试到十几个), 有上限,
+    且挑中的那个排第一。
+    """
+    from skills.pick_and_place import MAX_GRASP_CANDIDATES
+
     src = (ROOT / "skills/pick_and_place.py").read_text()
-    # 只执行一次。具体挑哪个由 _most_vertical 决定 (2026-10-06 从"分数最高"改成
-    # "最竖直"), 这里只管"只有一个候选被送去执行", 不把选择规则钉死在源码里。
     assert src.count("self._execute_grasping_twin_js_2(") == 1
     assert "for i in range(len(grasping_pose_world))" not in src
     assert "Checking pose:" not in src
+    assert "order[:MAX_GRASP_CANDIDATES]" in src
+    assert 1 < MAX_GRASP_CANDIDATES <= 5        # 1 = 回到只试一个; 太大 = 反复开合
 
 
 def test_grasp_picks_most_vertical_candidate():
