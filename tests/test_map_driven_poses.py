@@ -174,6 +174,31 @@ def test_a_fresh_map_lets_it_move(monkeypatch):
 def test_grasp_tries_exactly_one_candidate():
     """一次抓不到就认。堆候选的现场观感是"夹爪在果子旁边反复开合"。"""
     src = (ROOT / "skills/pick_and_place.py").read_text()
-    assert "grasping_pose_world[0]" in src
+    # 只执行一次。具体挑哪个由 _most_vertical 决定 (2026-10-06 从"分数最高"改成
+    # "最竖直"), 这里只管"只有一个候选被送去执行", 不把选择规则钉死在源码里。
+    assert src.count("self._execute_grasping_twin_js_2(") == 1
     assert "for i in range(len(grasping_pose_world))" not in src
     assert "Checking pose:" not in src
+
+
+def test_grasp_picks_most_vertical_candidate():
+    """下爪要正。AnyGrasp 的分数衡量夹得稳不稳, 跟下爪正不正无关。"""
+    import numpy as np
+    from skills.pick_and_place import PickAndPlaceSkill
+
+    def pose(tilt_deg):
+        """绕 Y 轴转 tilt_deg 的位姿: 接近轴(第三列)离竖直 tilt_deg 度。"""
+        t = np.radians(tilt_deg)
+        T = np.eye(4)
+        T[:3, :3] = np.array([[np.cos(t), 0, np.sin(t)],
+                              [0, 1, 0],
+                              [-np.sin(t), 0, np.cos(t)]])
+        return T
+
+    # 列表顺序 = AnyGrasp 分数从高到低; 最竖直的那个排在最后
+    candidates = [pose(38.6), pose(24.3), pose(51.1), pose(14.6)]
+    got = PickAndPlaceSkill._most_vertical(None, candidates)
+    assert abs(PickAndPlaceSkill._tilt_deg(got) - 14.6) < 0.1
+    # 全是斜的时候, 挑的还是里面最正的那个 —— 不做硬性角度门槛
+    assert abs(PickAndPlaceSkill._tilt_deg(
+        PickAndPlaceSkill._most_vertical(None, [pose(70.0), pose(55.0)])) - 55.0) < 0.1

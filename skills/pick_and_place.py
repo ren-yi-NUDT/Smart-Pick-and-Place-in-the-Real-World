@@ -55,7 +55,12 @@ class PickAndPlaceSkill(Skill):
 
         cprint(f"=================== 2. Parse input: Grasp {obj} and place it in the {container} ===================", "cyan")
         self.control_arm(pose_type="grasp1", speed=30)
-        self.control_hand(cmd_type="close")
+        # 观察时必须张着夹爪。夹爪就长在相机视场里 (画面下沿那两个黑块就是手指),
+        # 合拢着拍, 两根手指正好挡在物体前面: 2026-10-06 抓香蕉, 合着拍时 YOLO 的
+        # 置信度从 0.45 跳到 0.88, AnyGrasp 最高分候选跑到离香蕉 55mm 的地方 (手指
+        # 本身), 臂照那个点压下去, 空合一把。张着拍, 最高分候选回到香蕉上 (19mm)。
+        # 这里原来是 close, 是双臂 planner 留下的"起始状态"习惯, 没有任何东西依赖它。
+        self.control_hand(cmd_type="open")
 
         # ---- Grasp phase ----
         check = False
@@ -91,13 +96,20 @@ class PickAndPlaceSkill(Skill):
             if not len(grasping_pose_world):
                 continue
 
-            # 只试分数最高的那一个。以前按候选逐个试, 一个抓不到就再试十几个 —— 现场看到的
+            # 只试一个候选。以前按候选逐个试, 一个抓不到就再试十几个 —— 现场看到的
             # 是"夹爪在果子旁边反复开合", 而失败的候选本身也没被修好过。抓不到就认, 往下走。
             #
             # "往下走"指的是换下一个**观察位姿** (换视角才换得到抓取几何), 不是换候选。
             # 地图命中时 poses 只有一个, 所以这里等于"抓不到就结束"。
-            cprint(f"=================== 只试最高分的一个候选 ===================", "yellow")
-            check = self._execute_grasping_twin_js_2(grasping_pose_world[0], idx=key)
+            #
+            # 选哪个: 取接近轴最接近竖直的那个, **不是** AnyGrasp 分数最高的那个。
+            # AnyGrasp 的分数衡量的是"这个夹爪姿态夹得稳不稳", 跟"下爪下得正不正"毫无
+            # 关系。2026-10-06 桃子实测, 分数最高的候选倾角 38.6°、离果子中心 20mm, 而
+            # 倾角 14.6°、离中心 4mm 的那个排最后 —— 照分数选就是斜着进刀, 夹爪停在果子
+            # 边缘空合。用户现场的原话是"下爪的时候很歪"。
+            candidate = self._most_vertical(grasping_pose_world)
+            cprint(f"=================== 只试一个候选: 倾角 {self._tilt_deg(candidate):.1f}° ===================", "yellow")
+            check = self._execute_grasping_twin_js_2(candidate, idx=key)
             if check:
                 break
 
@@ -328,6 +340,21 @@ class PickAndPlaceSkill(Skill):
         if cos_theta > 0:
             transformed_pose_world = transformed_pose_world @ np.array([[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
         return transformed_pose_world
+
+    @staticmethod
+    def _tilt_deg(pose_world):
+        """这个抓取位姿的接近轴偏离竖直多少度。0° = 正着往下扎。"""
+        return float(np.degrees(np.arccos(np.clip(abs(pose_world[2, 2]), -1.0, 1.0))))
+
+    def _most_vertical(self, poses_world):
+        """在候选里挑接近轴最接近竖直的那个。
+
+        接近轴就是位姿自己的 Z 轴 (工具偏置也沿它), 所以 |R[2,2]| 越大越竖直。
+        长条形物体 (香蕉、黄瓜) 斜着进刀本来是对的, 所以这里**不做硬性角度门槛**,
+        只是在所有框内候选里挑最正的那个 —— 真有需要斜进刀的物体时, 它的候选里
+        最正的那个通常也还是斜的, 选出来照样斜。
+        """
+        return max(poses_world, key=lambda T: abs(T[2, 2]))
 
     def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None):
         """Exact replica of planner.py execute_grasping_twin_js_2."""
