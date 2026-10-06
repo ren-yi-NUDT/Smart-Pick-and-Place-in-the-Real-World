@@ -331,7 +331,12 @@ class PickAndPlaceSkill(Skill):
 
     def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None):
         """Exact replica of planner.py execute_grasping_twin_js_2."""
-        self.control_hand(cmd_type="open")
+        # 张不开就别往下走: 合拢的手指按抓取位姿压下去, 果子被推开, 后面 close 又是一次
+        # 空合, 日志里只剩一句 "no object detected", 看着像对不准。control_hand("open")
+        # 会读回实际开度, 张不开时挂 opened=False。
+        if self.control_hand(cmd_type="open").get("opened") is False:
+            cprint("=================== 夹爪张不开, 放弃这次抓取 ===================", "red")
+            return False
         basic_mat = np.eye(4)
         basic_mat[2, 3] -= 0.02
         preparasion_grasping_pos = grasping_pose_world_hand @ basic_mat

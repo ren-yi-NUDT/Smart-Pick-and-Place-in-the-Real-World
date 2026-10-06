@@ -53,18 +53,7 @@ class LookAroundSkill(Skill):
             return scene_map.detect_scene(self.perception, rgb)
 
         entries = scene_map.scan_workspace(move_to_pose, capture, transform, detect, poses)
-
-        # 记住东西在哪 —— 不然下次用户说"放粉盘子里"还得靠臂正好看着它
         objects = scene_map.merge(entries)
-        if objects:
-            path = scene_map.save(objects)
-            cprint(f"\n========== Scene map ({len(objects)} 样东西) -> {path} ==========", "green")
-            for o in sorted(objects, key=lambda o: -o["conf"]):
-                cprint(f"  {o['color'] or '?'} {o['name']:12s} conf={o['conf']:.2f} "
-                       f"world=({o['world'][0]:+.3f},{o['world'][1]:+.3f},{o['world'][2]:+.3f}) "
-                       f"从 {'/'.join(o['seen_from'])} 看到", "green")
-        else:
-            cprint("Scene map: 什么都没扫到", "yellow")
 
         # Analyze first image with VLM
         first_key = list(images.keys())[0]
@@ -86,4 +75,18 @@ class LookAroundSkill(Skill):
 
         if reset_pose:
             self.control_arm(pose_type=reset_pose, speed=30)
+
+        # 地图**最后**才落盘。save() 盖的是"现在"的时间戳, 而 pick_and_place 拿
+        # SCENE_MAP_TTL_S 卡这个时间戳 —— 落早了, 用户在 VLM 上等的那几十秒 (API 抽风时
+        # 是几分钟) 就从可用窗口里扣掉了, 命令刚跑完地图就已经过期。
+        # 场景在这几十秒里不会变, 所以按"命令返回"计时才是用户真正在用的那个窗口。
+        if objects:
+            path = scene_map.save(objects)
+            cprint(f"\n========== Scene map ({len(objects)} 样东西) -> {path} ==========", "green")
+            for o in sorted(objects, key=lambda o: -o["conf"]):
+                cprint(f"  {o['color'] or '?'} {o['name']:12s} conf={o['conf']:.2f} "
+                       f"world=({o['world'][0]:+.3f},{o['world'][1]:+.3f},{o['world'][2]:+.3f}) "
+                       f"从 {'/'.join(o['seen_from'])} 看到", "green")
+        else:
+            cprint("Scene map: 什么都没扫到", "yellow")
         return analysis

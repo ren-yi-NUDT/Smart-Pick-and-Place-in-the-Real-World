@@ -74,11 +74,11 @@ class Skill(ABC):
         return self._arm
 
     # ------------------------------------------------------------------
-    # Lazy property: hand client (socket to :8000)
+    # Lazy property: gripper client (socket to :8001)
     # ------------------------------------------------------------------
     @property
     def hand(self):
-        """Return a connected HandClient."""
+        """Return a connected GripperClient (Robotiq 2F-85)."""
         if self._hand is None:
             from core.backends import create_hand
             self._hand = create_hand()
@@ -201,11 +201,15 @@ class Skill(ABC):
         return json.loads(data_bytes.decode("utf-8"))
 
     def control_hand(self, cmd_type="close"):
-        """Control the dexterous hand (open / close / get_state)."""
+        """Control the dexterous hand (open / close / get_state).
+
+        open() 会读回实际开度, 张不开时在响应里挂 ``opened=False`` —— 调用方
+        (抓取前) 应该检查它, 别带着合拢的手指往下走。
+        """
         if cmd_type == "close":
-            self.hand.close()
+            return self.hand.close()
         elif cmd_type == "open":
-            self.hand.open()
+            return self.hand.open()
         elif cmd_type == "get_state":
             return self.hand.get_state()
 

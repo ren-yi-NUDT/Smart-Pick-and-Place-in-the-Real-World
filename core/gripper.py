@@ -96,12 +96,37 @@ class GripperClient:
     # Public interface
     # ------------------------------------------------------------------
     def open(self, force: int = None, speed: int = None) -> dict:
+        """张开夹爪, 并**确认它真的张开了**。
+
+        服务端回一句 "moved to pos=0/255" 只说明指令写进寄存器了, 不代表手指动了
+        (服务端的 wait_until_idle 见到 gOBJ!=0 就返回, 而夹爪静止时 gOBJ 本来就是 3)。
+        2026-10-06 现场: 夹爪停在闭合位就去抓, 空合一把 —— 日志里只有一行
+        "soft_close: no object detected", 看着像对不准, 其实是压根没张开。
+        所以这里读回实际开度, 没张开就重发; 两次都不行就把 opened=False 挂回去报出来。
+        """
         cmd = {"src": self._src, "type": "set", "cmd": list(self._cmds["open"])}
         if force is not None:
             cmd["force"] = force
         if speed is not None:
             cmd["speed"] = speed
-        return self._send_cmd(cmd)
+        resp = self._send_cmd(cmd)
+        if not self._wait_open():
+            resp = self._send_cmd(cmd)          # 重发一次: 单发丢掉的指令是有的
+            if not self._wait_open():
+                cprint(f"[GripperClient] 夹爪没能张开, 别带着合拢的手指去抓: {resp}", "red")
+                resp = dict(resp, opened=False)
+        return resp
+
+    def _wait_open(self, settle: float = 2.0) -> bool:
+        """轮询到开度到位。open 的 client 值是 1000, 实测机械上限只到 988。"""
+        deadline = time.time() + settle
+        while True:
+            value = self.get_state().get("value")
+            if isinstance(value, list) and value and value[0] >= FULLY_OPEN_THRESHOLD:
+                return True
+            if time.time() >= deadline:
+                return False
+            time.sleep(0.15)
 
     def close(self, force: int = None, speed: int = None, soft: bool = False) -> dict:
         cmd = {"src": self._src, "type": "set", "cmd": list(self._cmds["close"])}
