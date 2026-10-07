@@ -6,7 +6,7 @@ from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 from skills.base import Skill, register_skill
 from core import scene as scene_map
-from core.config import SCENE_MAP_TTL_S, YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
+from core.config import SCENE_MAP_TTL_S, TABLE_Z_M, YOLO_CONF_GRASP, YOLO_CONF_CONTAINER
 from core.transforms import graspcam2pixel, self_rotation_np, rpy_to_vector, pixel_to_camera_point2
 
 # soft close 探测到物体后服务端是以 force=0 持握的, 提臂前补一次实夹的力度。
@@ -37,6 +37,23 @@ PLACEMENT_ORN_FALLBACKS = [
     [0.2197, -0.7229, 0.0792, 0.6503],  # place1
     [0.0094, -0.8820, 0.0341, 0.4698],  # desk_pose_3
 ]
+
+
+def _grasp_height(contact_z):
+    """指尖该落在哪个高度: **接触点到桌面高度的一半**。
+
+    AnyGrasp 给的是可见表面上的接触点。相机装在腕上从上往下看, 那基本就是物体的
+    **顶面**, 于是手指在物体的**上方**合拢 —— 2026-10-07 火龙果 (高 8.6cm) 现场就是
+    "夹爪空合": 接触点在果子顶 z=0.092, 而果子高度中点是 0.052, 差了 40mm。
+
+    取一半正好落在中点上, 也就是物体的最宽处 (手指从两侧夹住的地方):
+      - 圆的果子: 接触点在顶, 一半 = 高度中点;
+      - 躺着的东西: 黄瓜直径 4.4cm, 接触点在顶面, 一半 = 轴心高度。
+    两者都不是凑出来的, 是"顶面高度的一半 = 最宽处"。
+
+    只会往下调, 不会往上 —— 接触点永远在物体表面, 而表面不会低于最宽处。
+    """
+    return (contact_z + TABLE_Z_M) / 2.0
 
 
 def _pre_grasp_pose(grasp_world, along, up, T_hand_effector_to_arm_endlink):
@@ -154,16 +171,18 @@ class PickAndPlaceSkill(Skill):
             if not len(grasping_pose_world):
                 continue
 
-            # 候选顺序: 最竖直的排第一 (理由见 _most_vertical), 其余按 AnyGrasp 分数。
-            # 挑一个最竖直的, 试一次。夹不到就换下一个观察位姿, **不遍历候选**。
-            # 用户 2026-10-06 / 2026-10-07: "一次抓不到直接继续, 不要再跑候选" ——
-            # 现场看到的是夹爪在果子旁边反复开合。而且候选之间"哪个好"没有可靠的事前
-            # 判据: _most_vertical 只看倾角, 倾角跟"手爪点在不在果子上"根本不相关。
-            # 把下面这行离框中心的数打出来就是为了盯这件事。
-            candidate = self._most_vertical(grasping_pose_world)
+            # 候选顺序: 最竖直的排前面, 但**够得着**优先 —— 孪生规划不过去的直接跳过,
+            # 连试都不试 (见 _pick_reachable)。仍然是每个观察位姿只真抓一次, 夹不到就换
+            # 下一个位姿, **不遍历候选**: 用户 2026-10-06 / 2026-10-07 "一次抓不到直接
+            # 继续, 不要再跑候选" —— 现场看到的是夹爪在果子旁边反复开合。
+            candidate = self._pick_reachable(grasping_pose_world, key)
             off_of = {}
             if len(offsets_px) == len(grasping_pose_world):
                 off_of = {id(p): o for p, o in zip(grasping_pose_world, offsets_px)}
+            if candidate is None:
+                cprint(f"[grasp] {key} 上 {len(grasping_pose_world)} 个候选孪生一个都规划不过去, "
+                       f"换下一个观察位姿", "yellow")
+                continue
             cprint(f"=================== 候选: 倾角 {self._tilt_deg(candidate):.1f}° 离框中心 "
                    f"{off_of.get(id(candidate), float('nan')):.0f}px "
                    f"(共 {len(grasping_pose_world)} 个候选) ===================", "yellow")
@@ -413,16 +432,6 @@ class PickAndPlaceSkill(Skill):
         """这个抓取位姿的接近轴偏离竖直多少度。0° = 正着往下扎。"""
         return float(np.degrees(np.arccos(np.clip(abs(pose_world[2, 2]), -1.0, 1.0))))
 
-    def _most_vertical(self, poses_world):
-        """在候选里挑接近轴最接近竖直的那个。
-
-        接近轴就是位姿自己的 Z 轴 (工具偏置也沿它), 所以 |R[2,2]| 越大越竖直。
-        长条形物体 (香蕉、黄瓜) 斜着进刀本来是对的, 所以这里**不做硬性角度门槛**,
-        只是在所有框内候选里挑最正的那个 —— 真有需要斜进刀的物体时, 它的候选里
-        最正的那个通常也还是斜的, 选出来照样斜。
-        """
-        return max(poses_world, key=lambda T: abs(T[2, 2]))
-
     def _desk_transfer(self, name):
         """从此刻的位姿去桌位姿 ``name`` 的关节轨迹, **孪生校验过**; 不行返回 None。
 
@@ -470,33 +479,33 @@ class PickAndPlaceSkill(Skill):
                                              "type": "trajectory_generation2", "cnfg": cnfg})
         return rsp["info"] if rsp["value"] else None
 
-    def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None):
-        """Exact replica of planner.py execute_grasping_twin_js_2."""
-        # 张不开就别往下走: 合拢的手指按抓取位姿压下去, 果子被推开, 后面 close 又是一次
-        # 空合, 日志里只剩一句 "no object detected", 看着像对不准。control_hand("open")
-        # 会读回实际开度, 张不开时挂 opened=False。
-        if self.control_hand(cmd_type="open").get("opened") is False:
-            cprint("=================== 夹爪张不开, 放弃这次抓取 ===================", "red")
-            return False
-        execution_grasping_pos = grasping_pose_world_hand.copy()
-        execution_grasping_pos[2, 3] = max(execution_grasping_pos[2, 3], 0.042)
-        execution_grasping_pos = execution_grasping_pos @ self.T_hand_effector_to_arm_endlink
-        execution_grasping_pos_position = execution_grasping_pos[:3, 3]
-        execution_grasping_pos_orientation = R.from_matrix(execution_grasping_pos[:3, :3]).as_quat()
+    def _plan_grasp(self, grasping_pose_world_hand, idx):
+        """问孪生: 这个候选够得着吗。返回孪生的响应 (value / trajectory / trajectory_ee)。
+
+        **只问, 不动机器人。** 挑候选时拿它把"规划不过去"的候选筛掉, 于是每个观察位姿
+        上仍然只有一次真实抓取 —— 用户 2026-10-06: "一次抓不到直接继续, 不要再跑候选"。
+        筛掉的是根本够不着的, 不是"试了没夹住"的。
+        """
+        # 高度先压到物体的最宽处 (见 _grasp_height), 再算末端目标。预抓取也用同一个
+        # 压过的点 —— 否则预抓取停在果子顶上 4cm, 执行点却在果子中间, 是斜着扎下去的。
+        pose = grasping_pose_world_hand.copy()
+        pose[2, 3] = max(_grasp_height(pose[2, 3]), 0.042)
+        execution_grasping_pos = pose @ self.T_hand_effector_to_arm_endlink
+        exec_pos = execution_grasping_pos[:3, 3]
+        exec_orn = R.from_matrix(execution_grasping_pos[:3, :3]).as_quat()
 
         default_traj_js_rad = [data / 180 * np.pi for data in self.config.default_traj_js[idx].values()]
         rsp = None
         for along, up in PRE_GRASP_OFFSETS:
-            pre = _pre_grasp_pose(grasping_pose_world_hand, along, up,
-                                  self.T_hand_effector_to_arm_endlink)
+            pre = _pre_grasp_pose(pose, along, up, self.T_hand_effector_to_arm_endlink)
             pre_pos = pre[:3, 3]
             pre_orn = R.from_matrix(pre[:3, :3]).as_quat()
             cnfg = {
                 "target_pose": [
                     [pre_pos[0], pre_pos[1], pre_pos[2],
                      pre_orn[0], pre_orn[1], pre_orn[2], pre_orn[3]],
-                    [execution_grasping_pos_position[0], execution_grasping_pos_position[1], execution_grasping_pos_position[2],
-                     execution_grasping_pos_orientation[0], execution_grasping_pos_orientation[1], execution_grasping_pos_orientation[2], execution_grasping_pos_orientation[3]],
+                    [exec_pos[0], exec_pos[1], exec_pos[2],
+                     exec_orn[0], exec_orn[1], exec_orn[2], exec_orn[3]],
                 ],
                 "current_js": default_traj_js_rad,
                 "struct": "rm65",
@@ -507,6 +516,32 @@ class PickAndPlaceSkill(Skill):
                     cprint(f"=================== 预抓取抬 {along + up:.3f}m 才够得着 "
                            f"(默认 0.04m) ===================", "yellow")
                 break
+        return rsp
+
+    def _pick_reachable(self, poses_world, idx):
+        """按"最竖直优先"挑一个**孪生规划得过去**的候选; 全够不着返回 None。
+
+        原来只挑最竖直的那个, 于是 r≈0.45 的火龙果上选中的是倾角 3°
+        的候选 —— 工具竖直意味着 link_6 还要沿工具轴往外 172mm, 那个位置机械臂够不到,
+        孪生报 delta_xyz=24mm 不可达, 一次抓取都没发生就"失败"了; 同一个果子上倾角
+        24~49° 的候选孪生全都能规划 (2026-10-07 实测 7/10 可达)。竖直不是目的, 够得着
+        才是 —— 把孪生的判决提到**挑选**阶段, 而不是挑完了才发现够不着。
+        """
+        for pose in sorted(poses_world, key=lambda T: -abs(T[2, 2])):
+            if self._plan_grasp(pose, idx)["value"]:
+                return pose
+        return None
+
+    def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None):
+        """Exact replica of planner.py execute_grasping_twin_js_2."""
+        # 张不开就别往下走: 合拢的手指按抓取位姿压下去, 果子被推开, 后面 close 又是一次
+        # 空合, 日志里只剩一句 "no object detected", 看着像对不准。control_hand("open")
+        # 会读回实际开度, 张不开时挂 opened=False。
+        if self.control_hand(cmd_type="open").get("opened") is False:
+            cprint("=================== 夹爪张不开, 放弃这次抓取 ===================", "red")
+            return False
+        default_traj_js_rad = [data / 180 * np.pi for data in self.config.default_traj_js[idx].values()]
+        rsp = self._plan_grasp(grasping_pose_world_hand, idx)
         state = rsp["value"]
 
         if state:

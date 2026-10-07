@@ -185,6 +185,7 @@ def test_a_successful_grasp_stops_walking_the_observation_poses(monkeypatch):
         return True
 
     s._execute_grasping_twin_js_2 = fake_exec
+    s.T_hand_effector_to_arm_endlink = np.eye(4)   # _plan_grasp 用它算末端目标
     s._twin = object()
     s.send_cmd_twin = lambda *a, **k: {"value": 1, "info": {
         "trajectory": [[0.0] * 6], "trajectory_ee": [[0.0] * 7]}}
@@ -313,8 +314,14 @@ def test_placement_tilts_pull_the_wrist_back_toward_the_base():
     assert wrist_xy(cands[-1]) < 0.50, f"倒 60° 没把腕部收回来: {wrist_xy(cands[-1]):.4f}"
 
 
-def test_grasp_picks_most_vertical_candidate():
-    """下爪要正。AnyGrasp 的分数衡量夹得稳不稳, 跟下爪正不正无关。"""
+def test_grasp_skips_candidates_the_twin_cannot_reach():
+    """下爪要正, 但**够得着**优先。
+
+    2026-10-07 火龙果: 最竖直的候选倾角只有 3°, 而 r≈0.45 上工具竖直意味着 link_6
+    还要沿工具轴往外 172mm —— 孪生报 delta_xyz=24mm 够不着, 一次抓取都没发生就
+    "抓取失败"。同一个果子上倾角 24~49° 的候选孪生全都能规划 (实测 7/10 可达)。
+    竖直不是目的, 够得着才是。
+    """
     import numpy as np
     from skills.pick_and_place import PickAndPlaceSkill
 
@@ -327,10 +334,34 @@ def test_grasp_picks_most_vertical_candidate():
                               [-np.sin(t), 0, np.cos(t)]])
         return T
 
-    # 列表顺序 = AnyGrasp 分数从高到低; 最竖直的那个排在最后
-    candidates = [pose(38.6), pose(24.3), pose(51.1), pose(14.6)]
-    got = PickAndPlaceSkill._most_vertical(None, candidates)
-    assert abs(PickAndPlaceSkill._tilt_deg(got) - 14.6) < 0.1
-    # 全是斜的时候, 挑的还是里面最正的那个 —— 不做硬性角度门槛
+    s = PickAndPlaceSkill.__new__(PickAndPlaceSkill)
+    # 孪生只认倾角 >= 20° 的候选: 更竖直的 link_6 探得太远, 够不着
+    s._plan_grasp = lambda mat, idx: {"value": int(PickAndPlaceSkill._tilt_deg(mat) >= 20.0)}
+
+    # 列表顺序 = AnyGrasp 分数从高到低。最竖直的 3.1° 够不着, 该退到 24.3°
+    candidates = [pose(38.6), pose(3.1), pose(51.1), pose(24.3)]
+    got = s._pick_reachable(candidates, "grasp1")
+    assert abs(PickAndPlaceSkill._tilt_deg(got) - 24.3) < 0.1, "没跳过够不着的那个"
+
+    # 一个都够不着 -> None, 上层换下一个观察位姿 (而不是硬发一条到不了的轨迹)
+    assert s._pick_reachable([pose(3.1), pose(5.0)], "grasp1") is None
+
+    # 全是斜的时候挑最正的 —— 不做硬性角度门槛
     assert abs(PickAndPlaceSkill._tilt_deg(
-        PickAndPlaceSkill._most_vertical(None, [pose(70.0), pose(55.0)])) - 55.0) < 0.1
+        s._pick_reachable([pose(70.0), pose(55.0)], "grasp1")) - 55.0) < 0.1
+
+
+def test_grasp_height_lands_on_the_widest_cross_section():
+    """指尖落在"接触点到桌面高度的一半" = 物体的最宽处。
+
+    2026-10-07 火龙果 (高 8.6cm): 桌面 z=0.009, AnyGrasp 接触点在果子顶 z=0.092,
+    手指就停在果子顶上合拢, 现场"夹爪空合"。果子高度中点是 0.052。
+    """
+    from core.config import TABLE_Z_M
+    from skills.pick_and_place import _grasp_height
+
+    assert abs(_grasp_height(0.092) - 0.0505) < 0.002, "没落到火龙果的高度中点"
+    # 躺着的东西: 顶面高度的一半 = 轴心高度 (黄瓜直径 4.4cm -> 轴心在桌面之上 2.2cm)
+    assert abs(_grasp_height(TABLE_Z_M + 0.044) - (TABLE_Z_M + 0.022)) < 1e-9
+    # 只会往下调: 接触点永远在物体表面, 表面不会低于最宽处
+    assert _grasp_height(0.30) < 0.30
