@@ -16,6 +16,11 @@ GRIPPER_HOLD_FORCE = 40
 # 用户 2026-10-06 / 2026-10-07: "一次抓不到直接继续, 不要再跑候选"。
 MAX_GRASP_CANDIDATES = 1
 
+# "差不多一样准"的容差: 手爪点离物体框中心的像素距离在最小值的 1.5 倍以内, 就算一样准。
+# 在这个集合里再挑最竖直的 —— **抓准优先于抓正**。用户 2026-10-07: "都抓的偏前"。
+# 实测两张候选表 (火龙果 grasp3) 上 1.0~3.0 取哪个值结果都一样, 所以不必精调。
+CENTER_TOL = 1.5
+
 # 预抓取位姿相对抓取点的抬法, 从高到低试: 每项是 (沿接近轴后退, 世界Z再抬)。
 #
 # 第一档是原来那一档 (两笔在竖直下爪时叠成 4cm), 是给"从观察位姿飞过来"留的余量,
@@ -175,7 +180,7 @@ class PickAndPlaceSkill(Skill):
             # 连试都不试 (见 _pick_reachable)。仍然是每个观察位姿只真抓一次, 夹不到就换
             # 下一个位姿, **不遍历候选**: 用户 2026-10-06 / 2026-10-07 "一次抓不到直接
             # 继续, 不要再跑候选" —— 现场看到的是夹爪在果子旁边反复开合。
-            candidate = self._pick_reachable(grasping_pose_world, key)
+            candidate = self._pick_reachable(grasping_pose_world, key, offsets_px)
             off_of = {}
             if len(offsets_px) == len(grasping_pose_world):
                 off_of = {id(p): o for p, o in zip(grasping_pose_world, offsets_px)}
@@ -518,8 +523,12 @@ class PickAndPlaceSkill(Skill):
                 break
         return rsp
 
-    def _pick_reachable(self, poses_world, idx):
-        """按"最竖直优先"挑一个**孪生规划得过去**的候选; 全够不着返回 None。
+    def _pick_reachable(self, poses_world, idx, offsets_px=None):
+        """挑一个**够得着**的候选: 先要**抓准** (手爪点落在物体上), 再要**抓正** (下爪竖直)。
+
+        只在"差不多一样准"的那批里挑 (容差见 CENTER_TOL), 那批一个都够不着才放宽到全部。
+        抓准优先于抓正: 用户 2026-10-07 "都抓的偏前" —— 只看倾角会挑中离物体中心
+        89px 的候选 (实测火龙果 grasp3: 最竖直的那个离框中心 89px, 而最准的只有 12px)。
 
         原来只挑最竖直的那个, 于是 r≈0.45 的火龙果上选中的是倾角 3°
         的候选 —— 工具竖直意味着 link_6 还要沿工具轴往外 172mm, 那个位置机械臂够不到,
@@ -527,9 +536,13 @@ class PickAndPlaceSkill(Skill):
         24~49° 的候选孪生全都能规划 (2026-10-07 实测 7/10 可达)。竖直不是目的, 够得着
         才是 —— 把孪生的判决提到**挑选**阶段, 而不是挑完了才发现够不着。
         """
-        for pose in sorted(poses_world, key=lambda T: -abs(T[2, 2])):
-            if self._plan_grasp(pose, idx)["value"]:
-                return pose
+        pairs = list(zip(poses_world, offsets_px or [0.0] * len(poses_world)))
+        for tol in (CENTER_TOL, float("inf")):
+            best = min(o for _, o in pairs)
+            near = [p for p, o in pairs if o <= best * tol]
+            for pose in sorted(near, key=lambda T: -abs(T[2, 2])):
+                if self._plan_grasp(pose, idx)["value"]:
+                    return pose
         return None
 
     def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None):
@@ -551,7 +564,8 @@ class PickAndPlaceSkill(Skill):
             self._obs_js = default_traj_js_rad
             trajectory_grasping = rsp["info"]["trajectory"]
             trajectory_grasping = np.array(copy.deepcopy(trajectory_grasping)) / np.pi * 180
-            self.control_arm(trajectory=trajectory_grasping, speed=20)
+            # 20 -> 30: 用户 2026-10-07 "抓的速度也慢了点"。跟观察位姿之间的移动同一个档。
+            self.control_arm(trajectory=trajectory_grasping, speed=30)
             cprint("=============== Reach grasping pose =============")
             self.control_hand(cmd_type="close")
             cprint("=============== Close hand =============")

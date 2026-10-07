@@ -365,3 +365,33 @@ def test_grasp_height_lands_on_the_widest_cross_section():
     assert abs(_grasp_height(TABLE_Z_M + 0.044) - (TABLE_Z_M + 0.022)) < 1e-9
     # 只会往下调: 接触点永远在物体表面, 表面不会低于最宽处
     assert _grasp_height(0.30) < 0.30
+
+
+def test_grasp_prefers_a_centred_candidate_over_a_vertical_one():
+    """抓准优先于抓正。
+
+    2026-10-07 用户: "都抓的偏前"。实测火龙果 grasp3 那张候选表上, 最竖直的候选离
+    物体框中心 89px (快到框边了), 而最准的只有 12px —— 只看倾角就会挑中那个偏的。
+    """
+    import numpy as np
+    from skills.pick_and_place import PickAndPlaceSkill
+
+    def pose(tilt_deg):
+        t = np.radians(tilt_deg)
+        T = np.eye(4)
+        T[:3, :3] = np.array([[np.cos(t), 0, np.sin(t)],
+                              [0, 1, 0],
+                              [-np.sin(t), 0, np.cos(t)]])
+        return T
+
+    s = PickAndPlaceSkill.__new__(PickAndPlaceSkill)
+    s._plan_grasp = lambda mat, idx: {"value": 1}
+    # (倾角, 离框中心 px) 取自实测: 最竖直的 24.3° 在 89px 处, 43.2° 那个在 12px 处
+    cands, offs = [pose(24.3), pose(49.4), pose(43.2)], [89.0, 40.0, 12.0]
+    got = s._pick_reachable(cands, "grasp1", offs)
+    assert abs(PickAndPlaceSkill._tilt_deg(got) - 43.2) < 0.1, "挑了偏的那个"
+
+    # 最准的那个够不着 -> 放宽到全部候选, 不能因为"最准的够不着"就整个放弃
+    s._plan_grasp = lambda mat, idx: {"value": int(PickAndPlaceSkill._tilt_deg(mat) < 30)}
+    got = s._pick_reachable(cands, "grasp1", offs)
+    assert abs(PickAndPlaceSkill._tilt_deg(got) - 24.3) < 0.1, "没放宽到全部"
