@@ -524,26 +524,32 @@ class PickAndPlaceSkill(Skill):
         return rsp
 
     def _pick_reachable(self, poses_world, idx, offsets_px=None):
-        """挑一个**够得着**的候选: 先要**抓准** (手爪点落在物体上), 再要**抓正** (下爪竖直)。
+        """挑一个候选: **够得着 > 抓准 > 抓正**。
 
-        只在"差不多一样准"的那批里挑 (容差见 CENTER_TOL), 那批一个都够不着才放宽到全部。
-        抓准优先于抓正: 用户 2026-10-07 "都抓的偏前" —— 只看倾角会挑中离物体中心
-        89px 的候选 (实测火龙果 grasp3: 最竖直的那个离框中心 89px, 而最准的只有 12px)。
+        顺序不能反:
 
-        原来只挑最竖直的那个, 于是 r≈0.45 的火龙果上选中的是倾角 3°
-        的候选 —— 工具竖直意味着 link_6 还要沿工具轴往外 172mm, 那个位置机械臂够不到,
-        孪生报 delta_xyz=24mm 不可达, 一次抓取都没发生就"失败"了; 同一个果子上倾角
-        24~49° 的候选孪生全都能规划 (2026-10-07 实测 7/10 可达)。竖直不是目的, 够得着
-        才是 —— 把孪生的判决提到**挑选**阶段, 而不是挑完了才发现够不着。
+        - **够得着**。工具竖直时 link_6 还要沿工具轴往外 172mm, r≈0.45 上那个位置够不到
+          —— 2026-10-07 火龙果最竖直的候选倾角只有 3°, 孪生报 delta_xyz=24mm 不可达,
+          一次抓取都没发生就"失败"; 同一个果子上倾角 24~49° 的候选全都能规划 (7/10)。
+          所以孪生的判决提到**挑选**阶段 (只问不动机器人, 仍然每个观察位姿只真抓一次)。
+        - **抓准**。用户 2026-10-07 "都抓的偏前": 只看倾角会挑中离物体框中心 89px 的
+          候选, 而最准的只有 12px。
+        - **抓正**。一样准的那批里 (容差见 CENTER_TOL) 再挑最竖直的。
+
+        2026-10-07 黄瓜实测 (grasp2, 14 个框内候选): 最准的只有 10px 但孪生规划不过去;
+        旧写法"那批够不着就放宽到全部"一放宽就让倾角当家, 挑了个 38px 的。所以现在是
+        先按偏移从小到大逐个问孪生, 超过"一样准"的边界就停 (再往后只会更偏)。
         """
-        pairs = list(zip(poses_world, offsets_px or [0.0] * len(poses_world)))
-        for tol in (CENTER_TOL, float("inf")):
-            best = min(o for _, o in pairs)
-            near = [p for p, o in pairs if o <= best * tol]
-            for pose in sorted(near, key=lambda T: -abs(T[2, 2])):
-                if self._plan_grasp(pose, idx)["value"]:
-                    return pose
-        return None
+        pairs = sorted(zip(poses_world, offsets_px or [0.0] * len(poses_world)),
+                       key=lambda po: po[1])
+        best, near = None, []
+        for pose, off in pairs:
+            if best is not None and off > best * CENTER_TOL:
+                break
+            if self._plan_grasp(pose, idx)["value"]:
+                best = off if best is None else min(best, off)
+                near.append(pose)
+        return max(near, key=lambda T: abs(T[2, 2])) if near else None
 
     def _execute_grasping_twin_js_2(self, grasping_pose_world_hand, idx=None):
         """Exact replica of planner.py execute_grasping_twin_js_2."""

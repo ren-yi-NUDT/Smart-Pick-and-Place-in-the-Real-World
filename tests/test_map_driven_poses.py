@@ -391,7 +391,13 @@ def test_grasp_prefers_a_centred_candidate_over_a_vertical_one():
     got = s._pick_reachable(cands, "grasp1", offs)
     assert abs(PickAndPlaceSkill._tilt_deg(got) - 43.2) < 0.1, "挑了偏的那个"
 
-    # 最准的那个够不着 -> 放宽到全部候选, 不能因为"最准的够不着"就整个放弃
-    s._plan_grasp = lambda mat, idx: {"value": int(PickAndPlaceSkill._tilt_deg(mat) < 30)}
-    got = s._pick_reachable(cands, "grasp1", offs)
-    assert abs(PickAndPlaceSkill._tilt_deg(got) - 24.3) < 0.1, "没放宽到全部"
+    # 最准的那个够不着 -> 退到"一样准"那批里的次准的, **不能**跳到 89px 的竖直候选
+    # (2026-10-07 黄瓜实测就是这个坑: 10px 那个规划不过去, 旧写法挑了个 38px 的)
+    cands2, offs2 = [pose(43.2), pose(32.7), pose(24.3)], [12.0, 18.0, 89.0]
+    s._plan_grasp = lambda mat, idx: {"value": int(abs(PickAndPlaceSkill._tilt_deg(mat) - 32.7) < 1)}
+    got = s._pick_reachable(cands2, "grasp1", offs2)
+    assert abs(PickAndPlaceSkill._tilt_deg(got) - 32.7) < 0.1, "跳到偏的候选上去了"
+
+    # 一个都够不着 -> None, 上层去下一个观察位姿
+    s._plan_grasp = lambda mat, idx: {"value": 0}
+    assert s._pick_reachable(cands, "grasp1", offs) is None
