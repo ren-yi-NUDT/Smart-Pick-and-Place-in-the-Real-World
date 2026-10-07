@@ -12,9 +12,9 @@ from core.transforms import graspcam2pixel, self_rotation_np, rpy_to_vector, pix
 # soft close 探测到物体后服务端是以 force=0 持握的, 提臂前补一次实夹的力度。
 GRIPPER_HOLD_FORCE = 40
 
-# 一个观察位姿上最多试几个抓取候选。1 = 只试 _most_vertical 挑中的那个。
-# 定成 3 而不是 1 的理由见 run() 里候选循环上方的注释。
-MAX_GRASP_CANDIDATES = 3
+# 一个观察位姿上试几个抓取候选。定死 1 —— 夹不到就换观察位姿, 不遍历候选。
+# 用户 2026-10-06 / 2026-10-07: "一次抓不到直接继续, 不要再跑候选"。
+MAX_GRASP_CANDIDATES = 1
 
 # 预抓取位姿相对抓取点的抬法, 从高到低试: 每项是 (沿接近轴后退, 世界Z再抬)。
 #
@@ -155,41 +155,22 @@ class PickAndPlaceSkill(Skill):
                 continue
 
             # 候选顺序: 最竖直的排第一 (理由见 _most_vertical), 其余按 AnyGrasp 分数。
-            # **试到夹住为止, 但一个观察位姿上最多 MAX_GRASP_CANDIDATES 个。**
-            #
-            # 为什么不是"只试一个": 原版 planner.py:737 是"每个候选都试, 试到夹住为止",
-            # 抓取成功率一直靠它兜着。0f0b421 改成只试一个, 理由是"失败的候选本身也没被
-            # 修好过", 现场看到的是夹爪在果子旁边反复开合。那条理由只在**所有**候选都
-            # 失败时才成立; 候选之间的差别是真实存在的 —— 同一次拍摄里桃子上最竖直的
-            # 候选手爪点压在顶沿 (离中心 35mm), 而离中心 6mm 的那两个在 58.7°, 选谁就是
-            # 夹住和空合的区别。而"哪个好"没有可靠的事前判据: _most_vertical 只看倾角,
-            # 倾角跟"手爪点在不在果子上"根本不相关。
-            #
-            # 所以留一个上限内的重试。第一个就夹住时 (常态) 一次都不多试, 现场看到的和
-            # "只试一个"完全一样; 只有真没夹住才往下走, 最多三个。上限存在的意义是
-            # 不让"所有候选都失败"退化成十几次开合 —— 那种情况本来就是这个位姿的几何
-            # 不行, 该做的是换视角, 不是继续试。
-            #
-            # 每次 _execute_grasping_twin_js_2 结束都会 control_arm(pose_type=idx) 回到
-            # 观察位姿, 所以下一个候选的 current_js 初值仍然是对的。
+            # 挑一个最竖直的, 试一次。夹不到就换下一个观察位姿, **不遍历候选**。
+            # 用户 2026-10-06 / 2026-10-07: "一次抓不到直接继续, 不要再跑候选" ——
+            # 现场看到的是夹爪在果子旁边反复开合。而且候选之间"哪个好"没有可靠的事前
+            # 判据: _most_vertical 只看倾角, 倾角跟"手爪点在不在果子上"根本不相关。
+            # 把下面这行离框中心的数打出来就是为了盯这件事。
             candidate = self._most_vertical(grasping_pose_world)
-            order = [candidate] + [c for c in grasping_pose_world if c is not candidate]
-            # 手爪点离物体框中心多远 —— 用户 2026-10-06: "总感觉抓的很偏, 两次都是在
-            # 边缘刚好"。_most_vertical 只看倾角, 倾角跟"手爪点在不在物体中间"无关,
-            # 所以这个数得打出来才知道是不是真偏。
             off_of = {}
             if len(offsets_px) == len(grasping_pose_world):
                 off_of = {id(p): o for p, o in zip(grasping_pose_world, offsets_px)}
-            for n, c in enumerate(order[:MAX_GRASP_CANDIDATES], 1):
-                cprint(f"=================== 候选 {n}/{min(len(order), MAX_GRASP_CANDIDATES)}: "
-                       f"倾角 {self._tilt_deg(c):.1f}° 离框中心 "
-                       f"{off_of.get(id(c), float('nan')):.0f}px ===================", "yellow")
-                check = self._execute_grasping_twin_js_2(c, idx=key)
-                if check:
-                    break
-            # 夹住了就收工。少了这句, 内层的 break 只跳出候选循环, 外层继续去下一个
-            # 观察位姿 —— 手里已经攥着果子了, 那边当然"检不出目标", 于是报"东西被挪了"
-            # 停下来问人。2026-10-06 抓黄瓜 (seen_from=[grasp2,grasp3]) 就是这么假失败的。
+            cprint(f"=================== 候选: 倾角 {self._tilt_deg(candidate):.1f}° 离框中心 "
+                   f"{off_of.get(id(candidate), float('nan')):.0f}px "
+                   f"(共 {len(grasping_pose_world)} 个候选) ===================", "yellow")
+            check = self._execute_grasping_twin_js_2(candidate, idx=key)
+            # 夹住了就收工。少了这句, 外层会继续去下一个观察位姿 —— 手里已经攥着果子
+            # 了, 那边当然"检不出目标", 于是报"东西被挪了"停下来问人。2026-10-06 抓
+            # 黄瓜 (seen_from=[grasp2,grasp3]) 就是这么假失败的。
             if check:
                 break
 

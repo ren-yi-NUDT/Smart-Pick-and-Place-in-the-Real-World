@@ -137,21 +137,21 @@ def test_a_fresh_map_lets_it_move(monkeypatch):
 # ---------------------------------------------------------------------------
 # 候选重试: 最竖直的先试, 上限 MAX_GRASP_CANDIDATES 个
 # ---------------------------------------------------------------------------
-def test_grasp_retries_candidates_but_is_capped():
-    """一个位姿上试到夹住为止, 但不超过上限。
+def test_grasp_tries_exactly_one_candidate_per_pose():
+    """一个观察位姿上只试一个候选, 夹不到就换位姿。
 
-    原版 planner.py 是"每个候选都试", 0f0b421 砍成只试一个 —— 砍掉的那半边正是抓取
-    成功率。这里钉住三件事: 还是只有一个执行点 (不再按分数逐个试到十几个), 有上限,
-    且挑中的那个排第一。
+    用户 2026-10-06 / 2026-10-07: "一次抓不到直接继续, 不要再跑候选"。中间有一版做成
+    "试到夹住为止, 上限 3", 理由是候选之间的差别真实存在 —— 但现场看到的是夹爪在果子
+    旁边反复开合, 而"哪个好"没有可靠的事前判据。钉死: 一个执行点, 不按分数遍历。
     """
     from skills.pick_and_place import MAX_GRASP_CANDIDATES
 
+    assert MAX_GRASP_CANDIDATES == 1
     src = (ROOT / "skills/pick_and_place.py").read_text()
     assert src.count("self._execute_grasping_twin_js_2(") == 1
     assert "for i in range(len(grasping_pose_world))" not in src
     assert "Checking pose:" not in src
-    assert "order[:MAX_GRASP_CANDIDATES]" in src
-    assert 1 < MAX_GRASP_CANDIDATES <= 5        # 1 = 回到只试一个; 太大 = 反复开合
+    assert "order[:MAX_GRASP_CANDIDATES]" not in src, "别再按候选循环了"
 
 
 def test_a_successful_grasp_stops_walking_the_observation_poses(monkeypatch):
