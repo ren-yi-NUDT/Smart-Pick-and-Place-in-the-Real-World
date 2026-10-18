@@ -5,7 +5,7 @@ detection.
 Usage:
     from core.perception import Perception
     perc = Perception(
-        yolo_model_path="/path/to/yolov8x-worldv2.pt",
+        yolo_model_path="/path/to/yoloe-26x-seg.pt",
         anygrasp_checkpoint="/path/to/checkpoint_detection.tar",
     )
     detections = perc.detect_objects(rgb, class_names=["orange"])
@@ -21,7 +21,7 @@ import numpy as np
 from datetime import datetime
 from PIL import Image
 from termcolor import cprint
-from ultralytics import YOLOWorld
+from ultralytics import YOLO
 
 from core.abc import BasePerception
 from core.config import (
@@ -130,9 +130,11 @@ class Perception(BasePerception):
         self.save_path = save_path
         self.checkpoint_path = anygrasp_checkpoint
 
-        # Load YOLO-World
+        # Load open-vocab detector (YOLOE-26, successor of YOLO-World; same
+        # set_classes/predict API). Text prompts re-embed via the MobileCLIP
+        # text tower on every set_classes call — needs mobileclip_blt.ts in cwd.
         if yolo_model_path:
-            self.yolo_model = YOLOWorld(yolo_model_path)
+            self.yolo_model = YOLO(yolo_model_path)
         else:
             self.yolo_model = None
 
@@ -226,9 +228,8 @@ class Perception(BasePerception):
         Parameters
         ----------
         class_name : str
-            Target class (comma-separated). Given together with *raw_depth*, the
-            target's occluded depth is reconstructed first -- see
-            :func:`core.camera.dome_fill_box`.
+            Retained for API compatibility. The wrist detector uses the generic
+            ``object`` class; semantic identity is supplied by the global view.
         raw_depth : np.ndarray
             The un-filled depth of the same frame.
 

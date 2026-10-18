@@ -13,6 +13,24 @@ import argparse
 import os
 
 
+def _ensure_anygrasp_environment(skill):
+    """Re-exec skills in the environment containing the AnyGrasp dependencies."""
+    if skill == "list" or os.environ.get("ANYGRASP_ENV_READY") == "1":
+        return
+    target = os.environ.get(
+        "ANYGRASP_PYTHON", "/home/zz/anaconda3/envs/anygrasp/bin/python"
+    )
+    if not os.path.isfile(target) or os.path.realpath(sys.executable) == os.path.realpath(target):
+        return
+    env = os.environ.copy()
+    env["ANYGRASP_ENV_READY"] = "1"
+    cudnn = "/home/zz/anaconda3/envs/anygrasp/lib/python3.9/site-packages/nvidia/cudnn/lib"
+    env["LD_LIBRARY_PATH"] = ":".join(
+        part for part in (cudnn, env.get("LD_LIBRARY_PATH", "")) if part
+    )
+    os.execvpe(target, [target, *sys.argv], env)
+
+
 def main():
     project_root = os.path.dirname(os.path.abspath(__file__))
     os.chdir(project_root)
@@ -24,6 +42,7 @@ def main():
     parser.add_argument("--config", default="./robot_config.json", help="Robot config path")
     parser.add_argument("--save-path", default="./log", help="Save directory")
     args = parser.parse_args()
+    _ensure_anygrasp_environment(args.skill)
 
     # Import all skills to trigger registration
     import skills

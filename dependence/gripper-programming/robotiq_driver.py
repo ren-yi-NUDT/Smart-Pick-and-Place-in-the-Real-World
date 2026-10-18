@@ -81,7 +81,7 @@ class Robotiq85:
         self,
         port: str = "/dev/ttyUSB0",
         baudrate: int = 115200,
-        slave: int = 9,
+        slave: int = 1,
         timeout: float = 1.0,
     ):
         self.port = port

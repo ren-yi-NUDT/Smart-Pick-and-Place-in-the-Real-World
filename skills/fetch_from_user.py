@@ -85,12 +85,8 @@ class FetchFromUserSkill(Skill):
         # ---- Step 6: Placement phase ----
         if container.lower() in ["trash", "垃圾桶", "garbage", "bin"]:
             cprint("=================== Trash mode detected ===================", "cyan")
-            throw_pose = self.config.get_pose("throw_to_trash_pose")
-            if throw_pose is None:
-                cprint("=================== Trash task failed: throw_to_trash_pose not found ===================", "red")
-                return False
-            joint_angles = [throw_pose[f"J{i}"] for i in range(1, 7)]
-            self.control_arm(trajectory=np.array([joint_angles]), speed=15)
+            # 贴合原项目 place_at_named_pose: 录制位姿直接裸发关节角。
+            self.control_arm(pose_type="throw_to_trash_pose", speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
             time.sleep(1)
@@ -100,14 +96,10 @@ class FetchFromUserSkill(Skill):
 
         if container.lower() in ["desk", "桌子", "table"]:
             cprint("=================== Desk placement mode detected ===================", "cyan")
+            # 贴合原项目: 三个桌位姿随机挑一个, 裸发录制关节角。
             import random
-            selected = random.choice(["desk_pose_1", "desk_pose_2", "desk_pose_3"])
-            desk_pose = self.config.get_pose(selected)
-            if desk_pose is None:
-                cprint(f"=================== Desk task failed: {selected} not found ===================", "red")
-                return False
-            joint_angles = [desk_pose[f"J{i}"] for i in range(1, 7)]
-            self.control_arm(trajectory=np.array([joint_angles]), speed=15)
+            name = random.choice(["desk_pose_1", "desk_pose_2", "desk_pose_3"])
+            self.control_arm(pose_type=name, speed=15)
             time.sleep(0.5)
             self.control_hand(cmd_type="open")
             time.sleep(1)

@@ -1,0 +1,36 @@
+{
+ "scan": [
+  "apple",
+  "banana",
+  "cucumber",
+  "lemon",
+  "orange",
+  "peach",
+  "pitaya",
+  "plum"
+ ],
+ "gloss": {
+  "杯子": "cup",
+  "杯": "cup",
+  "火龙果": "pitaya",
+  "猕猴桃": "kiwi fruit",
+  "瓶子": "bottle",
+  "瓶": "bottle",
+  "玩具": "toy",
+  "梨": "pear",
+  "水果": "fruit",
+  "橙子": "orange",
+  "橘子": "orange",
+  "柠檬": "lemon",
+  "桃子": "peach",
+  "榴莲": "durian",
+  "草莓": "strawberry",
+  "葡萄": "grape",
+  "蔬菜": "vegetable",
+  "西瓜": "watermelon",
+  "零食": "snack",
+  "黄瓜": "cucumber",
+  "苹果": "apple",
+  "香蕉": "banana"
+ }
+}

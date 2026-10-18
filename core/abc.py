@@ -68,28 +68,6 @@ class BaseArm(ABC):
     def execute_trajectory(self, trajectory, speed: int = 20) -> bool: ...
 
 
-class BaseHand(ABC):
-    """Dexterous hand / gripper controller."""
-
-    @abstractmethod
-    def connect(self) -> bool: ...
-
-    @abstractmethod
-    def close_connection(self) -> None: ...
-
-    @abstractmethod
-    def open(self) -> dict: ...
-
-    @abstractmethod
-    def close(self) -> dict: ...
-
-    @abstractmethod
-    def get_state(self) -> dict: ...
-
-    @abstractmethod
-    def is_grasping(self) -> bool: ...
-
-
 class BaseCamera(ABC):
     """RGB-D camera capture."""
 

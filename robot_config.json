@@ -79,20 +79,20 @@
         "J6": -17.894
     },
     "handover_pose": {
-        "J1": -55.998,
-        "J2": 36.077,
-        "J3": 58.833,
-        "J4": -162.371,
-        "J5": -5.324,
-        "J6": -17.892
+        "J1": -59.209,
+        "J2": 13.432,
+        "J3": 79.648,
+        "J4": 0.97,
+        "J5": 22.796,
+        "J6": 181.822
     },
     "throw_to_trash_pose": {
-        "J1": 101.951,
-        "J2": 24.906,
-        "J3": 60.157,
-        "J4": -161.525,
-        "J5": -59.769,
-        "J6": -26.607
+        "J1": 97.804,
+        "J2": 18.753,
+        "J3": 78.645,
+        "J4": 19.499,
+        "J5": 50.662,
+        "J6": 154.977
     },
     "look_over_what_in_user_hand_pose": {
         "J1": -56.001,
@@ -129,5 +129,49 @@
     "base_link_name": "base_link",
     "camera_link_name": "cam_link_grasp",
     "hand_effector_name": "gripper_endeffector",
-    "arm_end_link_name": "link_6"
+    "arm_end_link_name": "link_6",
+    "grasp_scoring": {
+        "weights": {
+            "anygrasp": 0.4,
+            "twin": 0.3,
+            "width": 0.15,
+            "length": 0.05,
+            "angle": 0.1
+        },
+        "preferred_width_m": 0.045,
+        "width_tolerance_m": 0.035,
+        "max_width_m": 0.085,
+        "gripper_height_m": 0.03,
+        "preferred_gripper_height_m": 0.03,
+        "height_tolerance_m": 0.01,
+        "preferred_approach_axis_base": [
+            0.0,
+            0.0,
+            -1.0
+        ],
+        "approach_axis_local": [
+            0.0,
+            0.0,
+            1.0
+        ],
+        "high_pregrasp_offset_m": 0.08,
+        "pregrasp_offset_m": 0.02,
+        "approach_interval_m": 0.025,
+        "approach_rotation_interval_rad": 0.15,
+        "joint_step_limit_rad": 0.12,
+        "max_gripper_axis_rotation_deg": 130,
+        "execution_offset_base_m": [
+            0.0,
+            0.0,
+            -0.002
+        ],
+        "grasp_observation_speed": 15,
+        "grasp_trajectory_speed": 6,
+        "gripper_close_force": 10,
+        "gripper_close_speed": 10,
+        "grasp_recovery_speed": 10,
+        "grasp_post_lift_speed": 15,
+        "gripper_hold_force": 40,
+        "verify_lift": true
+    }
 }

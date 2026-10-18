@@ -29,53 +29,12 @@ from scipy.spatial.transform import Slerp
 SIMULATION_STEP_DELAY = 1 / 240.
 ROUND_NUMBER = 3
 
-# 量 link 到桌面距离时的查询半径。给足 1m, 免得够远的 link 查不到点被当成"贴着桌面"。
-_Z_QUERY_M = 1.0
-
 def visualize_pose(pos, orn, d = 1):
     T = calcul_transformation_matrix(pos, orn)
     draw_axis(T, duration=d)
 
 
-def insert_lift_waypoints(target_pos_list, target_orn_list, curr_pos, min_z_list,
-                          z_min_threshold=0.10, z_lift_margin=0.02,
-                          lateral_threshold=0.05):
-    """
-    给"要从别处横向过去、又贴桌面"的目标点补一个抬升路点。
-
-    位姿本身不用改: 路点放在目标点正上方, 抬升量按该目标点实测的最低 link
-    (min_z_list, 世界坐标系, 桌面=0) 反推, 保证横向那一段整条都在
-    z_min_threshold 之上。纯垂直下探(与上一个点 XY 相同)不补 —— 抓取/放桌面
-    本来就要贴到桌面, 补了反而够不着。
-
-    lateral_threshold 是"算横向移动"的最小 XY 距离。原来写死 1mm, 于是抓取的
-    "预抓取位姿 -> 抓取位姿"也被算成横向 —— 这两个点只差一个沿夹爪 z 的 2cm 偏移,
-    夹爪一斜 XY 就差 1.4cm。实测一次橙子抓取: 为了跨这 1.4cm, 臂先抬 107mm 再落
-    回来, 就是用户看到的"上下来回一段才抓"。这种短距离位移不构成横扫, 而且紧贴
-    物体旁边做大幅垂直运动反而更容易碰倒它。默认取一个轨迹离散步长 (0.05m),
-    比它短的位移在轨迹里本来就是一段直线, 不需要保护。
-
-    返回 (pos_list, orn_list, is_lift_list), 三者等长。
-    """
-    pos_out, orn_out, lift_out = [], [], []
-    ref_pos = np.array(curr_pos, dtype=float)
-    for pos_i, orn_i, min_z in zip(target_pos_list, target_orn_list, min_z_list):
-        tgt = np.array(pos_i, dtype=float)
-        lateral = np.linalg.norm(tgt[:2] - ref_pos[:2]) > lateral_threshold
-        if min_z < z_min_threshold and lateral:
-            rise = max(0.0, z_min_threshold - min_z) + z_lift_margin
-            lift = [tgt[0], tgt[1], tgt[2] + rise]
-            pos_out.append(lift)
-            orn_out.append(list(orn_i))
-            lift_out.append(True)
-            ref_pos = np.array(lift, dtype=float)
-        pos_out.append(list(pos_i))
-        orn_out.append(list(orn_i))
-        lift_out.append(False)
-        ref_pos = tgt
-    return pos_out, orn_out, lift_out
-
-SUPPORTED_TWIN_SRV_TYPE = ["reachability_check", "collision_check", "IK_calculation","trajectory_generation" , "trajectory_generation2"]
+SUPPORTED_TWIN_SRV_TYPE = ["reachability_check", "collision_check", "IK_calculation", "trajectory_generation" , "trajectory_generation2"]
 
 class TwinTest2(World):
     def __init__(self, vis=True):
@@ -95,7 +54,9 @@ class TwinTest2(World):
         self.server_socket.listen(5)
 
         self.socket_thread = threading.Thread(target=self.socket_server_worker)
-        self.socket_thread.daemon = True 
+        self.socket_thread.daemon = True
+        # 一次只跑一个推理: PyBullet 仿真状态非线程安全, 并发请求会互相污染。
+        self.exec_lock = threading.Lock()
         self.socket_thread.start()
 
         self.setup()
@@ -107,27 +68,57 @@ class TwinTest2(World):
                 self.server_socket.settimeout(1.0)
                 try:
                     conn, addr = self.server_socket.accept()
-                    self.handle_client(conn)
+                    # 每连接一线程: 同 8010, 一个空闲连接会让后续客户端全饿死。
+                    threading.Thread(target=self.handle_client, args=(conn,),
+                                     daemon=True).start()
                 except socket.timeout:
                     continue
             except Exception as e:
                 print(f"Socket Server Error: {e}")
                 rospy.sleep(1)
 
+    @staticmethod
+    def _recv_exact(conn, n):
+        """循环 recv 直到收满 n 字节; 连接关闭返回 None。"""
+        buf = b""
+        while len(buf) < n:
+            chunk = conn.recv(n - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return buf
+
     def handle_client(self, conn):
-        """处理单个客户端请求"""
+        """处理单个客户端请求 (请求/响应都是 4 字节大端长度前缀 + JSON)。
+
+        请求必须按前缀整包收: 裸 recv(1024) 在请求超过 1024 字节时被截断,
+        json.loads 直接失败。trajectory_generation2 带 3 个目标位姿就 ~740 字节。
+        """
         with conn:
             while not rospy.is_shutdown():
                 try:
-                    data = conn.recv(1024)
-                    if not data: break
-                    
-                    msg_str = data.decode('utf-8')
-                    data_bytes = self.twin_callback(msg_str).encode('utf-8')
-                    length_prefix = struct.pack('>I', len(data_bytes))
-                    conn.sendall(length_prefix)
+                    header = self._recv_exact(conn, 4)
+                    if not header:
+                        break
+                    length = struct.unpack('>I', header)[0]
+                    if length > 10 * 1024 * 1024:
+                        print(f"Client handler error: request length {length} too large")
+                        break
+                    payload = self._recv_exact(conn, length)
+                    if payload is None:
+                        break
+
+                    msg_str = payload.decode('utf-8')
+                    try:
+                        with self.exec_lock:
+                            data_bytes = self.twin_callback(msg_str).encode('utf-8')
+                    except Exception as e:
+                        # 规划抛异常也必须回包: 客户端收不到响应会一直阻塞在 recv 上
+                        rospy.logerr(f"twin_callback error: {e}")
+                        data_bytes = json.dumps({"srv": "twin_inference", "value": 0,
+                                                 "info": {"error": str(e)}}).encode('utf-8')
+                    conn.sendall(struct.pack('>I', len(data_bytes)))
                     conn.sendall(data_bytes)
-                    # conn.sendall(response)
                 except Exception as e:
                     print(f"Client handler error: {e}")
                     break
@@ -148,7 +139,7 @@ class TwinTest2(World):
         
         try:
             struct_name = srv_config["struct"]
-            target_pose = srv_config["target_pose"]
+            target_pose = srv_config.get("target_pose")
             curr_js = srv_config["current_js"]
             cprint(f"struct_name::{struct_name}")
             cprint(f"target_pose::{target_pose}")
@@ -241,8 +232,8 @@ class TwinTest2(World):
             rospy.loginfo(f" {k}:  {v}")
         print("_________________________________________\n")
         return check,info
-    
-    
+
+
     def linear_traj_generation(self, config):
                 
         struct_name = config["struct"]
@@ -285,18 +276,12 @@ class TwinTest2(World):
             
             # reset robot to interval pose
             arm = self.robot.robot_structs[struct_name]
-            prev_js = np.array(intermediate_js, dtype=float)
             arm.reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
 
-            # 同 linear_traj_generation2: 先读构型再 step (trajectory 里存的是 intermediate_js)
+            # 先读构型再 step: trajectory 里存的是 intermediate_js, step 后读会被
+            # 重力甩离 IK 解 (见 linear_traj_generation2 里的说明)
             intermediate_js = arm.get_joint_pose()
 
-            # 同 linear_traj_generation2: 相邻路点换腕分支 -> 真机会扫过桌面, 直接拒发
-            jump = float(np.max(np.abs(intermediate_js - prev_js)))
-            if jump > np.radians(90):
-                rospy.logwarn(f"BRANCH_JUMP {np.degrees(jump):.1f}deg at {intermediate_pos} "
-                              f"CANNOT GENERATE TRAJECTORY")
-                return 0, trajectory, trajectory_ee, infos
             is_reach, delta_xyz, delta_rpy = arm.check_reach(intermediate_pos, intermediate_orn
                                                              , xyz_threshold =0.01, rpy_threshold = 0.01)
 
@@ -322,51 +307,40 @@ class TwinTest2(World):
         rospy.loginfo(f"TRAJECTORY GENERATED FOR CURENT POSE:{[curr_pos, curr_orn]} TO TARGET POSE:{[target_pos, target_orn]}")
         return 1, trajectory, trajectory_ee, infos
     
-    def check_arm_joints_z_height(self, struct_name, z_min_threshold=0.10):
+    def check_arm_joints_z_height(self, z_min_threshold=0.02):
         """
-        检查机械臂所有 link 的 Z 高度是否低于阈值
-
-        三个曾经的坑:
-          1. 原来只遍历 Arm struct 的 link_names (= link_1..link_6), 夹爪那 10 个 link
-             一个都不查 —— 而夹爪比最低臂杆还低 8~13cm, 盲区正好是夹爪长度。
-             实测 grasp2: 臂 link 最低 0.105 刚好过 0.10 的线, 夹爪最低 0.000 贴桌面,
-             Z 检查报"安全"而夹爪已经坐在桌上。
-          2. 原来用 getLinkState()[0] (关节原点), 不是几何最低点, 本身就低估。
-             改用 getAABB 的最低角点 —— 但 AABB 是**轴对齐**包围盒, link 一斜,
-             盒子就比几何大一圈, 于是从"低估"翻成"高估"。
-          3. 实测 (2026-10-04) 同一个位姿: right_inner_finger 的 AABB 最低点
-             -0.0195, 而它到桌面平面的真实距离是 +0.0005 —— 指尖正好贴桌面,
-             差 20mm 全是 AABB 的虚高 (Link4 上虚高 43mm)。后果是"指尖贴桌面"
-             这种本来正确的抓取位姿被判成"插进桌面", 直接拒掉。实测一个橙子
-             的抓取候选: IK 残差 0.0001m (完美), 三个候选全栽在这个检查上。
-             现在改用 getClosestPoints 量到桌面平面的真实距离。
-             (桌面 plane 不在 check_collision 的检查范围内 —— 那里显式跳过
-             body 0 —— 所以这个 z 检查是防插桌面的唯一一道关。)
+        检查机械臂各关节 link 的 Z 高度是否低于阈值 (原版实现)
 
         Args:
-            struct_name: 机械臂结构名称 (rm65)
-            z_min_threshold: Z高度最小阈值，默认0.10m
+            z_min_threshold: Z高度最小阈值，默认0.02m
 
         Returns:
-            is_safe: 是否安全 (所有 link 几何最低点 > z_min_threshold)
-            unsafe_links: 低于阈值的 link 列表 [[link_name, z_value], ...]
+            is_safe: 是否安全 (所有关节Z > z_min_threshold)
+            unsafe_links: 低于阈值的关节名称列表 [[link_name, z_value], ...]
             min_z: 最低的Z值
         """
-        body = self.robot.id
-        plane = self.planeID
+        arm_struct = self.robot.robot_structs["rm65"]
+        # 获取机械臂关节对应的link ID
+        # 排除 base_link 和 arm_end_link，只检查 Link1-Link6
+        arm_link_ids = arm_struct.link_ids
+        arm_link_names = arm_struct.link_names
+
+        # 过滤掉 base_link 和 end_link，只检查实际的机械臂关节 link
+        links_to_skip = ["base_link", "arm_end_link", "robot_base_link"]
+        check_link_ids = []
+        check_link_names = []
+        for i, name in enumerate(arm_link_names):
+            if name not in links_to_skip and "base" not in name.lower():
+                check_link_ids.append(arm_link_ids[i])
+                check_link_names.append(name)
+
         unsafe_links = []
         min_z = float('inf')
 
-        for link_id in range(p.getNumJoints(body)):
-            link_name = p.getJointInfo(body, link_id)[12].decode()
-            # 跳过机器人底座本体; 夹爪的 gripper_base 要看 (它下面就是手指)
-            if link_name in ("base_link", "robot_base_link", "arm_end_link"):
-                continue
-
-            # 到桌面平面的真实距离 (不是 AABB 角点, 见上面坑 3)。负值 = 插进桌面。
-            # 没有碰撞几何的 link (如 gripper_endeffector) 查不到点, 当作够远。
-            pts = p.getClosestPoints(bodyA=body, bodyB=plane, linkIndexA=link_id, distance=_Z_QUERY_M)
-            link_z = min(q[8] for q in pts) if pts else _Z_QUERY_M
+        for link_id, link_name in zip(check_link_ids, check_link_names):
+            link_state = p.getLinkState(self.robot.id, link_id)
+            link_pos = link_state[0]  # 世界坐标系中的位置 [x, y, z]
+            link_z = link_pos[2]
             min_z = min(min_z, link_z)
 
             if link_z < z_min_threshold:
@@ -381,12 +355,12 @@ class TwinTest2(World):
         target_pose_list = config["target_pose"]
         curr_js = config["current_js"]
         interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
+        rotation_interval_rad = config.get("rotation_interval_rad", 0.15)
+        joint_step_limit_rad = config.get("joint_step_limit_rad", 0.12)
         loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
-        z_min_threshold = config["z_min_threshold"] if "z_min_threshold" in config else 0.10  # 横向转移的安全高度
-        # 硬检查阈值: 低于它才算真的插进桌面。抓取/放桌面本来就要贴到桌面,
-        # 所以目标点和轨迹点的检查用这个 (0 = 桌面平面), 而不是 z_min_threshold。
-        z_floor_threshold = config["z_floor_threshold"] if "z_floor_threshold" in config else 0.0
-        z_lift_margin = config["z_lift_margin"] if "z_lift_margin" in config else 0.02
+        xyz_threshold = config.get("xyz_threshold", 0.015)
+        rpy_threshold = config.get("rpy_threshold", 0.05)
+        z_min_threshold = config["z_min_threshold"] if "z_min_threshold" in config else 0.02  # 关节最低高度阈值
         if struct_name != "rm65":
             rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT  SUPPORT CURRENT STRUCT: {struct_name}")
             return 0, {}
@@ -423,10 +397,10 @@ class TwinTest2(World):
             # z 高度检查同理 —— 漂移是往下塌的, 会把本来贴桌面的夹爪报成"插进桌面"。
             js_fake = arm.get_joint_pose()
             is_reach, delta_xyz, delta_rpy = arm.check_reach(target_pos, target_orn
-                                                             , xyz_threshold =0.01, rpy_threshold = 0.01)
+                                                             , xyz_threshold =xyz_threshold, rpy_threshold = rpy_threshold)
             is_collide, collide_id = self.robot.check_collision()
             # 检查关节Z高度是否安全
-            is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(struct_name, z_floor_threshold)
+            is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(z_min_threshold)
 
             self.step()
             info = {}
@@ -450,7 +424,7 @@ class TwinTest2(World):
 
             # Z高度不安全则直接失败
             if not is_z_safe:
-                rospy.logwarn(f"Z_HEIGHT_UNSAFE: Links {unsafe_links} below {z_floor_threshold}m at target pose {target_pos}")
+                rospy.logwarn(f"Z_HEIGHT_UNSAFE: Links {unsafe_links} below {z_min_threshold}m at target pose {target_pos}")
                 return 0, [], [], infos
 
         if loose_constraint:
@@ -468,17 +442,6 @@ class TwinTest2(World):
         # get curr
         curr_pos, curr_orn = self.robot.robot_structs[struct_name].get_end_link_pose_self()
 
-        # 低目标点(贴桌面的放桌面位姿、低观察位姿)如果要从别处横向过去, 先补一个
-        # "抬到安全高度 -> 平移 -> 垂直下探" 的路点。位姿本身不用改, 横向那一段
-        # 整条都在 z_min_threshold 之上。抬升量按该目标点实测的最低 link 反推,
-        # 所以不依赖任何魔数。纯垂直下探(与上一个点 XY 相同)不补 —— 抓取要贴桌面。
-        # ponytail: 抬升路点不单独做可达性预检, 交给下面主循环的逐步检查兜底 ——
-        # 真不可达时 check_collision 会返回 0, 上层看到 value=0 不会执行任何动作。
-        target_pos_list, target_orn_list, _ = insert_lift_waypoints(
-            target_pos_list, target_orn_list, curr_pos,
-            [info["min_z"] for info in infos], z_min_threshold, z_lift_margin,
-            lateral_threshold=interval_threshold)
-
         trajectory  = []
         trajectory_ee = []
         infos = []
@@ -493,7 +456,20 @@ class TwinTest2(World):
             # generate traj from fake pose to target
             target_pos_arr, target_orn_arr = np.array(target_pos), np.array(target_orn)
             delta_xyz = np.linalg.norm(target_pos_arr - fake_pos)
-            loop_num  = max(int(np.floor(delta_xyz/interval_threshold)), 1)
+            # Position-only subdivision can leave a large wrist rotation in
+            # one command when the grasp orientation differs from the
+            # observation pose. Subdivide by both translation and the
+            # shortest quaternion angle so the controller receives a gradual
+            # pose change.
+            quat_dot = float(np.dot(np.asarray(fake_orn), target_orn_arr))
+            rotation_angle = 2.0 * np.arccos(
+                np.clip(abs(quat_dot), -1.0, 1.0)
+            )
+            loop_num = max(
+                int(np.ceil(delta_xyz / max(interval_threshold, 1e-6))),
+                int(np.ceil(rotation_angle / max(rotation_interval_rad, 1e-6))),
+                1,
+            )
             
             intermediate_pos_list = [fake_pos + (target_pos_arr - fake_pos)*((l+1)/loop_num) for l in range(loop_num)]
             intermediate_orn_list = slerp(fake_orn, target_orn_arr, loop_num+1)[1:]
@@ -508,31 +484,61 @@ class TwinTest2(World):
                     time.sleep(0.1)
                 
                 # reset robot to interval pose
+                joint_start_js = np.asarray(intermediate_js, dtype=float).copy()
                 arm = self.robot.robot_structs[struct_name]
-                prev_js = np.array(intermediate_js, dtype=float)
                 arm.reset_by_ee_pose_self(intermediate_pos, intermediate_orn, js = intermediate_js)
 
-                # 同 381 行: 先读构型再 step。这里更要紧 —— trajectory 里存的是
-                # intermediate_js, 而这条轨迹是要发给真机的。在 step 之后取, 取到的是
-                # 仿真里被甩开 0.4rad 的关节角, 等于把错的目标点发给机械臂。
+                # 先读构型再 step。这里更要紧 —— trajectory 里存的是 intermediate_js,
+                # 而这条轨迹是要发给真机的。step 之后取, 取到的是被重力甩开 0.4rad 的
+                # 关节角, 等于把错的目标点发给机械臂。
                 intermediate_js = arm.get_joint_pose()
 
-                # 分支一致性。enforce_joint_limits 只保证"这个点本身合法"; 如果相邻
-                # 路点换了腕部分支 (J4 一次跳 ~180°), 真机照着走会让整条臂扫过桌面。
-                # 相邻路点间距恒为 interval_threshold (~50mm), 这个尺度下 90° 的关节
-                # 跳变只可能来自换分支。判不可用 -> 上层去试下一个观察位姿, 而不是
-                # 发一条会把夹爪甩飞的轨迹。
-                jump = float(np.max(np.abs(intermediate_js - prev_js)))
-                if jump > np.radians(90):
-                    rospy.logwarn(f"BRANCH_JUMP {np.degrees(jump):.1f}deg at {intermediate_pos} "
-                                  f"(prev={np.degrees(prev_js).round(1)} now={np.degrees(intermediate_js).round(1)}) "
-                                  f"CANNOT GENERATE TRAJECTORY")
-                    return 0, trajectory, trajectory_ee, infos
                 is_reach, delta_xyz, delta_rpy = arm.check_reach(intermediate_pos, intermediate_orn
                                                                  , xyz_threshold =0.01, rpy_threshold = 0.01)
                 is_collide, collide_id = self.robot.check_collision()
                 # 检查关节Z高度
-                is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(struct_name, z_floor_threshold)
+                is_z_safe, unsafe_links, min_z = self.check_arm_joints_z_height(z_min_threshold)
+
+                # IK can occasionally switch solution branches even when the
+                # Cartesian step is small. Insert joint-space waypoints and
+                # validate every inserted state before sending the path out.
+                joint_delta = np.max(
+                    np.abs(np.asarray(intermediate_js) - joint_start_js)
+                )
+                joint_steps = max(
+                    int(np.ceil(joint_delta / max(joint_step_limit_rad, 1e-6))),
+                    1,
+                )
+                for joint_step in range(1, joint_steps):
+                    ratio = joint_step / float(joint_steps)
+                    safe_js = (
+                        joint_start_js
+                        + ratio * (
+                            np.asarray(intermediate_js, dtype=float)
+                            - joint_start_js
+                        )
+                    ).tolist()
+                    self.robot.robot_structs[struct_name].reset_by_joint_states(
+                        safe_js
+                    )
+                    self.step()
+                    safe_collided, safe_collide_id = self.robot.check_collision()
+                    safe_z, safe_unsafe_links, safe_min_z = (
+                        self.check_arm_joints_z_height(z_min_threshold)
+                    )
+                    if safe_collided or not safe_z:
+                        rospy.logwarn(
+                            "UNSAFE JOINT INTERPOLATION: "
+                            f"collision={safe_collided}, z_safe={safe_z}, "
+                            f"collide_body={safe_collide_id}"
+                        )
+                        return 0, trajectory, trajectory_ee, infos
+                    trajectory.append(list(safe_js))
+                    safe_pos, safe_orn = (
+                        self.robot.robot_structs[struct_name]
+                        .get_end_link_pose_self()
+                    )
+                    trajectory_ee.append(list(safe_pos) + list(safe_orn))
 
                 self.step()
 
@@ -562,7 +568,7 @@ class TwinTest2(World):
                     return 0, trajectory, trajectory_ee, infos
 
                 if not is_z_safe:
-                    rospy.logwarn(f"Z_HEIGHT_UNSAFE: Links {unsafe_links} below {z_floor_threshold}m at pos:{intermediate_pos}")
+                    rospy.logwarn(f"Z_HEIGHT_UNSAFE: Links {unsafe_links} below {z_min_threshold}m at pos:{intermediate_pos}")
                     return 0, trajectory, trajectory_ee, infos
             
             fake_pos = np.array(target_pos)
@@ -572,175 +578,6 @@ class TwinTest2(World):
 
         rospy.loginfo(f"TRAJECTORY GENERATED FOR CURENT POSE:{[curr_pos, curr_orn]} TO TARGET POSE:{[target_pos, target_orn]}")
         return 1, trajectory, trajectory_ee, infos
-
-    def linear_traj_generation3(self, config):
-        struct_name = config["struct"]
-        target_pose_list = config["target_pose"]
-        curr_js = config["current_js"]
-        interval_threshold = config["interval_threshold"] if "interval_threshold" in config else 0.05
-        loose_constraint = config["loose_constraint"] if "loose_constraint" in config else 0
-        
-        if struct_name != "rm65":
-            rospy.logwarn(f"TWIN INFERENCER 'trajectory generation' DOES NOT SUPPORT CURRENT STRUCT: {struct_name}")
-            return 0, {}, [], [] # 修正返回格式以匹配下文
-
-        # --- 准备工作 ---
-        target_pos_list = []
-        target_orn_list = []
-        for target_pose in target_pose_list:
-            target_pos, target_orn = target_pose[:3], target_pose[3:]
-            target_pos_list.append(target_pos)
-            target_orn_list.append(target_orn)
-            if self.vis:
-                visualize_pose(target_pos, target_orn)
-
-        # 获取结构体对象
-        arm_struct = self.robot.robot_structs[struct_name]
-
-        # ------------------------------------------------------------------
-        # 阶段 1: 关键点预检查 (Pre-check & Anchor Generation)
-        # 目的：确保目标点绝对可达，并计算出"无碰撞且合理的"最终关节角度
-        # ------------------------------------------------------------------
-        
-        # 先重置回当前状态
-        arm_struct.reset_by_joint_states(curr_js)
-        arm_struct.move_joint(curr_js)
-        self.step()
-
-        infos = []
-        pre_check_reaches = []
-        pre_check_js_solutions = [] # 存储预检查计算出的目标关节角
-        
-        # 使用虚拟变量进行模拟，不影响物理显示的连贯性（如果不需要实时渲染中间过程）
-        js_fake = copy.deepcopy(curr_js) 
-        
-        for target_pos, target_orn in zip(target_pos_list, target_orn_list):
-            # 尝试求解 IK
-            # 注意：这里我们使用更严格的 solve_robust_ik
-            success, solved_js = self.robot.robot_structs[struct_name].solve_robust_ik(target_pos, target_orn, seed_js=js_fake)
-            
-            # 将模拟机器人设置到解的位置进行碰撞检测
-            if success:
-                arm_struct.reset_by_joint_states(solved_js)
-                js_fake = solved_js # 更新下一个点的种子
-
-            # 验证 Reach (双重确认 IK 误差)。必须在 step 之前 —— step 会把臂甩离 IK 解
-            is_reach, delta_xyz, delta_rpy = arm_struct.check_reach(target_pos, target_orn, xyz_threshold=0.015, rpy_threshold=0.05)
-
-            if success:
-                self.step() # 更新物理引擎状态 (碰撞检测用)
-            # 验证 Collision
-            is_collide, collide_id = self.robot.check_collision()
-            
-            # 综合判定
-            # 如果 IK 求解报告成功，但实际物理误差大或者碰撞，则视为不可行
-            final_reach_status = 1 if (success and is_reach and not is_collide) else 0
-
-            info = {
-                "is_reached": int(final_reach_status),
-                "delta_xyz": delta_xyz,
-                "delta_rpy": delta_rpy,
-                "is_collided": int(is_collide),
-                "collide_body": collide_id,
-                "js_fake": list(js_fake) if success else [],
-                "ee_fake": list(target_pos) + list(target_orn)
-            }
-            if self.vis:
-                print(f"[Pre-check] Reach:{final_reach_status}, Collide:{is_collide}, Err:{delta_xyz:.4f}")
-
-            infos.append(info)
-            pre_check_reaches.append(final_reach_status)
-            pre_check_js_solutions.append(solved_js if success else None)
-
-        # 宽松约束与严格约束判断
-        if loose_constraint:
-            if not pre_check_reaches[-1]: # 只要最后一个点不可达就失败
-                 rospy.logwarn("Target Unreachable in Loose Mode.")
-                 return 0, [], [], infos
-        else:
-            if any(r == 0 for r in pre_check_reaches): # 任何中间关键点不可达就失败
-                rospy.logwarn("Target Unreachable in Strict Mode.")
-                return 0, [], [], infos
-
-        # ------------------------------------------------------------------
-        # 阶段 2: 分段线性轨迹生成 (Interpolation)
-        # 目的：生成平滑轨迹，并利用阶段 1 的结果作为引导
-        # ------------------------------------------------------------------
-        
-        # 重置回起始点
-        arm_struct.reset_by_joint_states(curr_js)
-        arm_struct.move_joint(curr_js)
-        self.step()
-        
-        curr_pos, curr_orn = arm_struct.get_end_link_pose_self()        
-        
-        trajectory_js = [curr_js]
-        trajectory_ee = [list(curr_pos) + list(curr_orn)]
-        
-        fake_pos = np.array(curr_pos)
-        fake_orn = np.array(curr_orn)
-        fake_js = copy.deepcopy(curr_js)
-        
-        for idx, (target_pos, target_orn) in enumerate(zip(target_pos_list, target_orn_list)):
-            target_pos_arr = np.array(target_pos)
-            target_orn_arr = np.array(target_orn)
-            
-            dist = np.linalg.norm(target_pos_arr - fake_pos)
-            
-            # 动态步长计算：保证最小步数，防止极短距离导致的跳变
-            min_steps = 5
-            calc_steps = int(np.floor(dist / interval_threshold))
-            loop_num = max(calc_steps, min_steps)
-
-            # 插值
-            interp_pos_list = [fake_pos + (target_pos_arr - fake_pos) * ((i+1)/loop_num) for i in range(loop_num)]
-            # Slerp 插值需注意：slerp通常返回包括起点的列表，这里取 [1:]
-            interp_orn_list = slerp(fake_orn, target_orn_arr, loop_num + 1)[1:]
-            
-            last_valid_js = copy.deepcopy(fake_js)
-            
-            for l in range(loop_num):
-                t_pos = interp_pos_list[l]
-                t_orn = interp_orn_list[l]
-
-                if self.vis:
-                    visualize_pose(t_pos, t_orn, d=0.05) # d 缩小，显示更精细
-
-                # --- 核心改进：鲁棒 IK 求解 ---
-                # 使用上一步的解 last_valid_js 作为 seed
-                success, solved_js = self.solve_robust_ik(struct_name, t_pos, t_orn, seed_js=last_valid_js)
-                
-                if not success:
-                    # 尝试降级策略：如果只是中间点微小误差，可以容忍吗？
-                    # 严格模式下，为了保证一定是直线，如果不成功则中断
-                    rospy.logerr(f"Traj Gen Failed: IK stuck at step {l}/{loop_num} of segment {idx}")
-                    return 0, trajectory_js, trajectory_ee, infos
-                
-                # --- 核心改进：关节连续性检查 (Anti-Flip) ---
-                # 检查最大关节变化量，防止机械臂"翻转"
-                js_diff = np.max(np.abs(np.array(solved_js) - np.array(last_valid_js)))
-                if js_diff > 1.5: # 阈值根据实际机器人设定，通常相邻帧不应超过 1.5 rad
-                    rospy.logerr(f"Traj Gen Failed: Joint Flip detected (diff: {js_diff:.2f})")
-                    return 0, trajectory_js, trajectory_ee, infos
-
-                # 模拟执行
-                arm_struct.reset_by_joint_states(solved_js)
-                self.step()
-
-                # 记录
-                last_valid_js = solved_js
-                trajectory_js.append(list(solved_js))
-                trajectory_ee.append(list(t_pos) + list(t_orn))
-
-            # 更新段间状态
-            fake_pos = target_pos_arr
-            fake_orn = target_orn_arr
-            # 关键：这里可以选择是否强行对齐到 Pre-check 计算出的完美解
-            # 为了平滑，我们通常继续使用插值的最后结果，但如果误差累积，可以使用 pre_check_js_solutions[idx] 进行修正
-            fake_js = last_valid_js 
-            
-        rospy.loginfo(f"TRAJECTORY GENERATED SAFELY with {len(trajectory_js)} steps.")
-        return 1, trajectory_js, trajectory_ee, infos
 
     def test_client(self):
         

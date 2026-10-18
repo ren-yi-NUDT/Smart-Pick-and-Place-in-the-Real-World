@@ -2,6 +2,7 @@
 import queue
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +32,8 @@ class AzureCamera:
         self._writer_thread = None
         self._latest_frame = None       # BGR ndarray, RGB去alpha
         self._latest_ts = 0.0
+        self._latest_frame_id = 0
+        self.session_id = uuid.uuid4().hex
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()
         self._thread = None
@@ -85,10 +88,18 @@ class AzureCamera:
             self._recorder = None
         self._device.stop()
 
+    def get_snapshot(self, max_age: float = 0.5):
+        """Return one atomic frame packet for downstream vision consumers."""
+        with self._lock:
+            if self._latest_frame is None or time.monotonic() - self._latest_ts > max_age:
+                raise RuntimeError("no fresh frame from Azure Kinect")
+            return {"session_id": self.session_id, "frame_id": self._latest_frame_id,
+                    "captured_at": self._latest_ts, "bgr": self._latest_frame.copy()}
+
     def get_frame(self, max_age: float = 0.5) -> np.ndarray:
         """取最新一帧 BGR。stale 超过 max_age 秒抛 RuntimeError。"""
         with self._lock:
-            if self._latest_frame is None or time.time() - self._latest_ts > max_age:
+            if self._latest_frame is None or time.monotonic() - self._latest_ts > max_age:
                 raise RuntimeError("no fresh frame from Azure Kinect")
             return self._latest_frame.copy()
 
@@ -118,7 +129,8 @@ class AzureCamera:
             frame = cap.color[:, :, :3]
             with self._lock:
                 self._latest_frame = frame
-                self._latest_ts = time.time()
+                self._latest_ts = time.monotonic()
+                self._latest_frame_id += 1
             self.frame_count += 1
         self._stop_evt.set()  # 通知写盘线程收尾
 

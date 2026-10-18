@@ -5,6 +5,9 @@ smart_pick_and_place_ws/devel/
 smart_pick_and_place_ws/*/CMakeLists.txt
 log/
 
+# 外部克隆项目（自带 .git，14GB，含 .venv 与模型）
+Open-Jev/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -212,3 +215,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+# 大文件模型权重, 不入库
+*.pt
+*.ts
+mobileclip_blt.ts
+# 录像与 OpenSeeD(已弃用), 大目录不入库
+recordings/
+dependence/OpenSeeD/

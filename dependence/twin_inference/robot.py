@@ -1077,67 +1077,6 @@ class Arm(BaseStruct):
         self.move_joint(best)
         return True
 
-    def solve_robust_ik(self, target_pos, target_orn, seed_js=None):
-        """
-        增强版 IK 求解器：
-        1. 使用 Null Space 计算 (如果参数可用)。
-        2. 包含重试机制 (Random Restarts)。
-        3. 内部执行 reset 并返回是否成功的标志。
-        """
-        max_attempts = 3 # 最大重试次数
-        best_js = None
-        min_error = float('inf')
-        
-        curr_js_fake = self.create_fake_js(js=seed_js) if seed_js is not None else None
-        # 限位数组必须只覆盖末端链 (6 个), 见 ik_args 注释。
-        # 原来读的是 self.rp_robot —— 这个属性根本不存在, rp 恒为 None, 于是每次都走
-        # 下面"不带限位"的普通 IK 分支, 解的质量差一大截, 而它的返回值又是 pre_check
-        # 的唯一依据。
-        ll, ul, jr, rp = self.ik_args(curr_js_fake if curr_js_fake is not None else self.default_pose["reset"])
-
-        for attempt in range(max_attempts):
-            # 转换坐标系
-            pos_world, orn_world = robot_to_world(self.robot_id, target_pos, target_orn)
-            
-            # 如果是重试 (attempt > 0)，给 seed 加一点随机噪声，帮助跳出局部极小值
-            if attempt > 0 and curr_js_fake is not None:
-                noise = np.random.normal(0, 0.05, size=len(curr_js_fake))
-                iter_js = list(np.array(curr_js_fake) + noise)
-            else:
-                iter_js = curr_js_fake
-
-            # 调用 PyBullet IK
-            joint_poses = p.calculateInverseKinematics(
-                self.robot_id, self.end_link_id, pos_world, orn_world,
-                ll, ul, jr, rp,
-                maxNumIterations=5000, residualThreshold=1e-4, solver=p.IK_DLS
-            )
-            
-            # 提取控制关节
-            controllable_joint_poses = [joint_poses[idx] for idx in self.joint_index]
-            
-            # 验证解的质量 (计算 FK 看看是不是真的到了)
-            # 临时设置模型状态来检查误差 (不渲染)
-            self.reset_by_joint_states(controllable_joint_poses)
-            
-            curr_pos, curr_orn = self.get_end_link_pose_self()
-            # 简单的欧氏距离检查
-            err = np.linalg.norm(np.array(curr_pos) - np.array(target_pos))
-            
-            if err < min_error:
-                min_error = err
-                best_js = controllable_joint_poses
-            
-            if err < 0.01: # 阈值可调
-                return True, best_js
-        
-        # 如果重试多次后误差依然很大
-        if min_error > 0.02:
-            return False, best_js
-        
-        # 勉强接受
-        return True, best_js     
-
 class Head(BaseStruct):
     def __init__(self, config, blocking_mode = False, vis = True):
         super(Head, self).__init__(config, blocking_mode=blocking_mode, vis = vis)

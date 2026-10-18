@@ -30,7 +30,7 @@ TWIN_PORT = 8020
 # ---------------------------------------------------------------------------
 DEFAULT_YOLO_MODEL = os.path.join(
     PROJECT_ROOT,
-    "dependence", "yolo_world", "yolov8x-worldv2.pt",
+    "dependence", "yolo_world", "yoloe-26x-seg.pt",
 )
 DEFAULT_ANYGRASP_CHECKPOINT = os.path.join(
     PROJECT_ROOT,
@@ -50,10 +50,12 @@ DEFAULT_ANYGRASP_CHECKPOINT = os.path.join(
 # 的那一次 (grasp2, 0.645) 框被画面右沿切掉 (x2=637/640), 那一帧 AnyGrasp 一个落在
 # 果子上的候选都给不出来 (掠射角, 点云立不起来)。两个视角一个"看得见抓不着"、
 # 一个"抓得着看不见", 结果就是火龙果根本抓不了。
-# 抓取侧的假阳性代价小: _filtering_pose 还要求框内必须落进 AnyGrasp 候选点, 空框
-# 自然被丢掉; 而且查的是指定类名。容器侧不动。
+# 抓取侧假阳性并非零代价: 2026-10-10 黄瓜回合里, 粉色盘子上出现 0.05 分的幻影
+# "banana" 框, AnyGrasp 候选落进框内被选中, 空抓还撞了盘子。提到 0.10 后 pitaya
+# (0.045) 依然检不出 —— 但那是 AnyGrasp 候选质量问题, 靠压阈值救不回来, 别再
+# 为它把阈值压回幻影区。容器侧不动。
 # ---------------------------------------------------------------------------
-YOLO_CONF_GRASP = 0.03
+YOLO_CONF_GRASP = 0.10
 YOLO_CONF_CONTAINER = 0.10
 
 # 容器框的最小边长 (px)。框被画面边缘切掉、或者小到只剩一条边时, 框中心不是容器中心,
@@ -101,7 +103,7 @@ MIN_FRAME_BRIGHTNESS = 40
 # ---------------------------------------------------------------------------
 # 桌面在基座标系里的高度 (米)。
 #
-# 夹爪落点用它算"物体高度的一半" (见 skills/pick_and_place.py:_grasp_height)。
+# 诊断工具 (tools/diagnose_grasp.py) 拿它当"接触点离桌面多高"的基准。
 # 实测 (2026-10-07) 物体框外一圈桌面点云的中位 z: 0.009 (火龙果旁) / 0.013 (黄瓜旁)。
 # 重新标定底座、换桌面或换房间后要重测: 把一个已知高度的方块放桌上, 看它的接触点 z。
 # ---------------------------------------------------------------------------
@@ -112,7 +114,7 @@ TABLE_Z_M = 0.010
 # look_around —— 拿一张过期地图去够东西比不干活更糟 (会够到空处或撞到别的东西)。
 # 默认 300s 是拍的, 真机上要试多久合适。
 # ---------------------------------------------------------------------------
-SCENE_MAP_TTL_S = 300
+SCENE_MAP_TTL_S = 600
 
 # ---------------------------------------------------------------------------
 # Named poses exposed from robot_config.json
@@ -262,3 +264,30 @@ class Config(BaseConfig):
             if val is not None and isinstance(val, dict) and "J1" in val:
                 poses[key] = val
         return poses
+
+    # ------------------------------------------------------------------
+    # 抓取管线 (core/grasp_pipeline.py) 的配置接口 —— 原项目同款 API, 单臂化。
+    # ------------------------------------------------------------------
+    def get_arm_config(self, side: str = "left") -> dict:
+        """Return the arm config dict (poses, twin_struct, ...). 单臂: side 被忽略。"""
+        return dict(self.robot_config, twin_struct="rm65")
+
+    def get_grasp_scoring(self, side: str = "left") -> dict:
+        """Return grasp scoring / verification parameters (robot_config 的 grasp_scoring 段)."""
+        return self.robot_config.get("grasp_scoring", {})
+
+    def get_camera_intrinsics(self, side: str = "right") -> dict:
+        """Return the wrist camera intrinsics {fx, fy, cx, cy}."""
+        from core.transforms import _get_intrinsics
+        fx, fy, cx, cy = _get_intrinsics(side)
+        return {"fx": fx, "fy": fy, "cx": cx, "cy": cy}
+
+    @property
+    def shared(self) -> dict:
+        """Return the shared configuration section (空段安全 —— 管线里都有默认值)."""
+        return self.robot_config.get("shared", {})
+
+    @property
+    def sim_mode(self) -> bool:
+        """本平台没有 sim 后端, 恒 False。"""
+        return False

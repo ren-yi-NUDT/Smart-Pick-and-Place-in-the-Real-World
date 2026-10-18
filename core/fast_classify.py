@@ -23,6 +23,9 @@ CONF_THRESHOLD = 0.4  # jev 置信度低于此值的结果直接丢弃
 
 def jev_classify(crop_description, candidates=FINE_CANDIDATES, timeout=10.0):
     """让 jev 从 candidates 中选一个类别。返回 (类别, 概率, confidence)。"""
+    candidates = list(candidates)
+    if not candidates or any(not isinstance(name, str) or not name for name in candidates):
+        raise ValueError("candidates must be non-empty strings")
     request = {
         "state": f"A camera view cropped around one object. Observed: {crop_description}",
         "questions": {"class": {
@@ -36,7 +39,23 @@ def jev_classify(crop_description, candidates=FINE_CANDIDATES, timeout=10.0):
         JEV_URL, data=data, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         answer = json.loads(resp.read())["answers"]["class"]
-    return answer["choice"], answer["probabilities"][answer["choice"]], answer["confidence"]
+    choice = answer.get("choice")
+    probabilities = answer.get("probabilities")
+    confidence = answer.get("confidence")
+    if choice not in candidates:
+        raise ValueError(f"JEV choice is not a candidate: {choice!r}")
+    if not isinstance(probabilities, dict) or choice not in probabilities:
+        raise ValueError("JEV response has no probability for choice")
+    try:
+        probability = float(probabilities[choice])
+        confidence = float(confidence)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("JEV probability/confidence is not numeric") from exc
+    if not 0.0 <= probability <= 1.0:
+        raise ValueError("JEV probability is outside [0, 1]")
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("JEV confidence is outside [0, 1]")
+    return choice, probability, confidence
 
 
 def _crop_hint(frame_bgr, box, bgr=True):
@@ -66,17 +85,21 @@ def classify_frame(frame_bgr, perception, coarse=COARSE_CLASSES, bgr=True):
     perception: core.perception.Perception 实例（YOLO-World 已加载）。
     bgr: 输入帧通道序（OpenCV 默认 BGR；ROS 图像为 RGB 时传 bgr=False）。
     """
-    detections = perception.detect_objects(frame_bgr, coarse, conf=0.15)
+    detection_image = frame_bgr
+    if bgr:
+        import cv2
+        detection_image = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    detections = perception.detect_objects(detection_image, coarse, conf=0.15)
     results = []
     for box in detections:
         coarse_name = coarse[int(box[5])] if isinstance(coarse[0], str) else box[5]
         hint = _crop_hint(frame_bgr, box, bgr=bgr)
         try:
-            cls, prob, conf = jev_classify(hint, candidates)
-        except (URLError, TimeoutError, KeyError) as e:
-            # jev 不可用时退回 YOLO 粗类，不阻塞抓取流水线
-            print(f"[fast_classify] jev fallback: {e}")
-            cls, prob, conf = coarse_name, float(box[4]), float(box[4])
+            cls, prob, conf = jev_classify(hint, FINE_CANDIDATES)
+        except (URLError, TimeoutError, KeyError, ValueError, json.JSONDecodeError) as e:
+            # JEV 结果不能安全解释时丢弃该框, 不用粗类猜测后动臂。
+            print(f"[fast_classify] jev rejected: {e}")
+            continue
         if conf < CONF_THRESHOLD:
             continue
         results.append({"box": [round(v, 1) for v in box[:4]],

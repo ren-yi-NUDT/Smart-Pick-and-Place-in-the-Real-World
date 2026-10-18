@@ -3,9 +3,9 @@
 """
 位姿执行技能
 ============
-通过技能框架注册，负责机械臂位姿回放、灵巧手手势执行和动作序列播放。
+通过技能框架注册，负责机械臂位姿回放和动作序列播放。
 
-使用 socket 服务器 (arm :8010, hand :8000) 发送控制指令。
+使用 socket 服务器 (arm :8010) 发送控制指令。
 从 recorded_poses.json 读取已录制的位姿数据。
 
 命令接口 (run kwargs):
@@ -14,13 +14,8 @@
     {"command": "list"}
     {"command": "play",  "sequence": "path/to/sequence.json"}
     {"command": "play",  "sequence": "<json string>", "sequence_is_string": true}
-    {"command": "play",  "hand": "open"}
-    {"command": "play",  "hand": [0,0,1000,1000,0,0]}
 
-手势格式支持:
-    - 预设名称: "open", "close", "peace", "rock", "pointing", "thumbs_up", "ok", "grab"
-    - 数组: [小指, 无名指, 中指, 食指, 拇指, 拇指外展] (0=弯曲, 1000=张开)
-    - 字典: {"pinky": 0, "ring": 0, "middle": 1000, "index": 1000, "thumb": 0, "thumb_abduct": 0}
+序列步骤格式: {"arm": 位姿名, "speed": 30, "delay": 0.5}
 """
 
 import os
@@ -44,21 +39,6 @@ DEFAULT_POSE_FILE = os.path.join(
 
 ARM_SERVER_HOST = "127.0.0.1"
 ARM_SERVER_PORT = 8010
-HAND_SERVER_HOST = "127.0.0.1"
-HAND_SERVER_PORT = 8000
-
-# 手势预设 (6值: [小指, 无名指, 中指, 食指, 拇指, 拇指外展])
-# 0=弯曲, 1000=张开
-HAND_GESTURES = {
-    "open": [1000, 1000, 1000, 1000, 1000, 500],      # 全张开
-    "close": [0, 0, 0, 0, 0, 0],                       # 握拳
-    "peace": [0, 0, 1000, 1000, 0, 0],                 # 比耶
-    "rock": [1000, 0, 0, 1000, 0, 0],                  # Rock手势
-    "pointing": [0, 0, 0, 1000, 0, 0],                 # 指向 (食指)
-    "thumbs_up": [0, 0, 0, 0, 1000, 800],              # 竖大拇指
-    "ok": [800, 800, 800, 150, 150, 400],              # OK手势 (食指+拇指圈起，其他张开)
-    "grab": [50, 50, 50, 100, 100, 0],                 # 抓取姿态
-}
 
 
 # ---------------------------------------------------------------------------
@@ -72,38 +52,6 @@ def _load_poses(pose_file=None):
         with open(pose_file, "r") as f:
             return json.load(f)
     return {}
-
-
-def _parse_hand_gesture(hand_input):
-    """
-    解析手势输入，返回 6 值数组
-
-    支持格式:
-    - 预设名称: "open", "close", "peace", "rock", "pointing", "thumbs_up", "ok", "grab"
-    - 数组: [0, 0, 1000, 1000, 0, 0]
-    - 字典: {"pinky": 0, "ring": 0, "middle": 1000, "index": 1000, "thumb": 0, "thumb_abduct": 0}
-    """
-    if isinstance(hand_input, str):
-        if hand_input in HAND_GESTURES:
-            return HAND_GESTURES[hand_input]
-        else:
-            cprint(f"[pose_execute] 未知手势预设: {hand_input}", "red")
-            return None
-    elif isinstance(hand_input, list):
-        if len(hand_input) == 6:
-            return hand_input
-        else:
-            cprint(f"[pose_execute] 手指数组长度必须为6，收到: {len(hand_input)}", "red")
-            return None
-    elif isinstance(hand_input, dict):
-        finger_map = ["pinky", "ring", "middle", "index", "thumb", "thumb_abduct"]
-        result = []
-        for finger in finger_map:
-            result.append(hand_input.get(finger, 0))
-        return result
-    else:
-        cprint(f"[pose_execute] 不支持的手势格式: {type(hand_input)}", "red")
-        return None
 
 
 def _send_arm_command(sock, joint_angles, speed=30, block=True):
@@ -141,29 +89,6 @@ def _send_arm_command(sock, joint_angles, speed=30, block=True):
     return resp
 
 
-def _send_hand_command(sock, gesture):
-    """
-    通过 socket 发送灵巧手手势指令
-
-    Args:
-        sock: 已连接的 socket
-        gesture: 6 值数组
-
-    Returns:
-        dict: 服务器响应
-    """
-    cmd = {
-        "src": "/left_hand/movement_control",
-        "type": "set",
-        "cmd": gesture,
-    }
-    msg = json.dumps(cmd).encode("utf-8")
-    sock.sendall(msg)
-
-    resp = json.loads(sock.recv(1024).decode("utf-8"))
-    return resp
-
-
 # ---------------------------------------------------------------------------
 # 技能类
 # ---------------------------------------------------------------------------
@@ -173,22 +98,20 @@ class PoseExecuteSkill(Skill):
     """
     位姿执行技能
 
-    通过 socket 服务器回放已录制的机械臂位姿、执行灵巧手手势、播放动作序列。
+    通过 socket 服务器回放已录制的机械臂位姿、播放动作序列。
 
     使用:
         skill = PoseExecuteSkill()
         skill.run(command="play", name="home", speed=30)
         skill.run(command="list")
-        skill.run(command="play", hand="open")
         skill.run(command="play", sequence="sequence.json")
     """
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        # self.arm and self.hand are injected by the skill framework (socket connections)
-        # If not injected, connections are created on first use
+        # self.arm is injected by the skill framework; if not injected,
+        # the connection is created on first use
         self._arm_sock = None
-        self._hand_sock = None
 
     # -- 连接管理 (fallback) --
 
@@ -208,22 +131,6 @@ class PoseExecuteSkill(Skill):
                 self._arm_sock = None
         return self._arm_sock
 
-    @property
-    def hand_sock(self):
-        """获取灵巧手 socket 连接 (独立的 raw socket，不走 base.py 的 HandClient)"""
-        if self._hand_sock is None:
-            try:
-                self._hand_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._hand_sock.connect((HAND_SERVER_HOST, HAND_SERVER_PORT))
-                cprint(
-                    f"[pose_execute] 已连接灵巧手服务 {HAND_SERVER_HOST}:{HAND_SERVER_PORT}",
-                    "green",
-                )
-            except Exception as e:
-                cprint(f"[pose_execute] 连接灵巧手服务失败: {e}", "red")
-                self._hand_sock = None
-        return self._hand_sock
-
     # -- 核心: run() --
 
     def run(self, **kwargs):
@@ -238,7 +145,6 @@ class PoseExecuteSkill(Skill):
                 block (bool): 是否阻塞等待 (默认 True)
                 sequence (str): 序列文件路径或 JSON 字符串
                 sequence_is_string (bool): sequence 是 JSON 字符串而非文件路径
-                hand: 手势输入 (预设名/数组/字典)
 
         Returns:
             dict: {"success": bool, "info": str}
@@ -250,11 +156,6 @@ class PoseExecuteSkill(Skill):
 
         elif command == "play":
             results = {}
-
-            # 播放灵巧手手势
-            hand = kwargs.get("hand")
-            if hand is not None:
-                results["hand"] = self.play_hand_gesture(hand)
 
             # 播放动作序列
             sequence = kwargs.get("sequence")
@@ -270,7 +171,7 @@ class PoseExecuteSkill(Skill):
                 results["pose"] = self.play_pose(name, speed, block)
 
             if not results:
-                return {"success": False, "info": "未指定 name/sequence/hand 参数"}
+                return {"success": False, "info": "未指定 name/sequence 参数"}
 
             return {
                 "success": all(r for r in results.values() if isinstance(r, bool)),
@@ -328,37 +229,6 @@ class PoseExecuteSkill(Skill):
             self._arm_sock = None
             return False
 
-    # -- 灵巧手手势 --
-
-    def play_hand_gesture(self, hand_input):
-        """
-        执行手势
-
-        Args:
-            hand_input: 手势输入（预设名/数组/字典）
-
-        Returns:
-            bool: 是否执行成功
-        """
-        gesture = _parse_hand_gesture(hand_input)
-        if gesture is None:
-            return False
-
-        sock = self.hand_sock
-        if sock is None:
-            cprint("[pose_execute] 无可用灵巧手连接", "red")
-            return False
-
-        try:
-            resp = _send_hand_command(sock, gesture)
-            label = hand_input if isinstance(hand_input, str) else gesture
-            cprint(f"[pose_execute] 执行手势 {label}: {resp}", "green")
-            return resp.get("value", False)
-        except Exception as e:
-            cprint(f"[pose_execute] 执行手势失败: {e}", "red")
-            self._hand_sock = None
-            return False
-
     # -- 动作序列 --
 
     def play_sequence(self, sequence_input, is_file=True):
@@ -397,12 +267,6 @@ class PoseExecuteSkill(Skill):
         all_ok = True
         for i, step in enumerate(sequence):
             cprint(f"\n=== 步骤 {i+1}/{len(sequence)} ===", "yellow")
-
-            # 执行灵巧手 (先执行手)
-            hand_gesture = step.get("hand")
-            if hand_gesture is not None:
-                if not self.play_hand_gesture(hand_gesture):
-                    all_ok = False
 
             # 执行机械臂
             arm_pose = step.get("arm")

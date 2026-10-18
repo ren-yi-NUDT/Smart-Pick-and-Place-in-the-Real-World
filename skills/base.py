@@ -60,6 +60,7 @@ class Skill(ABC):
         self._transforms = None
         self._json_parser = None
         self._tf_broadcaster = None
+        self._grasp_pipeline = None
 
     # ------------------------------------------------------------------
     # Lazy property: arm client (socket to :8010)
@@ -96,6 +97,14 @@ class Skill(ABC):
             self._twin = create_twin()
             self._twin.connect()
         return self._twin
+
+    @property
+    def grasp_pipeline(self):
+        """视觉抓取管线 (core/grasp_pipeline.py), 复用本 skill 的硬件连接。"""
+        if self._grasp_pipeline is None:
+            from core.grasp_pipeline import GraspPipeline
+            self._grasp_pipeline = GraspPipeline(self)
+        return self._grasp_pipeline
 
     # ------------------------------------------------------------------
     # Lazy property: camera
@@ -181,9 +190,10 @@ class Skill(ABC):
         """Send a command to the Twin service."""
         if hasattr(twin_client_or_sock, '_send_cmd'):
             return twin_client_or_sock._send_cmd(data)
-        # Fallback: raw socket with length-prefix receive
+        # Fallback: raw socket with length prefix both ways
         import json, struct
         msg = json.dumps(data).encode("utf-8")
+        twin_client_or_sock.sendall(struct.pack(">I", len(msg)))
         twin_client_or_sock.sendall(msg)
         length_bytes = b""
         while len(length_bytes) < 4:

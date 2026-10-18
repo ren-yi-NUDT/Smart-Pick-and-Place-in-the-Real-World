@@ -9,6 +9,7 @@
     python3 -m core.jev_command "把苹果拿给我" --exec   # 实机执行（暂未启用）
 """
 import json
+import math
 import sys
 import time
 
@@ -18,6 +19,108 @@ from .fast_classify import COARSE_CLASSES, FINE_CANDIDATES, jev_classify, _crop_
 SELECT_CLASSES = ["fruit", "apple", "orange", "banana", "toy", "bottle",
                   "cup", "snack", "vegetable"]
 SELECT_CONF = 0.35  # 逐框 yes/no 判定的最低置信度
+
+
+_PLAN_ACTIONS = ["grasp", "pick_and_place", "look_around", "none"]
+_PLAN_CONFIDENCE = 0.4
+
+
+def _plan_objects(snapshot):
+    objects = snapshot.get("objects")
+    if not isinstance(objects, list):
+        raise ValueError("snapshot objects must be a list")
+    return objects
+
+
+def _plan_choice(ask, state, candidates):
+    answer = ask(state, candidates)
+    if not isinstance(answer, (tuple, list)) or len(answer) != 3:
+        raise ValueError("JEV plan response must be (choice, probability, confidence)")
+    choice, probability, confidence = answer
+    if choice not in candidates:
+        raise ValueError(f"JEV plan choice is not a candidate: {choice!r}")
+    try:
+        probability, confidence = float(probability), float(confidence)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("JEV plan scores must be numeric") from exc
+    if (not math.isfinite(probability) or not math.isfinite(confidence)
+            or not 0.0 <= probability <= 1.0
+            or not 0.0 <= confidence <= 1.0):
+        raise ValueError("JEV plan scores must be within [0, 1]")
+    if confidence < _PLAN_CONFIDENCE:
+        raise ValueError("JEV plan confidence is too low")
+    return choice, probability, confidence
+
+
+def build_plan(instruction, snapshot, ask=jev_classify):
+    """Turn a fresh Azure snapshot into one finite, non-executable task plan."""
+    objects = _plan_objects(snapshot)
+    names = [str(obj.get("name", "")) for obj in objects]
+    if len(names) != len(set(names)):
+        raise ValueError("duplicate semantic names are ambiguous")
+    action, probability, confidence = _plan_choice(
+        ask, f'User instruction: {instruction!r}', _PLAN_ACTIONS)
+    plan = {"action": action, "object_target_id": None,
+            "container_target_id": None, "probability": probability,
+            "confidence": confidence, "session_id": snapshot["session_id"],
+            "frame_id": snapshot["frame_id"],
+            "captured_at": snapshot["captured_at"]}
+    if action in ("look_around", "none"):
+        return plan
+    candidates = [obj["target_id"] for obj in objects
+                  if obj.get("confirmed") and obj.get("target_id")
+                  and str(obj.get("name", "")).lower() not in
+                  {"plate", "bowl", "cup", "container"}]
+    if not candidates:
+        candidates = [obj["target_id"] for obj in objects
+                      if obj.get("confirmed") and obj.get("target_id")]
+    if not candidates:
+        raise ValueError("no confirmed target")
+    target, probability, confidence = _plan_choice(
+        ask, f'Choose object for: {instruction!r}', candidates)
+    plan.update(object_target_id=target, probability=probability,
+                confidence=confidence)
+    if action == "pick_and_place":
+        containers = [obj["target_id"] for obj in objects
+                      if obj.get("confirmed") and obj.get("target_id") != target]
+        if not containers:
+            raise ValueError("no confirmed container")
+        container, probability, confidence = _plan_choice(
+            ask, f'Choose container for: {instruction!r}', containers)
+        plan.update(container_target_id=container, probability=probability,
+                    confidence=confidence)
+    return plan
+
+
+def validate_plan(plan, snapshot, max_age=2.0, now=None):
+    """Validate plan provenance and selected objects without refreshing it."""
+    if not isinstance(plan, dict) or plan.get("action") not in _PLAN_ACTIONS:
+        raise ValueError("invalid plan action")
+    now = time.monotonic() if now is None else now
+    try:
+        age = now - float(snapshot["captured_at"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid snapshot timestamp") from exc
+    if age < 0 or age > max_age:
+        raise ValueError("stale snapshot")
+    for key in ("session_id", "frame_id", "captured_at"):
+        if plan.get(key) != snapshot.get(key):
+            raise ValueError("plan provenance mismatch")
+    objects = {obj.get("target_id"): obj for obj in _plan_objects(snapshot)}
+    action = plan["action"]
+    if action in ("look_around", "none"):
+        return True
+    target = objects.get(plan.get("object_target_id"))
+    if not target or not target.get("confirmed"):
+        raise ValueError("object target is not confirmed")
+    if action == "pick_and_place":
+        container = objects.get(plan.get("container_target_id"))
+        if not container or not container.get("confirmed"):
+            raise ValueError("container target is not confirmed")
+    if not 0.0 <= float(plan.get("confidence", -1)) <= 1.0:
+        raise ValueError("invalid plan confidence")
+    return True
+
 
 # 指令中文词 -> 英文目标词。jev 候选必须纯英文（中文内嵌会破坏打分）。
 _GLOSS = {

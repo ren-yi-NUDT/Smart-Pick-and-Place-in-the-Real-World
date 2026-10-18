@@ -10,6 +10,33 @@
 
 ---
 
+## 执行状态 (2026-09-30)
+
+Task 1–4 的代码改动已全部落地并验证；下方复选框未逐条勾选，以本表为准。
+
+| Task | 状态 | 验证 |
+|---|---|---|
+| 1 删除 igrape 后端 | 完成 | `core/backends/__init__.py` 只剩 `BACKEND = "rm65"`；`import core.backends` → `rm65 False`；`core/backends/igrape/` 已不存在 |
+| 2 统一单臂网络标识 | 完成 | `robot_config.json` = RM65 / 192.168.1.18 / 8080 / 6 DOF；全仓已无 `192.168.1.19`、`8011`、`8021`、`right_arm`（仅剩 `8001` = 保留的 Robotiq 夹爪口） |
+| 3 启动与 ROS bringup 单臂化 | 完成 | `bash -n start.bash` 通过；`start.bash` 只起 1 套 bringup/Twin/Azure/夹爪；`bringup.launch` 只含 1 个 `arm_75_bringup.py` + 1 个 `mount_camera.py` |
+| 4 去除双臂运行路由 | 完成 | `skills/__init__.py` 只注册 10 个单臂 skill；`twin_inference/robot.py` 只有单个 `Arm`/`ErdaijiRobot`；`python3 -m compileall -q core skills dependence/twin_inference tools` 通过 |
+| 5 无硬件验证 | 部分 | 见下 |
+
+**与计划的偏差**（计划里的部分文件名/测试名是起草时的推测，实际未采用）：
+
+- 计划中的 `-k rm65_is_the_only_backend` / `single_arm_network_config` / `single_arm_startup` / `no_dual_runtime` 四个测试，实际合并为 `tests/test_single_arm_static.py` 里的 4 个测试。
+- 计划中的 `tools/start_arm_bridge.sh` 从未存在，`start.bash` 直接起各进程，无需该文件。
+- `inspire_hand_bringup.py` 节点仍保留在 `bringup.launch` 中（测试断言其存在），未按"旧设备停用"删除。
+- Task 5 Step 4（TCP 连通性检查）**未执行**：需机器人上电，未经确认不跑。
+
+**Task 5 结果**：
+
+- `python3 -m pytest -q` → 4 passed（新增 `pytest.ini` 限定 `testpaths = tests`，否则会去收集 `Open-Jev/` 的 69 个外部测试并报错）
+- `git diff --check` / `git diff --cached --check` → clean（`rm65.urdf` 第 2 行行尾空格已去除）
+- 原仓库 `/home/zz/Code/Smart-Pick-and-Place-in-the-Real-World` 未被本次清理改动；本目录是它的 git worktree（分支 `tianyi_single_arm`），原仓库工作区的改动是它自己的双臂开发内容
+
+---
+
 ### Task 1: Remove the unused alternate backend
 
 **Files:**

@@ -5,7 +5,7 @@ Extracted from ``planner.py`` lines 53-75 (``send_cmd_twin``) and
 lines 411-434 (``create_send_config_3``, ``create_twin_service``).
 
 Protocol:
-  SEND:   raw JSON (no length prefix)
+  SEND:   4-byte big-endian length prefix + JSON payload
   RECV:   4-byte big-endian length prefix + JSON payload
 
 Usage:
@@ -39,6 +39,9 @@ class TwinClient(BaseTwinClient):
     def connect(self) -> bool:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # 孪生规划带随机种子 IK 重试, 单次请求可达分钟级。没有超时的话,
+            # 服务端任何异常断连都会让 skill 永远挂在 recv 上 (真机表现: 臂停在半空假死)。
+            self.sock.settimeout(300)
             self.sock.connect((self.host, self.port))
             cprint(f"[TwinClient] Connected to {self.host}:{self.port}", "green")
             return True
@@ -55,8 +58,11 @@ class TwinClient(BaseTwinClient):
     # Protocol helpers
     # ------------------------------------------------------------------
     def _send_cmd(self, data: dict) -> dict:
-        """SEND raw JSON, RECV with 4-byte length prefix + JSON."""
+        """SEND and RECV: 4-byte big-endian length prefix + JSON."""
         msg = json.dumps(data).encode("utf-8")
+        # 请求侧必须带长度前缀: 服务端按前缀整包接收, 裸 JSON 超过一次 recv
+        # 的读取量会被截断, json.loads 直接失败。
+        self.sock.sendall(struct.pack(">I", len(msg)))
         self.sock.sendall(msg)
 
         # -- receive length prefix --

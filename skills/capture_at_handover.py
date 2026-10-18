@@ -39,16 +39,14 @@ class CaptureAtHandoverSkill(Skill):
         Image.fromarray(depth).save(depth_path)
         cprint(f"Saved: {rgb_path}", "cyan")
 
-        prompt = (
-            "画面中有一只手，告诉我手里拿的是什么。请简洁回答，只说物品名称。"
-        )
-
-        analysis = self.vlm.analyze(rgb, prompt=prompt)
-        if analysis:
-            cprint(f"\n========== Object in hand: {analysis} ==========\n", "green")
-        else:
+        holding, name = self.vlm.detect_hand_object(rgb)
+        if holding is None:
             cprint("VLM analysis failed", "red")
+        elif holding:
+            cprint(f"\n========== Object in hand: {name} ==========\n", "green")
+        else:
+            cprint("\n========== 用户手上没有物品 ==========\n", "green")
 
         if reset_pose:
             self.control_arm(pose_type=reset_pose, speed=30)
-        return analysis
+        return name if holding else None

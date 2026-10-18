@@ -45,7 +45,7 @@ SERVICE_SRC = DEFAULT_SRC  # kept for backwards compatibility (module-level cons
 DEFAULT_PORT = 8001
 DEFAULT_SERIAL = "/dev/ttyUSB0"
 DEFAULT_BAUD = 115200
-DEFAULT_SLAVE = 9
+DEFAULT_SLAVE = 1
 
 
 # --------------------------------------------------------------------------- #

@@ -38,8 +38,11 @@ def anygrasp_get_poses(checkpoint_path, color, depth, text_prompt=None, model = 
     # get camera intrinsics
     
     if model == "rs_right":
-        fx, fy = 386.4509582519531, 385.8191223144531
-        cx, cy = 318.2220153808594, 238.8162841796875
+        # 2026-10-08 实测 D455 (serial 036322250517) 彩色流 640x480。
+        # 深度已 rs.align(color) 对齐, 反投影必须用彩色内参; 旧值是深度流内参,
+        # cx 偏 9px, 30cm 处画面边缘横向偏差 ~7mm (画面中心 ≈0)。
+        fx, fy = 384.821320, 384.447662
+        cx, cy = 309.234741, 236.915833
     elif model == "rs_left":
         fx, fy = 392.26812744140625, 392.26812744140625
         cx, cy = 325.4682312011719, 242.28213500976562

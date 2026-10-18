@@ -98,7 +98,11 @@ class RM_ARM_bringup(RM_ARM):
                 self.server_socket.settimeout(1.0)
                 try:
                     conn, addr = self.server_socket.accept()
-                    self.handle_client(conn)
+                    # 每连接一线程: 单线程逐个处理时, 一个空闲连接(如上次运行
+                    # 未退出的 skill 缓存连接)会让后续所有客户端饿死在 backlog,
+                    # 表现为位姿控制全 timeout。SDK 并发安全由 sdk_lock 串行化保证。
+                    threading.Thread(target=self.handle_client, args=(conn,),
+                                     daemon=True).start()
                 except socket.timeout:
                     continue
             except Exception as e:

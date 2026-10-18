@@ -31,10 +31,63 @@ SCENE_PATH = "./log/scene.json"
 # 要靠它; 但它会让地图里多出同位置的重名条目 —— 只有在用户真的说 "apple" 时才会找错。
 #
 # 这是**现场标定**的, 和白平衡常数一个性质: 换场景/换东西要重探, 用 tools/probe_vocab.py。
-SCAN_VOCAB = [
-    "plate", "bowl", "cup", "bottle", "box",
-    "plum", "pitaya", "cucumber", "orange", "lemon", "banana", "apple",
+# 物体部分来自 object_vocab.json 的 "scan" 节（单源，见 core/object_vocab.py），
+# 动态学到的新词由 object_vocab.add() 原位追加。
+from core.object_vocab import load as _load_object_vocab
+SCAN_VOCAB = ["plate", "bowl", "cup", "bottle", "box"] + [
+    n for n in _load_object_vocab()[0]
+    if n not in ("plate", "bowl", "cup", "bottle", "box")
 ]
+
+_CANONICAL_NAMES = {
+    "dragon fruit": "pitaya",
+    "dragonfruit": "pitaya",
+    "火龙果": "pitaya",
+    "桃子": "peach",
+}
+_VALID_COLORS = {"pink", "blue", "green", "red", "yellow", "orange",
+                 "white", "black", "gray", "purple", "brown", None}
+
+
+def canonical_object_name(name):
+    """Normalize user/VLM aliases without changing unknown detector labels."""
+    text = str(name or "").strip().lower()
+    return _CANONICAL_NAMES.get(text, text)
+
+
+def _vlm_semantics(vlm, rgb, candidates):
+    """Ask the existing VLM to label candidate boxes; reject malformed answers."""
+    import re
+
+    prompt = (
+        "只根据给出的候选框确认图片中的物体。严格只返回 JSON，不要 Markdown："
+        '{"objects":[{"index":0,"name":"pitaya","color":"pink"}]}。'
+        "index 必须是候选编号；name 用简短英文类别，dragon fruit 写 pitaya，桃子写 peach；"
+        "color 只能是 pink/blue/green/red/yellow/orange/white/black/gray/purple/brown；"
+        "看不清或不是物体就不要返回。候选框如下：" + json.dumps(candidates, ensure_ascii=False)
+    )
+    answer = vlm.analyze(rgb, prompt=prompt, max_tokens=8192, temperature=0.0)
+    if not answer:
+        raise ValueError("VLM recognition failed")
+    answer = re.sub(r"^```(?:json)?\s*|\s*```$", "", answer.strip(), flags=re.I)
+    try:
+        data = json.loads(answer)
+        items = data["objects"]
+        if not isinstance(items, list):
+            raise ValueError("VLM objects is not a list")
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"VLM returned invalid JSON: {exc}") from exc
+    out = {}
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("index"), int):
+            raise ValueError("VLM object has invalid index")
+        i = item["index"]
+        name = canonical_object_name(item.get("name"))
+        color = item.get("color")
+        if not 0 <= i < len(candidates) or not name or color not in _VALID_COLORS:
+            raise ValueError("VLM object has invalid index/name/color")
+        out[i] = (name, color)
+    return out
 
 # 颜色词。把指令里的一串词拆成 (颜色, 名字) 时用。中英都收, 因为用户两种都会说。
 COLOR_VOCAB = [
@@ -175,7 +228,7 @@ def parse_target(phrase, color_vocab=None, noun_vocab=None):
     return None, phrase
 
 
-def detect_scene(perception, rgb, conf=YOLO_CONF_SCAN, framed_only=False):
+def detect_scene(perception, rgb, conf=YOLO_CONF_SCAN, framed_only=False, vlm=None):
     """跑一遍**建图用的那套**检测, 返回 ``[(名字, 颜色, 框, 置信度), ...]``。
 
     建图和"现场核对地图"必须用同一套判据。建图这边是 YOLO 认 SCAN_VOCAB 里的名词 +
@@ -192,11 +245,27 @@ def detect_scene(perception, rgb, conf=YOLO_CONF_SCAN, framed_only=False):
     核对那边**不能**跟着严: 那儿只要确认东西"还在", 坐标本来就取地图记的, 框被画面
     切掉不算"东西被挪了"。
     """
-    detections = perception.detect_objects(rgb, SCAN_VOCAB, conf=conf)
+    detections = perception.detect_objects(rgb, SCAN_VOCAB, conf=0.01 if vlm else conf)
     if framed_only:
         detections = [d for d in detections if _well_framed(d, rgb.shape)]
-    return [(SCAN_VOCAB[int(d[5])], dominant_color_name(rgb, d), d[:4], d[4])
-            for d in detections]
+    semantics = {}
+    if vlm and detections:
+        candidates = [{"index": i, "name": SCAN_VOCAB[int(d[5])],
+                       "bbox": [float(x) for x in d[:4]],
+                       "confidence": float(d[4])}
+                      for i, d in enumerate(detections)]
+        semantics = _vlm_semantics(vlm, rgb, candidates)
+    result = []
+    for i, d in enumerate(detections):
+        if vlm:
+            if i not in semantics:
+                continue
+            name, color = semantics[i]
+        else:
+            name = SCAN_VOCAB[int(d[5])]
+            color = dominant_color_name(rgb, d)
+        result.append((name, color, d[:4], d[4]))
+    return result
 
 
 def _world_point(T_base_to_cam, depth, box):

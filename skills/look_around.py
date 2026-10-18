@@ -35,7 +35,7 @@ class LookAroundSkill(Skill):
         self.control_hand(cmd_type="open")
 
         def move_to_pose(name):
-            self.control_arm(pose_type=name, speed=30)
+            self.control_arm(pose_type=name, speed=40)
 
         def capture(name):
             rgb, depth = self.get_camera_obs()
@@ -54,7 +54,12 @@ class LookAroundSkill(Skill):
             return self.T_base_to_cam
 
         def detect(rgb):
-            return scene_map.detect_scene(self.perception, rgb, framed_only=True)
+            try:
+                return scene_map.detect_scene(self.perception, rgb, framed_only=True,
+                                              vlm=self.vlm)
+            except ValueError as exc:
+                cprint(f"[look_around] VLM 识别失败: {exc}", "red")
+                return []
 
         entries = scene_map.scan_workspace(move_to_pose, capture, transform, detect, poses)
         objects = scene_map.merge(entries)

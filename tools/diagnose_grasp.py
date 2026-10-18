@@ -99,22 +99,24 @@ def main():
     if not anygrasp_pose:
         print("[anygrasp] 没有候选")
         return 1
-    filt, detected, _offsets = s._filtering_pose(anygrasp_pose, class_name=args.object, image=rgb)
-    print(f"[anygrasp] 候选 {len(anygrasp_pose)} 个, 框内 {len(filt)} 个, 检出目标={detected}")
+    filt = s.perception.filter_grasps_by_detection(
+        anygrasp_pose, rgb, class_name=args.object, vis=False)
+    print(f"[anygrasp] 候选 {len(anygrasp_pose)} 个, 框内 {len(filt)} 个")
     if not filt:
         return 1
 
-    world = s._transform_anygrasp_pose(filt, _visualization=False)
-    top_world = world[0][:3, 3]
+    # 抓取管线同款换算: 相机系候选 -> 世界系手爪位姿 (含左臂夹爪约定)。
+    cands = s.grasp_pipeline._build_grasp_candidates(filt)
+    cand = s.grasp_pipeline._score_grasp_candidates(cands)[0]
+    top_world = cand["pose"][:3, 3]
     d = np.linalg.norm(top_world - map_world)
     print(f"[exec] 最高分候选世界坐标=({top_world[0]:+.3f},{top_world[1]:+.3f},{top_world[2]:+.3f})"
           f"  离地图点 {d * 1000:.0f} mm")
 
-    # ---- 3. 真正发给孪生的那个点 (z 夹紧 + 工具偏置之后) ----
-    exec_pos = np.array(world[0], dtype=float, copy=True)
-    exec_pos[2, 3] = max(exec_pos[2, 3], 0.042)
-    exec_pos = exec_pos @ s.T_hand_effector_to_arm_endlink
-    tip = exec_pos[:3, 3]
+    # ---- 3. 真正发给孪生的那个点 (管线同款三段目标: 高预抓取/低预抓取/执行) ----
+    cnfg = s.grasp_pipeline._grasp_target_config(
+        cand, s.config.get_pose(args.pose))
+    tip = np.array(cnfg["target_pose"][-1][:3])
     print(f"[exec] 发给孪生的末端坐标=({tip[0]:+.3f},{tip[1]:+.3f},{tip[2]:+.3f})"
           f"  离地图点 {np.linalg.norm(tip - map_world) * 1000:.0f} mm")
     print(f"[exec] 工具偏置 手爪->末端 = {np.linalg.norm(s.T_hand_effector_to_arm_endlink[:3, 3]) * 1000:.0f} mm")
@@ -122,20 +124,6 @@ def main():
     # ---- 4. 孪生拿这个点算出什么 ----
     # 孪生报的末端坐标如果等于上面那个 tip, 说明"候选 -> 世界 -> 孪生"这一段没丢精度,
     # 臂是真的被指到果子上了; 不等就是这一段的问题。
-    import copy
-    from scipy.spatial.transform import Rotation as R
-    pre = np.array(world[0], dtype=float, copy=True)
-    pre[2, 3] -= 0.02
-    pre[2, 3] += 0.02
-    pre = pre @ s.T_hand_effector_to_arm_endlink
-    cnfg = {
-        "target_pose": [
-            list(pre[:3, 3]) + list(R.from_matrix(pre[:3, :3]).as_quat()),
-            list(exec_pos[:3, 3]) + list(R.from_matrix(exec_pos[:3, :3]).as_quat()),
-        ],
-        "current_js": [d / 180 * np.pi for d in s.config.default_traj_js[args.pose].values()],
-        "struct": "rm65",
-    }
     rsp = s.send_cmd_twin(s.twin, {"srv": "twin_inference", "type": "trajectory_generation2", "cnfg": cnfg})
     info = rsp.get("info") or {}
     ee = np.array(info.get("trajectory_ee", []))
